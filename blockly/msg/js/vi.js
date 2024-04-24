@@ -645,6 +645,8 @@ Blockly.Msg.Python_start = "Bắt đầu";
 Blockly.Msg.kcbot_lcd_dia_chi = "Địa chỉ";
 
 // ---------------------------------------Airsense----------------------------------------
-Blockly.Msg.AirsenseReadTempBME280 = "Đọc nhiệt độ (BME280)";
+Blockly.Msg.AirsenseReadDataBME280 = "Đọc dữ liệu (BME280)";
 Blockly.Msg.freeRTOS = "Tạo nhiệm vụ";
-Blockly.Msg.AirsenseReadPMS7003 = "Đọc dữ liệu từ cảm biến PMS7003" 
+Blockly.Msg.AirsenseReadDataPMS7003 = "Đọc dữ liệu từ cảm biến (PMS7003)" ;
+Blockly.Msg.ESP32_wifi = "Kết nối wifi";
+Blockly.Msg.AirsenseReadDataMHZ14A  =  "Đọc dữ liệu từ cảm biến (MHZ14A)";

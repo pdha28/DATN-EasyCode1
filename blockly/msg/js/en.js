@@ -629,6 +629,8 @@ Blockly.Msg.kcbot_lcd_dia_chi = "address";
 
 // ---------------------------------------------------------------
 Blockly.Msg.kcbot_readDS18b20 = "Read tempraturee (ds18b20)";
-Blockly.Msg.AirsenseReadTempBME280 = "Read tempratute (BME280)";
+Blockly.Msg.AirsenseReadDataBME280 = "Read data (BME280)";
 Blockly.Msg.freeRTOS = "Create Task";
-Blockly.Msg.AirsenseReadPMS7003 = "Read data in PMS7003"
+Blockly.Msg.AirsenseReadDataPMS7003 = "Read data PMS7003" ;
+Blockly.Msg.ESP32_wifi = "Connect wifi";
+Blockly.Msg.AirsenseReadDataMHZ14A = "Read  data MHZ14A"

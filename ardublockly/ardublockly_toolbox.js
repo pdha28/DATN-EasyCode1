@@ -15,16 +15,40 @@ var Ardublockly = Ardublockly || {};
 var Airsense_toolbox = 
 '<sep></sep>' +
 '   <category id="Airsense" name="Airsense" colour="#00abd6">' +
-'       <block type="AirsenseReadTempBME280">'+
+'       <block type="AirsenseReadDataBME280">'+
             '<field name="I2C_port_SDA"> 21 </field>' +
             '<field name="I2C_port_SCL"> 22 </field>' +
         '</block>' +
 
          '<block type="freeRTOS">'+
+            //'<field name="I2C_port_SDA"> 21 </field>' +
+            //'<field name="I2C_port_SCL"> 22 </field>' +
          '</block>' +
 
-        '<block type="AirsenseReadPMS7003">'+
+        '<block type="AirsenseReadDataPMS7003">'+
+            '<field name="Port uart"> 2 </field>' +
+            '<field name="Port rx"> 16 </field>' +
+            '<field name="Port tx"> 17 </field>' +
+            '<field name="Baud speed"> 9600 </field>' +
         '</block>' +
+
+        '<block type="ESP32_wireless">'+
+
+            '<field name="Selet"> "Select" </field>' +
+            //'<field name="I2C_port_SCL"> 22 </field>' +
+         '</block>' +
+
+         '<block type="AirsenseReadDataMHZ14A">'+
+
+         '<field name="Port uart"> 1 </field>' +
+         '<field name="Port rx"> 26 </field>' +
+         '<field name="Port tx"> 27 </field>' +
+         '<field name="Baud speed"> 9600 </field>' +
+         '</block>' +
+
+
+
+            
 '</category>';
 
 

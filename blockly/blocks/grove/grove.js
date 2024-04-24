@@ -274,13 +274,13 @@ Blockly.Blocks['kcbot_dht11_humi'] = {
     this.appendDummyInput()
         .appendField(Blockly.Msg.kcbot_dht11_read)
         .appendField(new Blockly.FieldDropdown([[Blockly.Msg.kcbot_dht11_humi,"1"], [Blockly.Msg.kcbot_dht11_temp,"2"]]), "MOTOR")
-    this.appendDummyInput()
+    //this.appendDummyInput()
         .appendField(Blockly.Msg.kcbot_dht11_pin)
         .appendField(new Blockly.FieldDropdown(
             Blockly.Arduino.Boards.selected.digitalPins), 'PIN')
         //.appendField(Blockly.Msg.ARD_WRITE_TO)
         //.setCheck(Blockly.Types.NUMBER.output);
-    this.setInputsInline(true);
+    this.setInputsInline(false);
     this.setOutput(true, "Number");
     this.setColour('#00abd6');
  this.setTooltip("");
@@ -610,6 +610,27 @@ Blockly.Blocks['loop_forever'] = {
 };
 
 
+
+
+
+
+Blockly.Blocks['kcbot_motor'] = {
+  init: function() {
+    this.appendDummyInput()
+        .appendField(Blockly.Msg.kcbot_motor_motor)
+        .appendField(new Blockly.FieldDropdown([["M1","0"], ["M2","1"]]), "MOTOR")
+    this.appendValueInput("SPEED")
+        .setCheck("Number")    
+        .appendField(Blockly.Msg.kcbot_motor_speed)
+    this.setPreviousStatement(true, null);
+    this.setInputsInline(true);
+    this.setNextStatement(true, null);
+    this.setColour('#00abd6');
+ this.setTooltip("");
+ this.setHelpUrl("");
+  }
+};
+
 Blockly.Blocks['kcbot_readDS18b20'] = {
   init: function() {
     this.appendDummyInput()
@@ -627,6 +648,9 @@ Blockly.Blocks['kcbot_readDS18b20'] = {
     return Blockly.Types.NUMBER;
   },
 };
+
+// ---------------------------------------Airsense----------------------------------------
+
 
 
 var Analog_pin_esp32 = [
@@ -673,35 +697,19 @@ var Digital_pin_esp32 = [
   ['39', '39']
 ];
 
-
-Blockly.Blocks['kcbot_motor'] = {
-  init: function() {
-    this.appendDummyInput()
-        .appendField(Blockly.Msg.kcbot_motor_motor)
-        .appendField(new Blockly.FieldDropdown([["M1","0"], ["M2","1"]]), "MOTOR")
-    this.appendValueInput("SPEED")
-        .setCheck("Number")    
-        .appendField(Blockly.Msg.kcbot_motor_speed)
-    this.setPreviousStatement(true, null);
-    this.setInputsInline(true);
-    this.setNextStatement(true, null);
-    this.setColour('#00abd6');
- this.setTooltip("");
- this.setHelpUrl("");
-  }
-};
-// ---------------------------------------Airsense----------------------------------------
-Blockly.Blocks['AirsenseReadTempBME280'] = {
+Blockly.Blocks['AirsenseReadDataBME280'] = {
   init: function() {
   this.appendDummyInput()
-      .appendField(Blockly.Msg.AirsenseReadTempBME280)
+      .appendField(Blockly.Msg.AirsenseReadDataBME280)
       .appendField("SDA")
       .appendField(new Blockly.FieldDropdown(Digital_pin_esp32), "I2C_port_SDA")
       .appendField("SCL")
       .appendField(new Blockly.FieldDropdown(Digital_pin_esp32), "I2C_port_SCL")
   this.setColour('#00abd6');
-  this.setInputsInline(true);
+  this.setInputsInline(false);
+  //this.setOutput(true, "Number");
   this.setNextStatement(true, null);
+  this.setPreviousStatement(true, null);
   this.setTooltip("");
   this.setHelpUrl("");
   },
@@ -710,18 +718,27 @@ Blockly.Blocks['AirsenseReadTempBME280'] = {
   },
 };
 
-var nameTask = ["Nhiệm vụ 1"];
+  var nameTask = ["Nhiệm vụ 1"];
+  var firsPriority = 1 ;
 
-Blockly.Blocks['freeRTOS'] = {
+  Blockly.Blocks['freeRTOS'] = {
     init: function() {
     this.appendDummyInput()
         .appendField(Blockly.Msg.freeRTOS)
         
         .appendField(new Blockly.FieldTextInput(nameTask), "Name task")
-      
+        //.appendValueInput(new Blockly.FieldTextInput(firsPriority),"Priority task")
+        .appendField("Bộ nhớ task")
+        .appendField(new Blockly.FieldDropdown([["128","128"], ["256","256"], ["512","512"],["1024","1024"]]),"Memory task")
+        .appendField("Độ ưu tiên")
+        .appendField(new Blockly.FieldDropdown([["1","1"], ["2","2"], ["3","3"], ["4","4"], ["5","5"], ["6","6"], ["7","7"], ["8","8"], ["9","9"], ["10","10"]]), "Priority task")
+        
     this.setColour('#00abd6');
-    this.setInputsInline(true);
+    this.setInputsInline(false);
     this.setNextStatement(true, null);
+    this.setPreviousStatement(true, null);
+
+
     this.setTooltip("");
     this.setHelpUrl("");
     },
@@ -731,20 +748,100 @@ Blockly.Blocks['freeRTOS'] = {
   };
 
 
-Blockly.Blocks['AirsenseReadPMS7003'] = {
+Blockly.Blocks['AirsenseReadDataPMS7003'] = {
   init: function() {
     this.appendDummyInput()
-        .appendField(Blockly.Msg.AirsenseReadPMS7003)
-        
+        .appendField(Blockly.Msg.AirsenseReadDataPMS7003)
+        .appendField("Tốc độ truyền dữ liệu")
+        .appendField(new Blockly.FieldDropdown([["9600","9600"],["115200","1152200"]]),"Baud speed")
+        .appendField("Cổng UART")
+        .appendField(new Blockly.FieldDropdown([["1","1"],["2","2"]]),"Port uart")
+        .appendField("Chân RX")
+        .appendField(new Blockly.FieldDropdown(Digital_pin_esp32),"Port rx")
+        .appendField("Chân TX")
+        .appendField(new Blockly.FieldDropdown(Digital_pin_esp32),"Port tx")
+
+
+
     this.setColour('#00abd6');
-    this.setInputsInline(true);
+    this.setInputsInline(false);
     this.setNextStatement(true, null);
+    this.setPreviousStatement(true, null);
     this.setTooltip("");
     this.setHelpUrl("");
     },
     getBlockType: function() {
       return Blockly.Types.NUMBER;
     },
+}
 
+Blockly.Blocks['ESP32_wireless'] = {
+  init: function() {
+      var dropdown = new Blockly.FieldDropdown([["Select","Select"],["Wifi","Wifi"],["Bluetooth","Bluetooth"]], function(option) {
+          this.updateShape_(option);
+      }.bind(this));
+      
+      this.appendDummyInput()
+          .appendField("Lựa chọn kết nối không dây (Wifi/Bluetooth)")
+          .appendField(dropdown, "Select");
+      
+      this.appendDummyInput("WifiInputs")
+          .appendField("WiFi Settings")
+          .appendField(new Blockly.FieldTextInput("WiFi Name"), "Name_wifi")
+          .appendField(new Blockly.FieldTextInput("Password"), "Password")
+          .setVisible(false);
+      
+      this.appendDummyInput("BluetoothInputs")
+          .appendField("Bluetooth Settings")
+          .appendField(new Blockly.FieldTextInput("Bluetooth Name"), "Name_bluetooth")
+          .setVisible(false);
+    
+      this.setColour('#00abd6');
+      this.setInputsInline(false);
+      this.setNextStatement(true, null);
+      this.setPreviousStatement(true, null);
+      this.setTooltip("");
+      this.setHelpUrl("");
+  },
+  onchange: function() {
+      var option = this.getFieldValue("Select");
+      this.updateShape_(option);
+  },
+  updateShape_: function(option) {
+      var wifiInputs = (option == "Wifi");
+      var bluetoothInputs = (option == "Bluetooth");
+      
+      this.getInput("WifiInputs").setVisible(wifiInputs);
+      this.getInput("BluetoothInputs").setVisible(bluetoothInputs);
+  },
+  getBlockType: function() {
+      return Blockly.Types.NUMBER;
+  },
+}
+
+Blockly.Blocks['AirsenseReadDataMHZ14A'] =  {
+  init: function(){
+    this.appendDummyInput()
+        .appendField(Blockly.Msg.AirsenseReadDataMHZ14A)
+        .appendField("Tốc độ truyền dữ liệu")
+        .appendField(new Blockly.FieldDropdown([["9600","9600"],["115200","1152200"]]),"Baud speed")
+        .appendField("Cổng UART")
+        .appendField(new Blockly.FieldDropdown([["1","1"],["2","2"]]),"Port uart")
+        .appendField("Chân RX")
+        .appendField(new Blockly.FieldDropdown(Digital_pin_esp32),"Port rx")
+        .appendField("Chân TX")
+        .appendField(new Blockly.FieldDropdown(Digital_pin_esp32),"Port tx")
+    
+        this.setColour('#00abd6');
+        this.setInputsInline(false);
+        this.setNextStatement(true, null);
+        this.setPreviousStatement(true, null);
+        this.setTooltip("");
+        this.setHelpUrl("");
+
+  },
+  getBlockType: function() {
+    return Blockly.Types.NUMBER;
+  },
 
 }
