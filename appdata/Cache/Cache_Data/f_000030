@@ -1,525 +1,621 @@
-/**
- * @license
- * Visual Blocks Editor
- *
- * Copyright 2012 Google Inc.
- * https://developers.google.com/blockly/
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *   http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
+// Copyright 2007 The Closure Library Authors. All Rights Reserved.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//      http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS-IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 
 /**
- * @fileoverview Utility methods.
- * These methods are not specific to Blockly, and could be factored out into
- * a JavaScript framework such as Closure.
- * @author fraser@google.com (Neil Fraser)
+ * @fileoverview Definition of the goog.ui.tree.TreeControl class, which
+ * provides a way to view a hierarchical set of data.
+ *
+ * @author arv@google.com (Erik Arvidsson)
+ * @author eae@google.com (Emil A Eklund)
+ *
+ * This is a based on the webfx tree control. It since been updated to add
+ * typeahead support, as well as accessibility support using ARIA framework.
+ *
+ * @see ../../demos/tree/demo.html
  */
-'use strict';
 
-goog.provide('Blockly.utils');
+goog.provide('goog.ui.tree.TreeControl');
 
-goog.require('goog.dom');
-goog.require('goog.events.BrowserFeature');
-goog.require('goog.math.Coordinate');
+goog.require('goog.a11y.aria');
+goog.require('goog.asserts');
+goog.require('goog.dom.classlist');
+goog.require('goog.events.EventType');
+goog.require('goog.events.FocusHandler');
+goog.require('goog.events.KeyHandler');
+goog.require('goog.html.SafeHtml');
+goog.require('goog.log');
+goog.require('goog.ui.tree.BaseNode');
+goog.require('goog.ui.tree.TreeNode');
+goog.require('goog.ui.tree.TypeAhead');
 goog.require('goog.userAgent');
 
 
+
 /**
- * Add a CSS class to a element.
- * Similar to Closure's goog.dom.classes.add, except it handles SVG elements.
- * @param {!Element} element DOM element to add class to.
- * @param {string} className Name of class to add.
+ * This creates a TreeControl object. A tree control provides a way to
+ * view a hierarchical set of data.
+ * @param {string|!goog.html.SafeHtml} html The HTML content of the node label.
+ * @param {Object=} opt_config The configuration for the tree. See
+ *    goog.ui.tree.TreeControl.defaultConfig. If not specified, a default config
+ *    will be used.
+ * @param {goog.dom.DomHelper=} opt_domHelper Optional DOM helper.
+ * @constructor
+ * @extends {goog.ui.tree.BaseNode}
+ */
+goog.ui.tree.TreeControl = function(html, opt_config, opt_domHelper) {
+  goog.ui.tree.BaseNode.call(this, html, opt_config, opt_domHelper);
+
+  // The root is open and selected by default.
+  this.setExpandedInternal(true);
+  this.setSelectedInternal(true);
+
+  this.selectedItem_ = this;
+
+  /**
+   * Used for typeahead support.
+   * @private {!goog.ui.tree.TypeAhead}
+   */
+  this.typeAhead_ = new goog.ui.tree.TypeAhead();
+
+  /**
+   * The object handling keyboard events.
+   * @private {?goog.events.KeyHandler}
+   */
+  this.keyHandler_ = null;
+
+  /**
+   * The object handling focus events.
+   * @private {?goog.events.FocusHandler}
+   */
+  this.focusHandler_ = null;
+
+  /**
+   * Logger
+   * @private {?goog.log.Logger}
+   */
+  this.logger_ = goog.log.getLogger('this');
+
+  /**
+   * Whether the tree is focused.
+   * @private {boolean}
+   */
+  this.focused_ = false;
+
+  /**
+   * Child node that currently has focus.
+   * @private {?goog.ui.tree.BaseNode}
+   */
+  this.focusedNode_ = null;
+
+  /**
+   * Whether to show lines.
+   * @private {boolean}
+   */
+  this.showLines_ = true;
+
+  /**
+   * Whether to show expanded lines.
+   * @private {boolean}
+   */
+  this.showExpandIcons_ = true;
+
+  /**
+   * Whether to show the root node.
+   * @private {boolean}
+   */
+  this.showRootNode_ = true;
+
+  /**
+   * Whether to show the root lines.
+   * @private {boolean}
+   */
+  this.showRootLines_ = true;
+
+  if (goog.userAgent.IE) {
+    /** @preserveTry */
+    try {
+      // works since IE6SP1
+      document.execCommand('BackgroundImageCache', false, true);
+    } catch (e) {
+      goog.log.warning(this.logger_, 'Failed to enable background image cache');
+    }
+  }
+};
+goog.inherits(goog.ui.tree.TreeControl, goog.ui.tree.BaseNode);
+
+
+/** @override */
+goog.ui.tree.TreeControl.prototype.getTree = function() {
+  return this;
+};
+
+
+/** @override */
+goog.ui.tree.TreeControl.prototype.getDepth = function() {
+  return 0;
+};
+
+
+/**
+ * Expands the parent chain of this node so that it is visible.
+ * @override
+ */
+goog.ui.tree.TreeControl.prototype.reveal = function() {
+  // always expanded by default
+  // needs to be overriden so that we don't try to reveal our parent
+  // which is a generic component
+};
+
+
+/**
+ * Handles focus on the tree.
+ * @param {!goog.events.BrowserEvent} e The browser event.
  * @private
  */
-Blockly.addClass_ = function(element, className) {
-  var classes = element.getAttribute('class') || '';
-  if ((' ' + classes + ' ').indexOf(' ' + className + ' ') == -1) {
-    if (classes) {
-      classes += ' ';
-    }
-    element.setAttribute('class', classes + className);
+goog.ui.tree.TreeControl.prototype.handleFocus_ = function(e) {
+  this.focused_ = true;
+  goog.dom.classlist.add(
+      goog.asserts.assert(this.getElement()), goog.getCssName('focused'));
+
+  if (this.selectedItem_) {
+    this.selectedItem_.select();
   }
 };
 
-/**
- * Remove a CSS class from a element.
- * Similar to Closure's goog.dom.classes.remove, except it handles SVG elements.
- * @param {!Element} element DOM element to remove class from.
- * @param {string} className Name of class to remove.
- * @private
- */
-Blockly.removeClass_ = function(element, className) {
-  var classes = element.getAttribute('class');
-  if ((' ' + classes + ' ').indexOf(' ' + className + ' ') != -1) {
-    var classList = classes.split(/\s+/);
-    for (var i = 0; i < classList.length; i++) {
-      if (!classList[i] || classList[i] == className) {
-        classList.splice(i, 1);
-        i--;
-      }
-    }
-    if (classList.length) {
-      element.setAttribute('class', classList.join(' '));
-    } else {
-      element.removeAttribute('class');
-    }
-  }
-};
 
 /**
- * Checks if an element has the specified CSS class.
- * Similar to Closure's goog.dom.classes.has, except it handles SVG elements.
- * @param {!Element} element DOM element to check.
- * @param {string} className Name of class to check.
- * @return {boolean} True if class exists, false otherwise.
+ * Handles blur on the tree.
+ * @param {!goog.events.BrowserEvent} e The browser event.
  * @private
  */
-Blockly.hasClass_ = function(element, className) {
-  var classes = element.getAttribute('class');
-  return (' ' + classes + ' ').indexOf(' ' + className + ' ') != -1;
+goog.ui.tree.TreeControl.prototype.handleBlur_ = function(e) {
+  this.focused_ = false;
+  goog.dom.classlist.remove(
+      goog.asserts.assert(this.getElement()), goog.getCssName('focused'));
 };
 
+
 /**
- * Bind an event to a function call.
- * @param {!Node} node Node upon which to listen.
- * @param {string} name Event name to listen to (e.g. 'mousedown').
- * @param {Object} thisObject The value of 'this' in the function.
- * @param {!Function} func Function to call when event is triggered.
- * @return {!Array.<!Array>} Opaque data that can be passed to unbindEvent_.
- * @private
+ * @return {boolean} Whether the tree has keyboard focus.
  */
-Blockly.bindEvent_ = function(node, name, thisObject, func) {
-  if (thisObject) {
-    var wrapFunc = function(e) {
-      func.call(thisObject, e);
-    };
+goog.ui.tree.TreeControl.prototype.hasFocus = function() {
+  return this.focused_;
+};
+
+
+/** @override */
+goog.ui.tree.TreeControl.prototype.getExpanded = function() {
+  return !this.showRootNode_ ||
+      goog.ui.tree.TreeControl.superClass_.getExpanded.call(this);
+};
+
+
+/** @override */
+goog.ui.tree.TreeControl.prototype.setExpanded = function(expanded) {
+  if (!this.showRootNode_) {
+    this.setExpandedInternal(expanded);
   } else {
-    var wrapFunc = func;
+    goog.ui.tree.TreeControl.superClass_.setExpanded.call(this, expanded);
   }
-  node.addEventListener(name, wrapFunc, false);
-  var bindData = [[node, name, wrapFunc]];
-  // Add equivalent touch event.
-  if (name in Blockly.bindEvent_.TOUCH_MAP) {
-    wrapFunc = function(e) {
-      // Punt on multitouch events.
-      if (e.changedTouches.length == 1) {
-        // Map the touch event's properties to the event.
-        var touchPoint = e.changedTouches[0];
-        e.clientX = touchPoint.clientX;
-        e.clientY = touchPoint.clientY;
-      }
-      func.call(thisObject, e);
-      // Stop the browser from scrolling/zooming the page.
-      e.preventDefault();
-    };
-    for (var i = 0, eventName;
-         eventName = Blockly.bindEvent_.TOUCH_MAP[name][i]; i++) {
-      node.addEventListener(eventName, wrapFunc, false);
-      bindData.push([node, eventName, wrapFunc]);
-    }
-  }
-  return bindData;
 };
 
-/**
- * The TOUCH_MAP lookup dictionary specifies additional touch events to fire,
- * in conjunction with mouse events.
- * @type {Object}
- */
-Blockly.bindEvent_.TOUCH_MAP = {};
-if (goog.events.BrowserFeature.TOUCH_ENABLED) {
-  Blockly.bindEvent_.TOUCH_MAP = {
-    'mousedown': ['touchstart'],
-    'mousemove': ['touchmove'],
-    'mouseup': ['touchend', 'touchcancel']
-  };
-}
+
+/** @override */
+goog.ui.tree.TreeControl.prototype.getExpandIconSafeHtml = function() {
+  // no expand icon for root element
+  return goog.html.SafeHtml.EMPTY;
+};
+
+
+/** @override */
+goog.ui.tree.TreeControl.prototype.getIconElement = function() {
+  var el = this.getRowElement();
+  return el ? /** @type {Element} */ (el.firstChild) : null;
+};
+
+
+/** @override */
+goog.ui.tree.TreeControl.prototype.getExpandIconElement = function() {
+  // no expand icon for root element
+  return null;
+};
+
+
+/** @override */
+goog.ui.tree.TreeControl.prototype.updateExpandIcon = function() {
+  // no expand icon
+};
+
+
+/** @override */
+goog.ui.tree.TreeControl.prototype.getRowClassName = function() {
+  return goog.ui.tree.TreeControl.superClass_.getRowClassName.call(this) +
+      (this.showRootNode_ ? '' : ' ' + this.getConfig().cssHideRoot);
+};
+
 
 /**
- * Unbind one or more events event from a function call.
- * @param {!Array.<!Array>} bindData Opaque data from bindEvent_.  This list is
- *     emptied during the course of calling this function.
- * @return {!Function} The function call.
+ * Returns the source for the icon.
+ * @return {string} Src for the icon.
+ * @override
+ */
+goog.ui.tree.TreeControl.prototype.getCalculatedIconClass = function() {
+  var expanded = this.getExpanded();
+  var expandedIconClass = this.getExpandedIconClass();
+  if (expanded && expandedIconClass) {
+    return expandedIconClass;
+  }
+  var iconClass = this.getIconClass();
+  if (!expanded && iconClass) {
+    return iconClass;
+  }
+
+  // fall back on default icons
+  var config = this.getConfig();
+  if (expanded && config.cssExpandedRootIcon) {
+    return config.cssTreeIcon + ' ' + config.cssExpandedRootIcon;
+  } else if (!expanded && config.cssCollapsedRootIcon) {
+    return config.cssTreeIcon + ' ' + config.cssCollapsedRootIcon;
+  }
+  return '';
+};
+
+
+/**
+ * Sets the selected item.
+ * @param {goog.ui.tree.BaseNode} node The item to select.
+ */
+goog.ui.tree.TreeControl.prototype.setSelectedItem = function(node) {
+  if (this.selectedItem_ == node) {
+    return;
+  }
+
+  var hadFocus = false;
+  if (this.selectedItem_) {
+    hadFocus = this.selectedItem_ == this.focusedNode_;
+    this.selectedItem_.setSelectedInternal(false);
+  }
+
+  this.selectedItem_ = node;
+
+  if (node) {
+    node.setSelectedInternal(true);
+    if (hadFocus) {
+      node.select();
+    }
+  }
+
+  this.dispatchEvent(goog.events.EventType.CHANGE);
+};
+
+
+/**
+ * Returns the selected item.
+ * @return {goog.ui.tree.BaseNode} The currently selected item.
+ */
+goog.ui.tree.TreeControl.prototype.getSelectedItem = function() {
+  return this.selectedItem_;
+};
+
+
+/**
+ * Sets whether to show lines.
+ * @param {boolean} b Whether to show lines.
+ */
+goog.ui.tree.TreeControl.prototype.setShowLines = function(b) {
+  if (this.showLines_ != b) {
+    this.showLines_ = b;
+    if (this.isInDocument()) {
+      this.updateLinesAndExpandIcons_();
+    }
+  }
+};
+
+
+/**
+ * @return {boolean} Whether to show lines.
+ */
+goog.ui.tree.TreeControl.prototype.getShowLines = function() {
+  return this.showLines_;
+};
+
+
+/**
+ * Updates the lines after the tree has been drawn.
  * @private
  */
-Blockly.unbindEvent_ = function(bindData) {
-  while (bindData.length) {
-    var bindDatum = bindData.pop();
-    var node = bindDatum[0];
-    var name = bindDatum[1];
-    var func = bindDatum[2];
-    node.removeEventListener(name, func, false);
-  }
-  return func;
-};
+goog.ui.tree.TreeControl.prototype.updateLinesAndExpandIcons_ = function() {
+  var tree = this;
+  var showLines = tree.getShowLines();
+  var showRootLines = tree.getShowRootLines();
 
-/**
- * Don't do anything for this event, just halt propagation.
- * @param {!Event} e An event.
- */
-Blockly.noEvent = function(e) {
-  // This event has been handled.  No need to bubble up to the document.
-  e.preventDefault();
-  e.stopPropagation();
-};
+  /**
+   * Recursively walk through all nodes and update the class names of the
+   * expand icon and the children element.
+   * @param {!goog.ui.tree.BaseNode} node
+   */
+  function updateShowLines(node) {
+    var childrenEl = node.getChildrenElement();
+    if (childrenEl) {
+      var hideLines = !showLines || tree == node.getParent() && !showRootLines;
+      var childClass = hideLines ? node.getConfig().cssChildrenNoLines :
+                                   node.getConfig().cssChildren;
+      childrenEl.className = childClass;
 
-/**
- * Is this event targeting a text input widget?
- * @param {!Event} e An event.
- * @return {boolean} True if text input.
- * @private
- */
-Blockly.isTargetInput_ = function(e) {
-  return e.target.type == 'textarea' || e.target.type == 'text' ||
-         e.target.type == 'number' || e.target.type == 'email' ||
-         e.target.type == 'password' || e.target.type == 'search' ||
-         e.target.type == 'tel' || e.target.type == 'url' ||
-         e.target.isContentEditable;
-};
-
-/**
- * Return the coordinates of the top-left corner of this element relative to
- * its parent.  Only for SVG elements and children (e.g. rect, g, path).
- * @param {!Element} element SVG element to find the coordinates of.
- * @return {!goog.math.Coordinate} Object with .x and .y properties.
- * @private
- */
-Blockly.getRelativeXY_ = function(element) {
-  var xy = new goog.math.Coordinate(0, 0);
-  // First, check for x and y attributes.
-  var x = element.getAttribute('x');
-  if (x) {
-    xy.x = parseInt(x, 10);
-  }
-  var y = element.getAttribute('y');
-  if (y) {
-    xy.y = parseInt(y, 10);
-  }
-  // Second, check for transform="translate(...)" attribute.
-  var transform = element.getAttribute('transform');
-  var r = transform && transform.match(Blockly.getRelativeXY_.XY_REGEXP_);
-  if (r) {
-    xy.x += parseFloat(r[1]);
-    if (r[3]) {
-      xy.y += parseFloat(r[3]);
-    }
-  }
-  return xy;
-};
-
-/**
- * Static regex to pull the x,y values out of an SVG translate() directive.
- * Note that Firefox and IE (9,10) return 'translate(12)' instead of
- * 'translate(12, 0)'.
- * Note that IE (9,10) returns 'translate(16 8)' instead of 'translate(16, 8)'.
- * Note that IE has been reported to return scientific notation (0.123456e-42).
- * @type {!RegExp}
- * @private
- */
-Blockly.getRelativeXY_.XY_REGEXP_ =
-    /translate\(\s*([-+\d.e]+)([ ,]\s*([-+\d.e]+)\s*\))?/;
-
-/**
- * Return the absolute coordinates of the top-left corner of this element,
- * scales that after canvas SVG element, if it's a descendant.
- * The origin (0,0) is the top-left corner of the Blockly SVG.
- * @param {!Element} element Element to find the coordinates of.
- * @param {!Blockly.Workspace} workspace Element must be in this workspace.
- * @return {!goog.math.Coordinate} Object with .x and .y properties.
- * @private
- */
-Blockly.getSvgXY_ = function(element, workspace) {
-  var x = 0;
-  var y = 0;
-  var scale = 1;
-  if (goog.dom.contains(workspace.getCanvas(), element) ||
-      goog.dom.contains(workspace.getBubbleCanvas(), element)) {
-    // Before the SVG canvas, scale the coordinates.
-    scale = workspace.scale;
-  }
-  do {
-    // Loop through this block and every parent.
-    var xy = Blockly.getRelativeXY_(element);
-    if (element == workspace.getCanvas() ||
-        element == workspace.getBubbleCanvas()) {
-      // After the SVG canvas, don't scale the coordinates.
-      scale = 1;
-    }
-    x += xy.x * scale;
-    y += xy.y * scale;
-    element = element.parentNode;
-  } while (element && element != workspace.getParentSvg());
-  return new goog.math.Coordinate(x, y);
-};
-
-/**
- * Helper method for creating SVG elements.
- * @param {string} name Element's tag name.
- * @param {!Object} attrs Dictionary of attribute names and values.
- * @param {Element} parent Optional parent on which to append the element.
- * @param {Blockly.Workspace=} opt_workspace Optional workspace for access to
- *     context (scale...).
- * @return {!SVGElement} Newly created SVG element.
- */
-Blockly.createSvgElement = function(name, attrs, parent, opt_workspace) {
-  var e = /** @type {!SVGElement} */ (
-      document.createElementNS(Blockly.SVG_NS, name));
-  for (var key in attrs) {
-    e.setAttribute(key, attrs[key]);
-  }
-  // IE defines a unique attribute "runtimeStyle", it is NOT applied to
-  // elements created with createElementNS. However, Closure checks for IE
-  // and assumes the presence of the attribute and crashes.
-  if (document.body.runtimeStyle) {  // Indicates presence of IE-only attr.
-    e.runtimeStyle = e.currentStyle = e.style;
-  }
-  if (parent) {
-    parent.appendChild(e);
-  }
-  return e;
-};
-
-/**
- * Is this event a right-click?
- * @param {!Event} e Mouse event.
- * @return {boolean} True if right-click.
- */
-Blockly.isRightButton = function(e) {
-  if (e.ctrlKey && goog.userAgent.MAC) {
-    // Control-clicking on Mac OS X is treated as a right-click.
-    // WebKit on Mac OS X fails to change button to 2 (but Gecko does).
-    return true;
-  }
-  return e.button == 2;
-};
-
-/**
- * Return the converted coordinates of the given mouse event.
- * The origin (0,0) is the top-left corner of the Blockly svg.
- * @param {!Event} e Mouse event.
- * @param {!Element} svg SVG element.
- * @return {!Object} Object with .x and .y properties.
- */
-Blockly.mouseToSvg = function(e, svg) {
-  var svgPoint = svg.createSVGPoint();
-  svgPoint.x = e.clientX;
-  svgPoint.y = e.clientY;
-  var matrix = svg.getScreenCTM();
-  matrix = matrix.inverse();
-  return svgPoint.matrixTransform(matrix);
-};
-
-/**
- * Given an array of strings, return the length of the shortest one.
- * @param {!Array.<string>} array Array of strings.
- * @return {number} Length of shortest string.
- */
-Blockly.shortestStringLength = function(array) {
-  if (!array.length) {
-    return 0;
-  }
-  var len = array[0].length;
-  for (var i = 1; i < array.length; i++) {
-    len = Math.min(len, array[i].length);
-  }
-  return len;
-};
-
-/**
- * Given an array of strings, return the length of the common prefix.
- * Words may not be split.  Any space after a word is included in the length.
- * @param {!Array.<string>} array Array of strings.
- * @param {number=} opt_shortest Length of shortest string.
- * @return {number} Length of common prefix.
- */
-Blockly.commonWordPrefix = function(array, opt_shortest) {
-  if (!array.length) {
-    return 0;
-  } else if (array.length == 1) {
-    return array[0].length;
-  }
-  var wordPrefix = 0;
-  var max = opt_shortest || Blockly.shortestStringLength(array);
-  for (var len = 0; len < max; len++) {
-    var letter = array[0][len];
-    for (var i = 1; i < array.length; i++) {
-      if (letter != array[i][len]) {
-        return wordPrefix;
+      var expandIconEl = node.getExpandIconElement();
+      if (expandIconEl) {
+        expandIconEl.className = node.getExpandIconClass();
       }
     }
-    if (letter == ' ') {
-      wordPrefix = len + 1;
-    }
+    node.forEachChild(updateShowLines);
   }
-  for (var i = 1; i < array.length; i++) {
-    var letter = array[i][len];
-    if (letter && letter != ' ') {
-      return wordPrefix;
-    }
-  }
-  return max;
+  updateShowLines(this);
 };
 
+
 /**
- * Given an array of strings, return the length of the common suffix.
- * Words may not be split.  Any space after a word is included in the length.
- * @param {!Array.<string>} array Array of strings.
- * @param {number=} opt_shortest Length of shortest string.
- * @return {number} Length of common suffix.
+ * Sets whether to show root lines.
+ * @param {boolean} b Whether to show root lines.
  */
-Blockly.commonWordSuffix = function(array, opt_shortest) {
-  if (!array.length) {
-    return 0;
-  } else if (array.length == 1) {
-    return array[0].length;
+goog.ui.tree.TreeControl.prototype.setShowRootLines = function(b) {
+  if (this.showRootLines_ != b) {
+    this.showRootLines_ = b;
+    if (this.isInDocument()) {
+      this.updateLinesAndExpandIcons_();
+    }
   }
-  var wordPrefix = 0;
-  var max = opt_shortest || Blockly.shortestStringLength(array);
-  for (var len = 0; len < max; len++) {
-    var letter = array[0].substr(-len - 1, 1);
-    for (var i = 1; i < array.length; i++) {
-      if (letter != array[i].substr(-len - 1, 1)) {
-        return wordPrefix;
+};
+
+
+/**
+ * @return {boolean} Whether to show root lines.
+ */
+goog.ui.tree.TreeControl.prototype.getShowRootLines = function() {
+  return this.showRootLines_;
+};
+
+
+/**
+ * Sets whether to show expand icons.
+ * @param {boolean} b Whether to show expand icons.
+ */
+goog.ui.tree.TreeControl.prototype.setShowExpandIcons = function(b) {
+  if (this.showExpandIcons_ != b) {
+    this.showExpandIcons_ = b;
+    if (this.isInDocument()) {
+      this.updateLinesAndExpandIcons_();
+    }
+  }
+};
+
+
+/**
+ * @return {boolean} Whether to show expand icons.
+ */
+goog.ui.tree.TreeControl.prototype.getShowExpandIcons = function() {
+  return this.showExpandIcons_;
+};
+
+
+/**
+ * Sets whether to show the root node.
+ * @param {boolean} b Whether to show the root node.
+ */
+goog.ui.tree.TreeControl.prototype.setShowRootNode = function(b) {
+  if (this.showRootNode_ != b) {
+    this.showRootNode_ = b;
+    if (this.isInDocument()) {
+      var el = this.getRowElement();
+      if (el) {
+        el.className = this.getRowClassName();
       }
     }
-    if (letter == ' ') {
-      wordPrefix = len + 1;
+    // Ensure that we do not hide the selected item.
+    if (!b && this.getSelectedItem() == this && this.getFirstChild()) {
+      this.setSelectedItem(this.getFirstChild());
     }
   }
-  for (var i = 1; i < array.length; i++) {
-    var letter = array[i].charAt(array[i].length - len - 1);
-    if (letter && letter != ' ') {
-      return wordPrefix;
-    }
-  }
-  return max;
 };
 
+
 /**
- * Is the given string a number (includes negative and decimals).
- * @param {string} str Input string.
- * @return {boolean} True if number, false otherwise.
+ * @return {boolean} Whether to show the root node.
  */
-Blockly.isNumber = function(str) {
-  return !!str.match(/^\s*-?\d+(\.\d+)?\s*$/);
+goog.ui.tree.TreeControl.prototype.getShowRootNode = function() {
+  return this.showRootNode_;
 };
 
+
 /**
- * Parse a string with any number of interpolation tokens (%1, %2, ...).
- * '%' characters may be self-escaped (%%).
- * @param {string} message Text containing interpolation tokens.
- * @return {!Array.<string|number>} Array of strings and numbers.
+ * Add roles and states.
+ * @protected
+ * @override
  */
-Blockly.tokenizeInterpolation = function(message) {
-  var tokens = [];
-  var chars = message.split('');
-  chars.push('');  // End marker.
-  // Parse the message with a finite state machine.
-  // 0 - Base case.
-  // 1 - % found.
-  // 2 - Digit found.
-  var state = 0;
-  var buffer = [];
-  var number = null;
-  for (var i = 0; i < chars.length; i++) {
-    var c = chars[i];
-    if (state == 0) {
-      if (c == '%') {
-        state = 1;  // Start escape.
-      } else {
-        buffer.push(c);  // Regular char.
-      }
-    } else if (state == 1) {
-      if (c == '%') {
-        buffer.push(c);  // Escaped %: %%
-        state = 0;
-      } else if ('0' <= c && c <= '9') {
-        state = 2;
-        number = c;
-        var text = buffer.join('');
-        if (text) {
-          tokens.push(text);
-        }
-        buffer.length = 0;
-      } else {
-        buffer.push('%', c);  // Not an escape: %a
-        state = 0;
-      }
-    } else if (state == 2) {
-      if ('0' <= c && c <= '9') {
-        number += c;  // Multi-digit number.
-      } else {
-        tokens.push(parseInt(number, 10));
-        i--;  // Parse this char again.
-        state = 0;
-      }
-    }
-  }
-  var text = buffer.join('');
-  if (text) {
-    tokens.push(text);
-  }
-  return tokens;
+goog.ui.tree.TreeControl.prototype.initAccessibility = function() {
+  goog.ui.tree.TreeControl.superClass_.initAccessibility.call(this);
+
+  var elt = this.getElement();
+  goog.asserts.assert(elt, 'The DOM element for the tree cannot be null.');
+  goog.a11y.aria.setRole(elt, 'tree');
+  goog.a11y.aria.setState(elt, 'labelledby', this.getLabelElement().id);
 };
 
-/**
- * Generate a unique ID.  This should be globally unique.
- * 87 characters ^ 20 length > 128 bits (better than a UUID).
- * @return {string} A globally unique ID string.
- */
-Blockly.genUid = function() {
-  var length = 20;
-  var soupLength = Blockly.genUid.soup_.length;
-  var id = [];
-  for (var i = 0; i < length; i++) {
-    id[i] = Blockly.genUid.soup_.charAt(Math.random() * soupLength);
-  }
-  return id.join('');
+
+/** @override */
+goog.ui.tree.TreeControl.prototype.enterDocument = function() {
+  goog.ui.tree.TreeControl.superClass_.enterDocument.call(this);
+  var el = this.getElement();
+  el.className = this.getConfig().cssRoot;
+  el.setAttribute('hideFocus', 'true');
+  this.attachEvents_();
+  this.initAccessibility();
 };
 
+
+/** @override */
+goog.ui.tree.TreeControl.prototype.exitDocument = function() {
+  goog.ui.tree.TreeControl.superClass_.exitDocument.call(this);
+  this.detachEvents_();
+};
+
+
 /**
- * Legal characters for the unique ID.
- * Should be all on a US keyboard.  No XML special characters or control codes.
- * Removed $ due to issue 251.
+ * Adds the event listeners to the tree.
  * @private
  */
-Blockly.genUid.soup_ = '!#%()*+,-./:;=?@[]^_`{|}~' +
-    'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+goog.ui.tree.TreeControl.prototype.attachEvents_ = function() {
+  var el = this.getElement();
+  el.tabIndex = 0;
+
+  var kh = this.keyHandler_ = new goog.events.KeyHandler(el);
+  var fh = this.focusHandler_ = new goog.events.FocusHandler(el);
+
+  this.getHandler()
+      .listen(fh, goog.events.FocusHandler.EventType.FOCUSOUT, this.handleBlur_)
+      .listen(fh, goog.events.FocusHandler.EventType.FOCUSIN, this.handleFocus_)
+      .listen(kh, goog.events.KeyHandler.EventType.KEY, this.handleKeyEvent)
+      .listen(el, goog.events.EventType.MOUSEDOWN, this.handleMouseEvent_)
+      .listen(el, goog.events.EventType.CLICK, this.handleMouseEvent_)
+      .listen(el, goog.events.EventType.DBLCLICK, this.handleMouseEvent_);
+};
+
 
 /**
- * Local prompt function created to allow blockly developers to overwrite it
- * with a customised version. This version uses the default window.prompt
- * functionality, but it has been designed to be easily replaced by an 
- * asynchronous HTML based prompt.
- * @param {string} message Main text message for the window prompt.
- * @param {string=} opt_defaultInput Input string to be displayed by default.
- * @param {function=} opt_callback Optional function callback to process the
- *     user input.
- * @return {undefined|null|string} If no callback is provided it returns the
- *     value directly from window.prompt (null or string), otherwise it
- *     returns undefined.
+ * Removes the event listeners from the tree.
+ * @private
  */
-Blockly.prompt = function(message, opt_defaultInput, opt_callback) {
-  if (opt_callback === undefined) {
-    // If no callback provided to revert back to the normal blockly prompt
-    return window.prompt(message, opt_defaultInput);
-  } else {
-    // window.prompt still a blocking function, but returns value via callback
-    if (typeof opt_callback == 'function') {
-      opt_callback(window.prompt(message, opt_defaultInput));
-    } else {
-      console.log('Blocky prompt callback needs to be a callable function.');
+goog.ui.tree.TreeControl.prototype.detachEvents_ = function() {
+  this.keyHandler_.dispose();
+  this.keyHandler_ = null;
+  this.focusHandler_.dispose();
+  this.focusHandler_ = null;
+};
+
+
+/**
+ * Handles mouse events.
+ * @param {!goog.events.BrowserEvent} e The browser event.
+ * @private
+ */
+goog.ui.tree.TreeControl.prototype.handleMouseEvent_ = function(e) {
+  goog.log.fine(this.logger_, 'Received event ' + e.type);
+  var node = this.getNodeFromEvent_(e);
+  if (node) {
+    switch (e.type) {
+      case goog.events.EventType.MOUSEDOWN:
+        node.onMouseDown(e);
+        break;
+      case goog.events.EventType.CLICK:
+        node.onClick_(e);
+        break;
+      case goog.events.EventType.DBLCLICK:
+        node.onDoubleClick_(e);
+        break;
     }
   }
-  return undefined;
 };
+
+
+/**
+ * Handles key down on the tree.
+ * @param {!goog.events.BrowserEvent} e The browser event.
+ * @return {boolean} The handled value.
+ */
+goog.ui.tree.TreeControl.prototype.handleKeyEvent = function(e) {
+  var handled = false;
+
+  // Handle typeahead and navigation keystrokes.
+  handled = this.typeAhead_.handleNavigation(e) ||
+      (this.selectedItem_ && this.selectedItem_.onKeyDown(e)) ||
+      this.typeAhead_.handleTypeAheadChar(e);
+
+  if (handled) {
+    e.preventDefault();
+  }
+
+  return handled;
+};
+
+
+/**
+ * Finds the containing node given an event.
+ * @param {!goog.events.BrowserEvent} e The browser event.
+ * @return {goog.ui.tree.BaseNode} The containing node or null if no node is
+ *     found.
+ * @private
+ */
+goog.ui.tree.TreeControl.prototype.getNodeFromEvent_ = function(e) {
+  // find the right node
+  var node = null;
+  var target = e.target;
+  while (target != null) {
+    var id = target.id;
+    node = goog.ui.tree.BaseNode.allNodes[id];
+    if (node) {
+      return node;
+    }
+    if (target == this.getElement()) {
+      break;
+    }
+    target = target.parentNode;
+  }
+  return null;
+};
+
+
+/**
+ * Creates a new tree node using the same config as the root.
+ * @param {string=} opt_html The HTML content of the node label.
+ * @return {!goog.ui.tree.TreeNode} The new item.
+ */
+goog.ui.tree.TreeControl.prototype.createNode = function(opt_html) {
+  return new goog.ui.tree.TreeNode(
+      opt_html || goog.html.SafeHtml.EMPTY, this.getConfig(),
+      this.getDomHelper());
+};
+
+
+/**
+ * Allows the caller to notify that the given node has been added or just had
+ * been updated in the tree.
+ * @param {goog.ui.tree.BaseNode} node New node being added or existing node
+ *    that just had been updated.
+ */
+goog.ui.tree.TreeControl.prototype.setNode = function(node) {
+  this.typeAhead_.setNodeInMap(node);
+};
+
+
+/**
+ * Allows the caller to notify that the given node is being removed from the
+ * tree.
+ * @param {goog.ui.tree.BaseNode} node Node being removed.
+ */
+goog.ui.tree.TreeControl.prototype.removeNode = function(node) {
+  this.typeAhead_.removeNodeFromMap(node);
+};
+
+
+/**
+ * Clear the typeahead buffer.
+ */
+goog.ui.tree.TreeControl.prototype.clearTypeAhead = function() {
+  this.typeAhead_.clear();
+};
+
+
+/**
+ * A default configuration for the tree.
+ */
+goog.ui.tree.TreeControl.defaultConfig = goog.ui.tree.BaseNode.defaultConfig;

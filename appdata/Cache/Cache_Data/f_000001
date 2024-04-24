@@ -1,1035 +1,754 @@
 /**
- * @license Licensed under the Apache License, Version 2.0 (the "License"):
- *          http://www.apache.org/licenses/LICENSE-2.0
+ * @license
+ * Visual Blocks Editor
  *
- * @fileoverview CSS file for the Ardublockly application.
+ * Copyright 2012 Google Inc.
+ * https://developers.google.com/blockly/
  *
- * There are a lot of '!important' tags in this file as a lot of the rules set
- * here go against the css rules from the Materialize framework.
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *   http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
  */
-/******************/
-/*  Font sources  */
-/******************/
-@font-face {
-  font-family: "Droid Sans Mono";
-  src: url("font/droid/DroidSansMono.ttf") format("truetype");
-}
 
-@font-face {
-  font-family: 'Jokerman';
-  src: url('font/roboto/JOKERMAN.TTF');
-}
+/**
+ * @fileoverview List blocks for Blockly.
+ * @author fraser@google.com (Neil Fraser)
+ */
+'use strict';
 
-@font-face {
-  font-family: 'VNIZap';
-  src: url('font/roboto/vniVZAP.ttf');
-}
+goog.provide('Blockly.Blocks.lists');
 
-/**********/
-/*  HTML  */
-/**********/
-html,
-body {
-  height: 100% !important;
-  padding: 0;
-  margin: 0;
-}
-
-body {
-  background-color: #eeeeee;
-  -moz-user-select: -moz-none;
-  -khtml-user-select: none;
-  -webkit-user-select: none;
-  -ms-user-select: none;
-  user-select: none;
-}
+goog.require('Blockly.Blocks');
+goog.require('Blockly.Types');
 
 
-/*********************/
-/*  Arduino Colours  */
-/*********************/
-.arduino_teal {
-  background-color: #00ABD6; /*#00979C*/ 
-}
-.arduino_teal_dark {
-  background-color: #006468;
-  /* background-color: #00878F; from community logo */
-}
-.arduino_teal_light {
-  background-color: #62AEB2;
-}
-.arduino_orange {
-  background-color: #E47128;
-}
-.arduino_yellow {
-  background-color: rgba(255, 204, 51, 1);
-  /* background-color: #FFCC33; */
-  /* background-color: #E5AD24; from community logo */
-}
-.arduino_brown {
-  background-color: #8C7965;
-}
-.text_color_blue{
-  color: blue;
-}
+/**
+ * Common HSV hue for all blocks in this category.
+ */
+Blockly.Blocks.lists.HUE = 260;
 
-.text_color_red{
-  color: red;
-}
-
-.text_color_orange{
-  color: orange;
-}
-.text_color_yellow{
-  color: white;
-}
-.text_color_teal{
-  color: teal;
-}
-
-.text_color_green{
-  color:#9cf27d;
-}
- 
-.robo_image {
-  border: 0;
-  position: absolute;
-  bottom: 8%;
-  right: 5%;
-  text-align: center;
-  height: 65%;
-  z-index: 0;
-  width: 26%;
-}
-
-.robo_image a{
-  font-family:'Times New Roman';
-  font-size: 40px;
-  font-weight: bold;
-  color: blue;
-}
-.name_top{
-  font-family: 'Jokerman';
-  font-size:x-large;
-  transform: translateX(-50%) translateY(-50%);
-  position: absolute;
-  top: 50%;
-  left: 50%;
-}
-/********************/
-/*  Navigation bar  */
-/********************/
-.nav-fixed {
-  border-radius: 0;
-  position: inherit;
-  margin-bottom: 30px;
-  z-index: 997 !important;
-}
-@media only screen and (min-width : 993px) {
-  body {
-    padding-top: 100px;
+Blockly.Blocks['lists_create_empty'] = {
+  /**
+   * Block for creating an empty list.
+   * The 'list_create_with' block is preferred as it is more flexible.
+   * <block type="lists_create_with">
+   *   <mutation items="0"></mutation>
+   * </block>
+   * @this Blockly.Block
+   */
+  init: function() {
+    this.jsonInit({
+      "message0": Blockly.Msg.LISTS_CREATE_EMPTY_TITLE,
+      "output": "Array",
+      "colour": Blockly.Blocks.lists.HUE,
+      "tooltip": Blockly.Msg.LISTS_CREATE_EMPTY_TOOLTIP,
+      "helpUrl": Blockly.Msg.LISTS_CREATE_EMPTY_HELPURL
+    });
   }
-  .nav-fixed {
-    position: fixed;
-    right: 0;
-    left: 0;
-    top: 0;
-    margin-bottom: 0px;
-    z-index: 997;
+};
+
+Blockly.Blocks['lists_create_with'] = {
+  /**
+   * Block for creating a list with any number of elements of any type.
+   * @this Blockly.Block
+   */
+  init: function() {
+    this.setHelpUrl(Blockly.Msg.LISTS_CREATE_WITH_HELPURL);
+    this.setColour(Blockly.Blocks.lists.HUE);
+    this.itemCount_ = 3;
+    this.updateShape_();
+    this.setOutput(true, 'Array');
+    this.setMutator(new Blockly.Mutator(['lists_create_with_item']));
+    this.setTooltip(Blockly.Msg.LISTS_CREATE_WITH_TOOLTIP);
+  },
+  /**
+   * Create XML to represent list inputs.
+   * @return {!Element} XML storage element.
+   * @this Blockly.Block
+   */
+  mutationToDom: function() {
+    var container = document.createElement('mutation');
+    container.setAttribute('items', this.itemCount_);
+    return container;
+  },
+  /**
+   * Parse XML to restore the list inputs.
+   * @param {!Element} xmlElement XML storage element.
+   * @this Blockly.Block
+   */
+  domToMutation: function(xmlElement) {
+    this.itemCount_ = parseInt(xmlElement.getAttribute('items'), 10);
+    this.updateShape_();
+  },
+  /**
+   * Populate the mutator's dialog with this block's components.
+   * @param {!Blockly.Workspace} workspace Mutator's workspace.
+   * @return {!Blockly.Block} Root block in mutator.
+   * @this Blockly.Block
+   */
+  decompose: function(workspace) {
+    var containerBlock = workspace.newBlock('lists_create_with_container');
+    containerBlock.initSvg();
+    var connection = containerBlock.getInput('STACK').connection;
+    for (var i = 0; i < this.itemCount_; i++) {
+      var itemBlock = workspace.newBlock('lists_create_with_item');
+      itemBlock.initSvg();
+      connection.connect(itemBlock.previousConnection);
+      connection = itemBlock.nextConnection;
+    }
+    return containerBlock;
+  },
+  /**
+   * Reconfigure this block based on the mutator dialog's components.
+   * @param {!Blockly.Block} containerBlock Root block in mutator.
+   * @this Blockly.Block
+   */
+  compose: function(containerBlock) {
+    var itemBlock = containerBlock.getInputTargetBlock('STACK');
+    // Count number of inputs.
+    var connections = [];
+    while (itemBlock) {
+      connections.push(itemBlock.valueConnection_);
+      itemBlock = itemBlock.nextConnection &&
+          itemBlock.nextConnection.targetBlock();
+    }
+    // Disconnect any children that don't belong.
+    for (var i = 0; i < this.itemCount_; i++) {
+      var connection = this.getInput('ADD' + i).connection.targetConnection;
+      if (connection && connections.indexOf(connection) == -1) {
+        connection.disconnect();
+      }
+    }
+    this.itemCount_ = connections.length;
+    this.updateShape_();
+    // Reconnect any child blocks.
+    for (var i = 0; i < this.itemCount_; i++) {
+      Blockly.Mutator.reconnect(connections[i], this, 'ADD' + i);
+    }
+  },
+  /**
+   * Store pointers to any connected child blocks.
+   * @param {!Blockly.Block} containerBlock Root block in mutator.
+   * @this Blockly.Block
+   */
+  saveConnections: function(containerBlock) {
+    var itemBlock = containerBlock.getInputTargetBlock('STACK');
+    var i = 0;
+    while (itemBlock) {
+      var input = this.getInput('ADD' + i);
+      itemBlock.valueConnection_ = input && input.connection.targetConnection;
+      i++;
+      itemBlock = itemBlock.nextConnection &&
+          itemBlock.nextConnection.targetBlock();
+    }
+  },
+  /**
+   * Modify this block to have the correct number of inputs.
+   * @private
+   * @this Blockly.Block
+   */
+  updateShape_: function() {
+    if (this.itemCount_ && this.getInput('EMPTY')) {
+      this.removeInput('EMPTY');
+    } else if (!this.itemCount_ && !this.getInput('EMPTY')) {
+      this.appendDummyInput('EMPTY')
+          .appendField(Blockly.Msg.LISTS_CREATE_EMPTY_TITLE);
+    }
+    // Add new inputs.
+    for (var i = 0; i < this.itemCount_; i++) {
+      if (!this.getInput('ADD' + i)) {
+        var input = this.appendValueInput('ADD' + i);
+        if (i == 0) {
+          input.appendField(Blockly.Msg.LISTS_CREATE_WITH_INPUT_WITH);
+        }
+      }
+    }
+    // Remove deleted inputs.
+    while (this.getInput('ADD' + i)) {
+      this.removeInput('ADD' + i);
+      i++;
+    }
   }
-}
+};
 
-/* Side nav Logo */
-ul.side-nav li.logo {
-  text-align: center;
-  margin: 0px !important;
-  padding: 0px 0px !important;
-  border: none !important;
-  height: 145px;
-  background-color: transparent;
-}
-ul.side-nav li.logo:hover {
-  background-color: transparent;
-}
-ul.side-nav li.side-menu-end {
-  background-color: #eeeeee;
-  border-radius: 0px 0px 25px 0px;
-  border-left: 4px solid #ffffff;
-  border-bottom: 4px solid #dddddd;
-  border-right: 4px solid #dddddd;
-  border-bottom: 4px solid #dddddd;
-  line-height: 25px;
-}
-
-/************************************/
-/*  Blocks, Arduino, and XML areas  */
-/************************************/
-.content {
-  margin: 0;
-  padding: 0;
-  width: 100%;
-  background-color: #ffffff;
-}
-.height_transition {
-  transition: height 0.2s ease-out;
-  -ms-transition: height 0.2s ease-out;
-  -moz-transition: height 0.2s ease-out;
-  -webkit-transition: height 0.2s ease-out;
-}
-
-#blocks_panel {
-  padding: 0px;
-  position: relative !important;
-  min-height: 480px;
-}
-.blocks_panel_large {
-  height: -moz-calc(100vh - 190px);     /* Firefox  */
-  height: -webkit-calc(100vh - 190px);  /* WebKit   */
-  height: -o-calc(100vh - 190px);       /* Opera    */
-  height: calc(100vh - 190px);          /* Standard */
-}
-.blocks_panel_small {
-  height: -moz-calc(100vh - 350px);     /* Firefox  */
-  height: -webkit-calc(100vh - 350px);  /* WebKit   */
-  height: -o-calc(100vh - 350px);       /* Opera    */
-  height: calc(100vh - 350px);          /* Standard */
-}
-#content_blocks {
-  margin: 0;
-  padding: 0;
-  min-height: 480px;
-  height: -moz-calc(100vh - 190px);     /* Firefox  */
-  height: -webkit-calc(100vh - 190px);  /* WebKit   */
-  height: -o-calc(100vh - 190px);       /* Opera    */
-  height: calc(100vh - 190px);          /* Standard */
-}
-
-#content_xml {
-  resize: none;
-  outline: none;
-  border: none;
-  padding: 0px 7px;
-  font-family: monospace;
-  font-size: smaller;
-  overflow: scroll;
-  font-style: 0.2em !important;
-  min-height: 384px;
-}
-.content_xml_large {
-  height: -moz-calc(100vh - 286px);     /* Firefox  */
-  height: -webkit-calc(100vh - 286px);  /* WebKit   */
-  height: -o-calc(100vh - 286px);       /* Opera    */
-  height: calc(100vh - 286px);          /* Standard */
-}
-.content_xml_small {
-  height: -moz-calc(100vh - 446px);     /* Firefox  */
-  height: -webkit-calc(100vh - 446px);  /* WebKit   */
-  height: -o-calc(100vh - 446px);       /* Opera    */
-  height: calc(100vh - 446px);          /* Standard */
-}
-
-/* The materialize framework changes height of the div to show or hide */
-/* the collapsible elements. */
-#content_arduino {
-  resize: none;
-  outline: none;
-  border: none;
-  padding: 0px 5px;
-  font-size: 0.9rem;
-  font-family: "Droid Sans Mono", monospace;
-  overflow: auto;
-  -moz-user-select: text;
-  -khtml-user-select: text;
-  -webkit-user-select: text;
-  -ms-user-select: text;
-  user-select: text;
-  min-height: 388px;
-}
-.content_arduino_large {
-  height: -moz-calc(100vh - 237px);     /* Firefox  */
-  height: -webkit-calc(100vh - 237px);  /* WebKit   */
-  height: -o-calc(100vh - 237px);       /* Opera    */
-  height: calc(100vh - 237px);          /* Standard */
-}
-.content_arduino_small {
-  height: -moz-calc(100vh - 440px);     /* Firefox  */
-  height: -webkit-calc(100vh - 440px);  /* WebKit   */
-  height: -o-calc(100vh - 440px);       /* Opera    */
-  height: calc(100vh - 440px);          /* Standard */
-}
-
-/****************/
-/*  IDE output  */
-/****************/
-.ide_output_wrapper {
-  width: 100%;
-  margin: 0;
-  padding: 0;
-  position: fixed;
-  bottom: -16px;
-  z-index: 10;
-}
-
-.ide_output_collapsible {
-  box-shadow: 0 0px 17px 0 rgba(0, 0, 0, 0.2), 0 6px 20px 0 rgba(0, 0, 0, 0.19);
-  border-left: 0;
-  border-right: 0;
-}
-.ide_output_header_normal {
-  background-color: #00ABD6;
-  color: #ffffff;
-  -moz-transition: background-color 0.6s ease-in;;
-  -o-transition: background-color 0.6s ease-in;
-  -webkit-transition: background-color 0.6s ease-in;
-}
-.ide_output_header_highlight {
-  background-color: #62AEB2;
-  color: #ffffff;
-  -moz-transition: background-color 0.6s ease-in;;
-  -o-transition: background-color 0.6s ease-in;
-  -webkit-transition: background-color 0.6s ease-in;
-}
-.ide_output_header_error {
-  background-color: #E47128;
-  color: #ffffff;
-  -moz-transition: background-color 0.6s ease-in;;
-  -o-transition: background-color 0.6s ease-in;
-  -webkit-transition: background-color 0.6s ease-in;
-}
-.blocklyTreeSelected .blocklyTreeIcon.blocklyTreeIconNone:before {
-  color: #fff!important;
-}
-.blocklyToolboxDiv>div>div:nth-child(2)>div:nth-child(1)>.blocklyTreeRow>.blocklyTreeIcon:before {
-  font-family: FontAwesome;
-  content: "\f024";
-   color: #FFBF00; 
-  font-weight: 500;
-  margin-left: 3px;
-  font-size: 25px;
-}
-.blocklyToolboxDiv>div>div:nth-child(2)>div:nth-child(3)>.blocklyTreeRow>.blocklyTreeIcon:before {
-  font-family: FontAwesome;
-  content: "\f079";
-  color: #FFAB19;
-  font-weight: 500;
-  margin-left: 3px;
-  margin-bottom: 7px;
-  font-size: 25px;
-}
-.blocklyToolboxDiv>div>div:nth-child(2)>div:nth-child(5)>.blocklyTreeRow>.blocklyTreeIcon:before {
-  font-family: FontAwesome;
-  content: "\f1ec";
-  color: #59C059;
-  font-weight: 500;
-  margin-left: 3px;
-  font-size: 25px;
-}
-.blocklyToolboxDiv>div>div:nth-child(2)>div:nth-child(7)>.blocklyTreeRow>.blocklyTreeIcon:before {
-  font-family: FontAwesome;
-  content: "\f1c0";
-  color: #E49CDC;
-  font-weight: 500;
-  margin-left: 3px;
-  font-size: 25px;
-}
-.blocklyToolboxDiv>div>div:nth-child(2)>div:nth-child(9)>.blocklyTreeRow>.blocklyTreeIcon:before {
-  font-family: FontAwesome;
-  content: "\f1ca";
-  color: #F58413;
-  font-weight: 500;
-  margin-left: 3px;
-  font-size: 25px;
-}
-.blocklyToolboxDiv>div>div:nth-child(2)>div:nth-child(11)>.blocklyTreeRow>.blocklyTreeIcon:before {
-  font-family: FontAwesome;
-  content: "\f180";
-  color: #FF6680;
-  font-weight: 500;
-  margin-left: 3px;
-  font-size: 25px;
-}
-.blocklyToolboxDiv>div>div:nth-child(2)>div:nth-child(13)>.blocklyTreeRow>.blocklyTreeIcon:before {
-  font-family: FontAwesome;
-  content: "\f0ec";
-  color: #594AA5;
-  font-weight: 500;
-  margin-left: 3px;
-  font-size: 25px;
-}
-.blocklyToolboxDiv>div>div:nth-child(2)>div:nth-child(15)>.blocklyTreeRow>.blocklyTreeIcon:before {
-  font-family: FontAwesome;
-  content: "\f017";
-  color: #00CC66;
-  font-weight: 500;
-  margin-left: 3px;
-  font-size: 25px;
-}
-.blocklyToolboxDiv>div>div:nth-child(2)>div:nth-child(17)>.blocklyTreeRow>.blocklyTreeIcon:before {
-  font-family: FontAwesome;
-  content: "\1f5a5";
-  color: #844957;
-  font-weight: 500;
-  margin-left: 3px;
-  font-size: 25px;
-}
-.blocklyToolboxDiv>div>div:nth-child(2)>div:nth-child(19)>.blocklyTreeRow>.blocklyTreeIcon:before {
-  font-family: FontAwesome;
-  content: "\f1eb";
-  color: #5CA65C;
-  font-weight: 500;
-  margin-left: 3px;
-  font-size: 25px;
-}
-.blocklyToolboxDiv>div>div:nth-child(2)>div:nth-child(22)>.blocklyTreeRow>.blocklyTreeIcon:before {
-  font-family: FontAwesome;
-  color: #00abd6;
-  content: "\f11c";
-  font-weight: 500;
-  margin-left: 3px;
-  font-size: 25px;
-}
-.blocklyToolboxDiv>div>div:nth-child(2)>div:nth-child(24)>.blocklyTreeRow>.blocklyTreeIcon:before {
-  font-family: FontAwesome;
-  color: #5C81A6;
-  content: "\f11c";
-  font-weight: 500;
-  margin-left: 3px;
-  font-size: 25px;
-}
-.blocklyToolboxDiv>div>div:nth-child(2)>div:nth-child(26)>.blocklyTreeRow>.blocklyTreeIcon:before {
-  font-family: FontAwesome;
-  color: #5CA65C;
-  content: "\f11c";
-  font-weight: 500;
-  margin-left: 3px;
-  font-size: 25px;
-}
-.blocklyToolboxDiv>div>div:nth-child(2)>div:nth-child(28)>.blocklyTreeRow>.blocklyTreeIcon:before {
-  font-family: FontAwesome;
-  color: #6770ec;
-  content: "\f11c";
-  font-weight: 500;
-  margin-left: 3px;
-  font-size: 25px;
-}
-/*.blocklyToolboxDiv>div>div:nth-child(2)>div:nth-child(19)>.blocklyTreeRow>.blocklyTreeIcon:before {
-  font-family: FontAwesome;
-  content: "\f544";
-  color: #844957;
-  font-weight: 500;
-  margin-left: 3px;
-  font-size: 25px;
-}
-.blocklyToolboxDiv>div>div:nth-child(2)>div:nth-child(21)>.blocklyTreeRow>.blocklyTreeIcon:before {
-  font-family: FontAwesome;
-  content: "\f1e9";
-  color: #768E3B;
-  font-weight: 500;
-  margin-left: 3px;
-  font-size: 25px;
-}
-.blocklyToolboxDiv>div>div:nth-child(2)>div:nth-child(23)>.blocklyTreeRow>.blocklyTreeIcon:before {
-  font-family: FontAwesome;
-  content: "\f1eb";
-  color: #5c81a6;
-  font-weight: 500;
-  margin-left: 3px;
-  font-size: 25px;
-}*/
-
-
-#content_ide_output {
-  resize: none;
-  outline: none;
-  border: none;
-  padding: 0px 5px;
-  font-family: monospace;
-  overflow: auto;
-  font-style: 0.2em !important;
-  min-height: 160px;
-  max-height: 160px;
-  -moz-user-select: text;
-  -khtml-user-select: text;
-  -webkit-user-select: text;
-  -ms-user-select: text;
-  user-select: text;
-  background-color: #303030;
-  color: #ffffff;
-}
-/* IDE output content text formatting */
-#content_ide_output .arduino_dialog_success {
-  color: #00ABD6;   /* arduino light teal */
-  font-size: 1.2rem;
-  margin: 16px 0px 8px 0px;
-}
-#content_ide_output .arduino_dialog_failure {
-  color: #E47128;   /* arduino orange */
-  font-size: 1.2rem;
-  margin: 16px 0px 8px 0px;
-}
-#content_ide_output .arduino_dialog_out {
-  color: #ffffff;
-  font-size: 0.9rem;
-}
-#content_ide_output .arduino_dialog_out_error {
-  color: #E47128;   /* arduino orange */
-  font-size: 0.9rem;
-  padding-top: 8px;
-  display: block;
-}
-
-/* Spacer is used to not leave any content behind the collapsible header */
-#ide_output_spacer {
-  height: 40px;
-}
-@media only screen and (min-width: 0) {
-  #ide_output_spacer {
-    height: 20px;
+Blockly.Blocks['lists_create_with_container'] = {
+  /**
+   * Mutator block for list container.
+   * @this Blockly.Block
+   */
+  init: function() {
+    this.setColour(Blockly.Blocks.lists.HUE);
+    this.appendDummyInput()
+        .appendField(Blockly.Msg.LISTS_CREATE_WITH_CONTAINER_TITLE_ADD);
+    this.appendStatementInput('STACK');
+    this.setTooltip(Blockly.Msg.LISTS_CREATE_WITH_CONTAINER_TOOLTIP);
+    this.contextMenu = false;
   }
-}
-@media only screen and (min-width: 601px) {
-  #ide_output_spacer {
-    height: 30px;
+};
+
+Blockly.Blocks['lists_create_with_item'] = {
+  /**
+   * Mutator bolck for adding items.
+   * @this Blockly.Block
+   */
+  init: function() {
+    this.setColour(Blockly.Blocks.lists.HUE);
+    this.appendDummyInput()
+        .appendField(Blockly.Msg.LISTS_CREATE_WITH_ITEM_TITLE);
+    this.setPreviousStatement(true);
+    this.setNextStatement(true);
+    this.setTooltip(Blockly.Msg.LISTS_CREATE_WITH_ITEM_TOOLTIP);
+    this.contextMenu = false;
   }
-}
-@media only screen and (min-width: 993px) {
-  #ide_output_spacer {
-    height: 40px;
+};
+
+Blockly.Blocks['lists_repeat'] = {
+  /**
+   * Block for creating a list with one element repeated.
+   * @this Blockly.Block
+   */
+  init: function() {
+    this.jsonInit({
+      "message0": Blockly.Msg.LISTS_REPEAT_TITLE,
+      "args0": [
+        {
+          "type": "input_value",
+          "name": "ITEM"
+        },
+        {
+          "type": "input_value",
+          "name": "NUM",
+          "check": Blockly.Types.NUMBER.checkList
+        }
+      ],
+      "output": "Array",
+      "colour": Blockly.Blocks.lists.HUE,
+      "tooltip": Blockly.Msg.LISTS_REPEAT_TOOLTIP,
+      "helpUrl": Blockly.Msg.LISTS_REPEAT_HELPURL
+    });
   }
-}
+};
 
-
-/*************/
-/*  Buttons  */
-/*************/
-#ide_buttons_wrapper {
-  position: absolute;
-  right: 25px;
-  top: -20px;
-  height: 55px;
-  width: 160px;
-  z-index: 12;
-}
-#button_ide_large {
-  position: absolute;
-  right: 0px;
-  top: 0px;
-  width: 55px;
-  height: 55px;
-}
-#button_ide_large i {
-  font-size: 2.4rem !important;
-  line-height: 55px;
-}
-#button_ide_middle {
-  position: absolute;
-  right: 72px;
-  top: 10px;
-  visibility: hidden;
-  opacity: 0;
-  -moz-transition: visibility 0.3s linear, opacity 0.3s linear;
-  -webkit-transition: visibility 0.3s linear, opacity 0.3s linear;
-  -o-transition: visibility 0.3s linear, opacity 0.3s linear;
-  transition: visibility 0.3s linear, opacity 0.3s linear;
-}
-#button_ide_left {
-  position: absolute;
-  right: 126px;
-  top: 10px;
-  visibility: hidden;
-  opacity: 0;
-  -moz-transition: visibility 0.3s linear, opacity 0.3s linear;
-  -webkit-transition: visibility 0.3s linear, opacity 0.3s linear;
-  -o-transition: visibility 0.3s linear, opacity 0.3s linear;
-  transition: visibility 0.3s linear, opacity 0.3s linear;
-}
-#button_ide_large:hover:before,
-#button_ide_middle:hover:before,
-#button_ide_left:hover:before {
-  content: "";
-  display: block;
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  left: 0;
-  right: 0;
-  background: rgba(255,255,255, 0.25);
-  transition: all .3s linear;
-}
-
-#button_load_xml {
-  position: absolute;
-  right: 36px;
-  bottom: 36px;
-  display: none;
-}
-#button_load_xml .mdi-action-extension {
-  font-size: 2.1rem !important;
-}
-
-/* These floating buttons needs to be at a higher z index than card when */
-/* floating and lower when clicked.  */
-#button_ide_large:hover,
-#button_ide_middle:hover,
-#button_ide_left:hover,
-#button_load_xml:hover {
-  -webkit-box-shadow: 0 8px 17px 0 rgba(0, 0, 0, 0.2), 0 6px 20px 0 rgba(0, 0, 0, 0.19);
-  -moz-box-shadow: 0 8px 17px 0 rgba(0, 0, 0, 0.2), 0 6px 20px 0 rgba(0, 0, 0, 0.19);
-  box-shadow: 0 8px 17px 0 rgba(0, 0, 0, 0.2), 0 6px 20px 0 rgba(0, 0, 0, 0.19);
-}
-#button_ide_large:active,
-#button_ide_middle:active,
-#button_ide_left:active,
-#button_load_xml:active {
-  -webkit-box-shadow: 0 2px 5px 0 rgba(0, 0, 0, 0.16), 0 2px 10px 0 rgba(0, 0, 0, 0.12);
-  -moz-box-shadow: 0 2px 5px 0 rgba(0, 0, 0, 0.16), 0 2px 10px 0 rgba(0, 0, 0, 0.12);
-  box-shadow: 0 2px 5px 0 rgba(0, 0, 0, 0.16), 0 2px 10px 0 rgba(0, 0, 0, 0.12);
-}
-
-/* Toggle the toolbox on and off button */
-.button_toggle_toolbox_on {
-  position: absolute;
-  margin: 0 !important;
-  padding: 0 !important;
-  left: 12px;
-  top: 8px;
-  text-align: center;
-  font-size: 1.5rem !important;
-  z-index: 5;
-  border-color: #e0e0e0 !important;
-  border-width: 1px !important;
-  -webkit-border-radius: 4px 4px 4px 4px !important;
-  -moz-border-radius: 4px 4px 4px 4px !important;
-  border-radius: 4px 4px 4px 4px !important;
-  background: rgba(98, 174, 178, .2) !important;  /* Arduino Light Teal */
-  -webkit-box-shadow: 0 2px 5px 0 rgba(0, 0, 0, 0.16), 0 2px 10px 0 rgba(0, 0, 0, 0.12);
-  -moz-box-shadow: 0 2px 5px 0 rgba(0, 0, 0, 0.16), 0 2px 10px 0 rgba(0, 0, 0, 0.12);
-  box-shadow: 0 2px 5px 0 rgba(0, 0, 0, 0.16), 0 2px 10px 0 rgba(0, 0, 0, 0.12); 
-  transition: background 0.3s linear, box-shadow 0.3s linear, border-width 0.3s linear;
-  -ms-transition: background 0.3s linear, box-shadow 0.3s linear, border-width 0.3s linear;
-  -moz-transition: background 0.3s linear, -moz-box-shadow 0.3s linear, border-width 0.3s linear;
-  -webkit-transition: background 0.3s linear, -webkit-box-shadow 0.3s linear, border-width 0.3s linear;
-}
-.button_toggle_toolbox_off {
-  position: absolute;
-  margin: 0 !important;
-  padding: 0px !important;
-  left: 12px;
-  top: 8px;
-  text-align: center;
-  font-size: 1.5rem !important;
-  z-index: 5;
-}
-
-
-/*****************************/
-/*  Spinner and new colours  */
-/*****************************/
-.ide_loader {
-  position: absolute !important;
-  right: 0px !important;
-  top: 0px !important;
-  width: 55px !important;
-  height: 55px !important; 
-  z-index: 5;
-}
-.spinner-orange {
-  border-color: #E47128;
-}
-.active .spinner-layer.spinner-orange {
-  /* durations: 4 * ARCTIME */
-  -webkit-animation: fill-unfill-rotate 5332ms cubic-bezier(0.4, 0, 0.2, 1) infinite both, blue-fade-in-out 5332ms cubic-bezier(0.4, 0, 0.2, 1) infinite both;
-  animation: fill-unfill-rotate 5332ms cubic-bezier(0.4, 0, 0.2, 1) infinite both, blue-fade-in-out 5332ms cubic-bezier(0.4, 0, 0.2, 1) infinite both;
-}
-.spinner-dark-teal {
-  border-color: #00878F;
-}
-.active .spinner-layer.spinner-dark-teal {
-  /* durations: 4 * ARCTIME */
-  -webkit-animation: fill-unfill-rotate 5332ms cubic-bezier(0.4, 0, 0.2, 1) infinite both, red-fade-in-out 5332ms cubic-bezier(0.4, 0, 0.2, 1) infinite both;
-  animation: fill-unfill-rotate 5332ms cubic-bezier(0.4, 0, 0.2, 1) infinite both, red-fade-in-out 5332ms cubic-bezier(0.4, 0, 0.2, 1) infinite both;
-}
-.spinner-yellow {
-  border-color: rgba(255, 204, 51, 1);
-}
-.active .spinner-layer.spinner-yellow {
-  /* durations: 4 * ARCTIME */
-  -webkit-animation: fill-unfill-rotate 5332ms cubic-bezier(0.4, 0, 0.2, 1) infinite both, yellow-fade-in-out 5332ms cubic-bezier(0.4, 0, 0.2, 1) infinite both;
-  animation: fill-unfill-rotate 5332ms cubic-bezier(0.4, 0, 0.2, 1) infinite both, yellow-fade-in-out 5332ms cubic-bezier(0.4, 0, 0.2, 1) infinite both;
-}
-.spinner-light-teal {
-  border-color: #62AEB2;
-}
-.active .spinner-layer.spinner-light-teal {
-  /* durations: 4 * ARCTIME */
-  -webkit-animation: fill-unfill-rotate 5332ms cubic-bezier(0.4, 0, 0.2, 1) infinite both, green-fade-in-out 5332ms cubic-bezier(0.4, 0, 0.2, 1) infinite both;
-  animation: fill-unfill-rotate 5332ms cubic-bezier(0.4, 0, 0.2, 1) infinite both, green-fade-in-out 5332ms cubic-bezier(0.4, 0, 0.2, 1) infinite both;
-}
-.spinner-purple {
-  border-color: #8e24aa;
-}
-.active .spinner-layer.spinner-purple {
-  /* durations: 4 * ARCTIME */
-  -webkit-animation: fill-unfill-rotate 5332ms cubic-bezier(0.4, 0, 0.2, 1) infinite both, red-fade-in-out 5332ms cubic-bezier(0.4, 0, 0.2, 1) infinite both;
-  animation: fill-unfill-rotate 5332ms cubic-bezier(0.4, 0, 0.2, 1) infinite both, red-fade-in-out 5332ms cubic-bezier(0.4, 0, 0.2, 1) infinite both;
-}
-
-
-/************************/
-/*  Modals and content  */
-/************************/
-/* Large modal section blocks */
-.modal_section {
-  margin: 24px 0px;
-  width: 100%;
-}
-
-/* Blocks tick label as a title */
-.modal_label_title {
-  font-size: 1.6rem !important;
-  color: black;
-}
-
-/* Blocks modal divider */
-#blocks_menu_body .divider {
-  margin-top: 4px;
-  margin-bottom: 8px;
-}
-
-/* Arduino output modal dialog */
-#arduino_dialog_body {
-  padding-top: 25px;
-}
-.arduino_dialog_out {}
-.arduino_dialog_out_error {
-  color: #E47128;   /* arduino orange */
-  padding-top: 25px;
-  display: block;
-}
-.arduino_dialog_success {
-  color: #00979C;   /* arduino light teal */
-}
-.arduino_dialog_failure {
-  color: #E47128;   /* arduino orange */
-}
-
-/* Footer buttons padding */
-.modal_right_button {
-  margin: 0px 0px 0px 48px !important;
-}
-
-/* Small modal responsive design */
-.modal_small {
-  height: auto !important;
-  min-height: 200px;
-}
-.modal_small .modal-content {
-  margin-top: 0;
-  padding-top: 12px;
-  margin-bottom: 0;
-  padding-bottom: 0;
-}
-.modal_small input {
-  width: 100%;
-}
-@media only screen and (min-width: 0) {
-  .modal_small {
-    max-width: 75% !important;
-    width: 75% !important;
+Blockly.Blocks['lists_length'] = {
+  /**
+   * Block for list length.
+   * @this Blockly.Block
+   */
+  init: function() {
+    this.jsonInit({
+      "message0": Blockly.Msg.LISTS_LENGTH_TITLE,
+      "args0": [
+        {
+          "type": "input_value",
+          "name": "VALUE",
+          "check": Blockly.Types.TEXT.checkList.concat('Array')
+        }
+      ],
+      "output": Blockly.Types.NUMBER.output,
+      "colour": Blockly.Blocks.lists.HUE,
+      "tooltip": Blockly.Msg.LISTS_LENGTH_TOOLTIP,
+      "helpUrl": Blockly.Msg.LISTS_LENGTH_HELPURL
+    });
   }
-}
-@media only screen and (min-width: 601px) {
-  .modal_small {
-    max-width: 55% !important;
-    width: 55% !important;
+};
+
+Blockly.Blocks['lists_isEmpty'] = {
+  /**
+   * Block for is the list empty?
+   * @this Blockly.Block
+   */
+  init: function() {
+    this.jsonInit({
+      "message0": Blockly.Msg.LISTS_ISEMPTY_TITLE,
+      "args0": [
+        {
+          "type": "input_value",
+          "name": "VALUE",
+          "check": Blockly.Types.TEXT.checkList.concat('Array')
+        }
+      ],
+      "output": Blockly.Types.BOOLEAN.output,
+      "colour": Blockly.Blocks.lists.HUE,
+      "tooltip": Blockly.Msg.LISTS_ISEMPTY_TOOLTIP,
+      "helpUrl": Blockly.Msg.LISTS_ISEMPTY_HELPURL
+    });
   }
-}
-@media only screen and (min-width: 993px) {
-  .modal_small {
-    max-width: 35% !important;
-    width: 35% !important;
+};
+
+Blockly.Blocks['lists_indexOf'] = {
+  /**
+   * Block for finding an item in the list.
+   * @this Blockly.Block
+   */
+  init: function() {
+    var OPERATORS =
+        [[Blockly.Msg.LISTS_INDEX_OF_FIRST, 'FIRST'],
+         [Blockly.Msg.LISTS_INDEX_OF_LAST, 'LAST']];
+    this.setHelpUrl(Blockly.Msg.LISTS_INDEX_OF_HELPURL);
+    this.setColour(Blockly.Blocks.lists.HUE);
+    this.setOutput(true, Blockly.Types.NUMBER.output);
+    this.appendValueInput('VALUE')
+        .setCheck('Array')
+        .appendField(Blockly.Msg.LISTS_INDEX_OF_INPUT_IN_LIST);
+    this.appendValueInput('FIND')
+        .appendField(new Blockly.FieldDropdown(OPERATORS), 'END');
+    this.setInputsInline(true);
+    this.setTooltip(Blockly.Msg.LISTS_INDEX_OF_TOOLTIP);
   }
-}
+};
 
-
-/*****************/
-/*  Sketch name  */
-/*****************/
-.sketch_name_wrapper {
-  display: inline-block;
-  padding-left: 5px;
-}
-.sketch_name_icon {
-  display: inline !important;
-  font-size: 1.2rem !important;
-  float: right;
-  padding-top: 3px;
-}
-.sketch_name {
-  width: auto !important;
-  max-width: 400px;
-  line-height: 64px;
-  height: 3rem !important;
-  font-size: 1.5rem !important;
-  border-bottom: 0px solid #EEE !important;
-  font-style: italic;
-}
-.sketch_name:focus {
-    border-bottom: 1px solid #EEE !important;
-}
-
-@media only screen and (min-width: 0px) and (max-width: 600px) {
-  .sketch_name {
-    max-width: 200px;
+Blockly.Blocks['lists_getIndex'] = {
+  /**
+   * Block for getting element at index.
+   * @this Blockly.Block
+   */
+  init: function() {
+    var MODE =
+        [[Blockly.Msg.LISTS_GET_INDEX_GET, 'GET'],
+         [Blockly.Msg.LISTS_GET_INDEX_GET_REMOVE, 'GET_REMOVE'],
+         [Blockly.Msg.LISTS_GET_INDEX_REMOVE, 'REMOVE']];
+    this.WHERE_OPTIONS =
+        [[Blockly.Msg.LISTS_GET_INDEX_FROM_START, 'FROM_START'],
+         [Blockly.Msg.LISTS_GET_INDEX_FROM_END, 'FROM_END'],
+         [Blockly.Msg.LISTS_GET_INDEX_FIRST, 'FIRST'],
+         [Blockly.Msg.LISTS_GET_INDEX_LAST, 'LAST'],
+         [Blockly.Msg.LISTS_GET_INDEX_RANDOM, 'RANDOM']];
+    this.setHelpUrl(Blockly.Msg.LISTS_GET_INDEX_HELPURL);
+    this.setColour(Blockly.Blocks.lists.HUE);
+    var modeMenu = new Blockly.FieldDropdown(MODE, function(value) {
+      var isStatement = (value == 'REMOVE');
+      this.sourceBlock_.updateStatement_(isStatement);
+    });
+    this.appendValueInput('VALUE')
+        .setCheck('Array')
+        .appendField(Blockly.Msg.LISTS_GET_INDEX_INPUT_IN_LIST);
+    this.appendDummyInput()
+        .appendField(modeMenu, 'MODE')
+        .appendField('', 'SPACE');
+    this.appendDummyInput('AT');
+    if (Blockly.Msg.LISTS_GET_INDEX_TAIL) {
+      this.appendDummyInput('TAIL')
+          .appendField(Blockly.Msg.LISTS_GET_INDEX_TAIL);
+    }
+    this.setInputsInline(true);
+    this.setOutput(true);
+    this.updateAt_(true);
+    // Assign 'this' to a variable for use in the tooltip closure below.
+    var thisBlock = this;
+    this.setTooltip(function() {
+      var combo = thisBlock.getFieldValue('MODE') + '_' +
+          thisBlock.getFieldValue('WHERE');
+      return Blockly.Msg['LISTS_GET_INDEX_TOOLTIP_' + combo];
+    });
+  },
+  /**
+   * Create XML to represent whether the block is a statement or a value.
+   * Also represent whether there is an 'AT' input.
+   * @return {Element} XML storage element.
+   * @this Blockly.Block
+   */
+  mutationToDom: function() {
+    var container = document.createElement('mutation');
+    var isStatement = !this.outputConnection;
+    container.setAttribute('statement', isStatement);
+    var isAt = this.getInput('AT').type == Blockly.INPUT_VALUE;
+    container.setAttribute('at', isAt);
+    return container;
+  },
+  /**
+   * Parse XML to restore the 'AT' input.
+   * @param {!Element} xmlElement XML storage element.
+   * @this Blockly.Block
+   */
+  domToMutation: function(xmlElement) {
+    // Note: Until January 2013 this block did not have mutations,
+    // so 'statement' defaults to false and 'at' defaults to true.
+    var isStatement = (xmlElement.getAttribute('statement') == 'true');
+    this.updateStatement_(isStatement);
+    var isAt = (xmlElement.getAttribute('at') != 'false');
+    this.updateAt_(isAt);
+  },
+  /**
+   * Switch between a value block and a statement block.
+   * @param {boolean} newStatement True if the block should be a statement.
+   *     False if the block should be a value.
+   * @private
+   * @this Blockly.Block
+   */
+  updateStatement_: function(newStatement) {
+    var oldStatement = !this.outputConnection;
+    if (newStatement != oldStatement) {
+      this.unplug(true, true);
+      if (newStatement) {
+        this.setOutput(false);
+        this.setPreviousStatement(true);
+        this.setNextStatement(true);
+      } else {
+        this.setPreviousStatement(false);
+        this.setNextStatement(false);
+        this.setOutput(true);
+      }
+    }
+  },
+  /**
+   * Create or delete an input for the numeric index.
+   * @param {boolean} isAt True if the input should exist.
+   * @private
+   * @this Blockly.Block
+   */
+  updateAt_: function(isAt) {
+    // Destroy old 'AT' and 'ORDINAL' inputs.
+    this.removeInput('AT');
+    this.removeInput('ORDINAL', true);
+    // Create either a value 'AT' input or a dummy input.
+    if (isAt) {
+      this.appendValueInput('AT').setCheck(Blockly.Types.NUMBER.checkList);
+      if (Blockly.Msg.ORDINAL_NUMBER_SUFFIX) {
+        this.appendDummyInput('ORDINAL')
+            .appendField(Blockly.Msg.ORDINAL_NUMBER_SUFFIX);
+      }
+    } else {
+      this.appendDummyInput('AT');
+    }
+    var menu = new Blockly.FieldDropdown(this.WHERE_OPTIONS, function(value) {
+      var newAt = (value == 'FROM_START') || (value == 'FROM_END');
+      // The 'isAt' variable is available due to this function being a closure.
+      if (newAt != isAt) {
+        var block = this.sourceBlock_;
+        block.updateAt_(newAt);
+        // This menu has been destroyed and replaced.  Update the replacement.
+        block.setFieldValue(value, 'WHERE');
+        return null;
+      }
+      return undefined;
+    });
+    this.getInput('AT').appendField(menu, 'WHERE');
+    if (Blockly.Msg.LISTS_GET_INDEX_TAIL) {
+      this.moveInputBefore('TAIL', null);
+    }
   }
-  /* Remove the "Ardublockly title only leaving the sketch name */
-  .app_title {
-    display: none;
+};
+
+Blockly.Blocks['lists_setIndex'] = {
+  /**
+   * Block for setting the element at index.
+   * @this Blockly.Block
+   */
+  init: function() {
+    var MODE =
+        [[Blockly.Msg.LISTS_SET_INDEX_SET, 'SET'],
+         [Blockly.Msg.LISTS_SET_INDEX_INSERT, 'INSERT']];
+    this.WHERE_OPTIONS =
+        [[Blockly.Msg.LISTS_GET_INDEX_FROM_START, 'FROM_START'],
+         [Blockly.Msg.LISTS_GET_INDEX_FROM_END, 'FROM_END'],
+         [Blockly.Msg.LISTS_GET_INDEX_FIRST, 'FIRST'],
+         [Blockly.Msg.LISTS_GET_INDEX_LAST, 'LAST'],
+         [Blockly.Msg.LISTS_GET_INDEX_RANDOM, 'RANDOM']];
+    this.setHelpUrl(Blockly.Msg.LISTS_SET_INDEX_HELPURL);
+    this.setColour(Blockly.Blocks.lists.HUE);
+    this.appendValueInput('LIST')
+        .setCheck('Array')
+        .appendField(Blockly.Msg.LISTS_SET_INDEX_INPUT_IN_LIST);
+    this.appendDummyInput()
+        .appendField(new Blockly.FieldDropdown(MODE), 'MODE')
+        .appendField('', 'SPACE');
+    this.appendDummyInput('AT');
+    this.appendValueInput('TO')
+        .appendField(Blockly.Msg.LISTS_SET_INDEX_INPUT_TO);
+    this.setInputsInline(true);
+    this.setPreviousStatement(true);
+    this.setNextStatement(true);
+    this.setTooltip(Blockly.Msg.LISTS_SET_INDEX_TOOLTIP);
+    this.updateAt_(true);
+    // Assign 'this' to a variable for use in the tooltip closure below.
+    var thisBlock = this;
+    this.setTooltip(function() {
+      var combo = thisBlock.getFieldValue('MODE') + '_' +
+          thisBlock.getFieldValue('WHERE');
+      return Blockly.Msg['LISTS_SET_INDEX_TOOLTIP_' + combo];
+    });
+  },
+  /**
+   * Create XML to represent whether there is an 'AT' input.
+   * @return {Element} XML storage element.
+   * @this Blockly.Block
+   */
+  mutationToDom: function() {
+    var container = document.createElement('mutation');
+    var isAt = this.getInput('AT').type == Blockly.INPUT_VALUE;
+    container.setAttribute('at', isAt);
+    return container;
+  },
+  /**
+   * Parse XML to restore the 'AT' input.
+   * @param {!Element} xmlElement XML storage element.
+   * @this Blockly.Block
+   */
+  domToMutation: function(xmlElement) {
+    // Note: Until January 2013 this block did not have mutations,
+    // so 'at' defaults to true.
+    var isAt = (xmlElement.getAttribute('at') != 'false');
+    this.updateAt_(isAt);
+  },
+  /**
+   * Create or delete an input for the numeric index.
+   * @param {boolean} isAt True if the input should exist.
+   * @private
+   * @this Blockly.Block
+   */
+  updateAt_: function(isAt) {
+    // Destroy old 'AT' and 'ORDINAL' input.
+    this.removeInput('AT');
+    this.removeInput('ORDINAL', true);
+    // Create either a value 'AT' input or a dummy input.
+    if (isAt) {
+      this.appendValueInput('AT').setCheck(Blockly.Types.NUMBER.checkList);
+      if (Blockly.Msg.ORDINAL_NUMBER_SUFFIX) {
+        this.appendDummyInput('ORDINAL')
+            .appendField(Blockly.Msg.ORDINAL_NUMBER_SUFFIX);
+      }
+    } else {
+      this.appendDummyInput('AT');
+    }
+    var menu = new Blockly.FieldDropdown(this.WHERE_OPTIONS, function(value) {
+      var newAt = (value == 'FROM_START') || (value == 'FROM_END');
+      // The 'isAt' variable is available due to this function being a closure.
+      if (newAt != isAt) {
+        var block = this.sourceBlock_;
+        block.updateAt_(newAt);
+        // This menu has been destroyed and replaced.  Update the replacement.
+        block.setFieldValue(value, 'WHERE');
+        return null;
+      }
+      return undefined;
+    });
+    this.moveInputBefore('AT', 'TO');
+    if (this.getInput('ORDINAL')) {
+      this.moveInputBefore('ORDINAL', 'TO');
+    }
+
+    this.getInput('AT').appendField(menu, 'WHERE');
   }
-}
-@media only screen and (min-width : 600px) {
-  .sketch_name {
-    max-width: 275px;
+};
+
+Blockly.Blocks['lists_getSublist'] = {
+  /**
+   * Block for getting sublist.
+   * @this Blockly.Block
+   */
+  init: function() {
+    this['WHERE_OPTIONS_1'] =
+        [[Blockly.Msg.LISTS_GET_SUBLIST_START_FROM_START, 'FROM_START'],
+         [Blockly.Msg.LISTS_GET_SUBLIST_START_FROM_END, 'FROM_END'],
+         [Blockly.Msg.LISTS_GET_SUBLIST_START_FIRST, 'FIRST']];
+    this['WHERE_OPTIONS_2'] =
+        [[Blockly.Msg.LISTS_GET_SUBLIST_END_FROM_START, 'FROM_START'],
+         [Blockly.Msg.LISTS_GET_SUBLIST_END_FROM_END, 'FROM_END'],
+         [Blockly.Msg.LISTS_GET_SUBLIST_END_LAST, 'LAST']];
+    this.setHelpUrl(Blockly.Msg.LISTS_GET_SUBLIST_HELPURL);
+    this.setColour(Blockly.Blocks.lists.HUE);
+    this.appendValueInput('LIST')
+        .setCheck('Array')
+        .appendField(Blockly.Msg.LISTS_GET_SUBLIST_INPUT_IN_LIST);
+    this.appendDummyInput('AT1');
+    this.appendDummyInput('AT2');
+    if (Blockly.Msg.LISTS_GET_SUBLIST_TAIL) {
+      this.appendDummyInput('TAIL')
+          .appendField(Blockly.Msg.LISTS_GET_SUBLIST_TAIL);
+    }
+    this.setInputsInline(true);
+    this.setOutput(true, 'Array');
+    this.updateAt_(1, true);
+    this.updateAt_(2, true);
+    this.setTooltip(Blockly.Msg.LISTS_GET_SUBLIST_TOOLTIP);
+  },
+  /**
+   * Create XML to represent whether there are 'AT' inputs.
+   * @return {Element} XML storage element.
+   * @this Blockly.Block
+   */
+  mutationToDom: function() {
+    var container = document.createElement('mutation');
+    var isAt1 = this.getInput('AT1').type == Blockly.INPUT_VALUE;
+    container.setAttribute('at1', isAt1);
+    var isAt2 = this.getInput('AT2').type == Blockly.INPUT_VALUE;
+    container.setAttribute('at2', isAt2);
+    return container;
+  },
+  /**
+   * Parse XML to restore the 'AT' inputs.
+   * @param {!Element} xmlElement XML storage element.
+   * @this Blockly.Block
+   */
+  domToMutation: function(xmlElement) {
+    var isAt1 = (xmlElement.getAttribute('at1') == 'true');
+    var isAt2 = (xmlElement.getAttribute('at2') == 'true');
+    this.updateAt_(1, isAt1);
+    this.updateAt_(2, isAt2);
+  },
+  /**
+   * Create or delete an input for a numeric index.
+   * This block has two such inputs, independant of each other.
+   * @param {number} n Specify first or second input (1 or 2).
+   * @param {boolean} isAt True if the input should exist.
+   * @private
+   * @this Blockly.Block
+   */
+  updateAt_: function(n, isAt) {
+    // Create or delete an input for the numeric index.
+    // Destroy old 'AT' and 'ORDINAL' inputs.
+    this.removeInput('AT' + n);
+    this.removeInput('ORDINAL' + n, true);
+    // Create either a value 'AT' input or a dummy input.
+    if (isAt) {
+      this.appendValueInput('AT' + n).setCheck(Blockly.Types.NUMBER.checkList);
+      if (Blockly.Msg.ORDINAL_NUMBER_SUFFIX) {
+        this.appendDummyInput('ORDINAL' + n)
+            .appendField(Blockly.Msg.ORDINAL_NUMBER_SUFFIX);
+      }
+    } else {
+      this.appendDummyInput('AT' + n);
+    }
+    var menu = new Blockly.FieldDropdown(this['WHERE_OPTIONS_' + n],
+        function(value) {
+      var newAt = (value == 'FROM_START') || (value == 'FROM_END');
+      // The 'isAt' variable is available due to this function being a closure.
+      if (newAt != isAt) {
+        var block = this.sourceBlock_;
+        block.updateAt_(n, newAt);
+        // This menu has been destroyed and replaced.  Update the replacement.
+        block.setFieldValue(value, 'WHERE' + n);
+        return null;
+      }
+      return undefined;
+    });
+    this.getInput('AT' + n)
+        .appendField(menu, 'WHERE' + n);
+    if (n == 1) {
+      this.moveInputBefore('AT1', 'AT2');
+      if (this.getInput('ORDINAL1')) {
+        this.moveInputBefore('ORDINAL1', 'AT2');
+      }
+    }
+    if (Blockly.Msg.LISTS_GET_SUBLIST_TAIL) {
+      this.moveInputBefore('TAIL', null);
+    }
   }
-}
-@media only screen and (min-width : 993px) {
-  .sketch_name {
-    max-width: 350px;
+};
+
+Blockly.Blocks['lists_sort'] = {
+  /**
+   * Block for sorting a list.
+   * @this Blockly.Block
+   */
+  init: function() {
+    this.jsonInit({
+      "message0": Blockly.Msg.LISTS_SORT_TITLE,
+      "args0": [
+        {
+          "type": "field_dropdown",
+          "name": "TYPE",
+          "options": [
+            [Blockly.Msg.LISTS_SORT_TYPE_NUMERIC, "NUMERIC"],
+            [Blockly.Msg.LISTS_SORT_TYPE_TEXT, "TEXT"],
+            [Blockly.Msg.LISTS_SORT_TYPE_IGNORECASE, "IGNORE_CASE"]
+          ]
+        },
+        {
+          "type": "field_dropdown",
+          "name": "DIRECTION",
+          "options": [
+            [Blockly.Msg.LISTS_SORT_ORDER_ASCENDING, "1"],
+            [Blockly.Msg.LISTS_SORT_ORDER_DESCENDING, "-1"]
+          ]
+        },
+        {
+          "type": "input_value",
+          "name": "LIST",
+          "check": "Array"
+        }
+      ],
+      "output": "Array",
+      "colour": Blockly.Blocks.lists.HUE,
+      "tooltip": Blockly.Msg.LISTS_SORT_TOOLTIP,
+      "helpUrl": Blockly.Msg.LISTS_SORT_HELPURL
+    });
   }
-}
+};
 
-
-/************/
-/*  Others  */
-/************/
-/* Edit logo for code and xml collapsibles */
-.collapsible_logo {
-  width: 3rem;
-  font-size: 1.6rem;
-  line-height: 3rem;
-  font-weight: bold;
-  display: block;
-  float: left;
-  text-align: center;
-  margin-right: 1rem;
-}
-
-/* Colours for the new and deleted code highlighting */
-.code_highlight_new {
-  background-color: rgba(255, 204, 51, 0.5); /* Arduino yellow 50% */
-}
-.code_highlight_deleted {
-  background-color: #FDBEBE;
-}
-
-
-/*****************************/
-/*  Overwriting Blockly CSS  */
-/*****************************/
-/* Blockly text for the following components:  */
-.blocklyTreeLabel,           /* Toolbox        */
-.blocklyText,                /* Block          */
-.goog-menuitem-content {     /* Drop down menu */
-  font-family: "Roboto", sans-serif!important;
-}
-
-/* Entire Blockly area, Toolbox dranw on top */
-.blocklySvg {
-  border-width: 0 !important;
-}
-
-/* Toolbox */
-.blocklyToolboxDiv {
-  border-color: #e0e0e0 !important;
-  border-width: 0px 1px 0px 0px !important;
-  -webkit-border-radius: 0px 4px 4px 0px !important;
-  -moz-border-radius: 4px 4px 0px 0px !important;
-  border-radius: 0px 4px 4px 0px !important;
-  border: none !important;
-  margin: 0px !important;
-  padding: 0px 0px 0px 0px !important;
-  /*background: #00ABD6!important;  /* Arduino Light Teal */
-  -webkit-box-shadow: 0 2px 5px 0 rgba(0, 0, 0, 0.16), 0 2px 10px 0 rgba(0, 0, 0, 0.12);
-  -moz-box-shadow: 0 2px 5px 0 rgba(0, 0, 0, 0.16), 0 2px 10px 0 rgba(0, 0, 0, 0.12);
-  box-shadow: 0 2px 5px 0 rgba(0, 0, 0, 0.16), 0 2px 10px 0 rgba(0, 0, 0, 0.12);
-  overflow: hidden !important;
-}
-.blocklyTreeRoot {
-  background: none !important;
-  border: none !important;
-  margin: 36px 0px 0px 0px !important;
-  padding: 0px 1px !important;
-  height: -moz-calc(100% - 37px);     /* Firefox  */
-  height: -webkit-calc(100% - 37px);  /* WebKit   */
-  height: -o-calc(100% - 37px);       /* Opera    */
-  height: calc(100% - 37px);          /* Standard */
-  overflow-x: hidden;
-  overflow-y: auto;
-}
-.blocklyTreeLabel{
-  margin-left: 25px;
-  font-size: 18px;
-}
-.blocklyTreeRow {
-  /* background: none !important;
-  /* border: none !important; */
-  margin: 0px 0px !important;
-  padding: 7px 16px 7px 0px !important;
-  box-sizing: content-box !important; 
-}
- .blocklyTreeSelected {
-  /*background-color: #E47128 !important;  /* arduino orange */
-  color: white;
-} 
-.blocklyTreeRow:not(.blocklyTreeSelected):hover {
- background-color: rgb(174, 228, 253) !important;  /* arduino yellow */
-}
-.blocklyTreeLabel {
-}
-.blocklyTreeSeparator{
-  padding: 0px !important;
-  margin: 0px !important;
-}
-
-/* Toolbox second column with blocks*/
-.blocklyFlyoutBackground {
-  fill: #DEEEEF !important;
-  fill-opacity: 0.7 !important;
-  -webkit-border-radius: 0px 4px 4px 0px !important;
-  -moz-border-radius: 0px 4px 4px 0px !important;
-  border-radius: 0px 4px 4px 0px !important;
-}
-
-/* Blockly scrollbars */
-.blocklyScrollbarKnob {
-  fill: #00878F !important;
-  fill-opacity: 0.7 !important;
-}
-.blocklyScrollbarBackground {
-  stroke-width: 0px !important;
-  fill: none !important;
-}
-
-/* Edit select colour to Arduino yellow. (Edited out as already this colour)
-.blocklyHighlightedConnectionPath,
-.blocklySelected>.blocklyPath {
-  stroke: rgba(255, 204, 51, 1) !important;
-} */
-
-/*********************************/
-/*  Overwriting Materialize CSS  */
-/*********************************/
-/* Modify container to have a larger width in all resolutions */
-.container {
-  width: 90%;
-  max-width: initial !important;
-  padding-left: 1.5rem;
-  padding-right: 1.5rem;
-}
-@media only screen and (min-width : 601px) {
-  .container {
-    width: 95%;
+Blockly.Blocks['lists_split'] = {
+  /**
+   * Block for splitting text into a list, or joining a list into text.
+   * @this Blockly.Block
+   */
+  init: function() {
+    // Assign 'this' to a variable for use in the closures below.
+    var thisBlock = this;
+    var dropdown = new Blockly.FieldDropdown(
+        [[Blockly.Msg.LISTS_SPLIT_LIST_FROM_TEXT, 'SPLIT'],
+         [Blockly.Msg.LISTS_SPLIT_TEXT_FROM_LIST, 'JOIN']],
+        function(newMode) {
+          thisBlock.updateType_(newMode);
+        });
+    this.setHelpUrl(Blockly.Msg.LISTS_SPLIT_HELPURL);
+    this.setColour(Blockly.Blocks.lists.HUE);
+    this.appendValueInput('INPUT')
+        .setCheck(Blockly.Types.TEXT.checkList)
+        .appendField(dropdown, 'MODE');
+    this.appendValueInput('DELIM')
+        .setCheck(Blockly.Types.TEXT.checkList)
+        .appendField(Blockly.Msg.LISTS_SPLIT_WITH_DELIMITER);
+    this.setInputsInline(true);
+    this.setOutput(true, 'Array');
+    this.setTooltip(function() {
+      var mode = thisBlock.getFieldValue('MODE');
+      if (mode == 'SPLIT') {
+        return Blockly.Msg.LISTS_SPLIT_TOOLTIP_SPLIT;
+      } else if (mode == 'JOIN') {
+        return Blockly.Msg.LISTS_SPLIT_TOOLTIP_JOIN;
+      }
+      throw 'Unknown mode: ' + mode;
+    });
+  },
+  /**
+   * Modify this block to have the correct input and output types.
+   * @param {string} newMode Either 'SPLIT' or 'JOIN'.
+   * @private
+   * @this Blockly.Block
+   */
+  updateType_: function(newMode) {
+    if (newMode == 'SPLIT') {
+      this.outputConnection.setCheck('Array');
+      this.getInput('INPUT').setCheck(Blockly.Types.TEXT.checkList);
+    } else {
+      this.outputConnection.setCheck(Blockly.Types.TEXT.checkList);
+      this.getInput('INPUT').setCheck('Array');
+    }
+  },
+  /**
+   * Create XML to represent the input and output types.
+   * @return {!Element} XML storage element.
+   * @this Blockly.Block
+   */
+  mutationToDom: function() {
+    var container = document.createElement('mutation');
+    container.setAttribute('mode', this.getFieldValue('MODE'));
+    return container;
+  },
+  /**
+   * Parse XML to restore the input and output types.
+   * @param {!Element} xmlElement XML storage element.
+   * @this Blockly.Block
+   */
+  domToMutation: function(xmlElement) {
+    this.updateType_(xmlElement.getAttribute('mode'));
   }
-}
-@media only screen and (min-width : 993px) {
-  .container {
-    width: 100%;
-  }
-}
-@media only screen and (min-width : 1380px) {
-  .container {
-    width: 90%;
-  }
-}
-
-/* Maximize horizontal space for mobile */
-@media only screen and (min-width: 0px) and (max-width: 600px) {
-  body {
-    padding-top: 0px;
-  }
-  /* Expand to all visible horizontal space */
-  .container {
-    width: 100% !important;
-    padding: 0 !important;
-    margin: 0 !important;
-  }
-  nav {
-    margin: 0 !important;
-    padding: 0px 12px !important;
-  }
-  /* remove space between cards and navigation bar */
-  .col {
-    margin-top: -8px;
-  }
-}
-
-/* Increase the text size of the side menu */
-ul.side-nav {
-  padding: 0px !important;
-  line-height: 64px !important;
-}
-ul.side-nav i {
-  font-size: 1.8rem !important;
-}
-ul.side-nav .collapsible {
-  margin: 0 !important;
-}
-/* Set the background effect in the side menu */
-ul.side-nav {
-  background-color: transparent;
-  box-shadow: none !important;
-}
-ul.side-nav li {
-  background-color: #eeeeee;
-}
-ul.side-nav li {
-  background-color: #eeeeee;
-  box-sizing: border-box;
-  -moz-box-sizing: border-box;
-  -webkit-box-sizing: border-box;
-  border-right: 2px solid #dddddd;
-  border-left: 2px solid #ffffff;
-}
-ul.side-nav li ul li ul {
-  cursor: pointer;
-  border: none !important;
-}
-ul.side-nav li ul li ul li {
-  border: none !important;
-}
-
-/* Add extra margin to the side menu button*/
-.button-collapse {
-  margin-right: 16px;
-}
-
-/* Increase the size of Materialize Modal in small resolutions */
-@media only screen and (max-width : 600px) {
-  .modal {
-    width: 80% !important;
-    max-width: 80% !important;
-  }
-}
-
-/* Why the hell does button large has a predefined background colour !! */
-.btn-large:hover {
-  background-color: inherit;
-}
-
-/* Circle clipper (loading animation) thickness */
-.circle-clipper .circle {
-  border-width: 4px !important;
-}
-
-/* Materialize messes with these, so reset them here */
-.blocklyHtmlInput {
-  border: none !important;
-  border-radius: 4px !important;
-  font-family: sans-serif !important;
-  height: 100% !important;
-  margin: 0 !important;
-  outline: none !important;
-  padding: 0 1px !important;
-  width: 100% !important;
-  background-color: white !important;
-}
+};

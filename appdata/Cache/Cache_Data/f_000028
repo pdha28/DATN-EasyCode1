@@ -13,1360 +13,1272 @@
 // limitations under the License.
 
 /**
- * @fileoverview Base class for containers that host {@link goog.ui.Control}s,
- * such as menus and toolbars.  Provides default keyboard and mouse event
- * handling and child management, based on a generalized version of
- * {@link goog.ui.Menu}.
- *
- * @author attila@google.com (Attila Bodis)
- * @see ../demos/container.html
+ * @fileoverview Python style iteration utilities.
+ * @author arv@google.com (Erik Arvidsson)
  */
-// TODO(attila):  Fix code/logic duplication between this and goog.ui.Control.
-// TODO(attila):  Maybe pull common stuff all the way up into Component...?
 
-goog.provide('goog.ui.Container');
-goog.provide('goog.ui.Container.EventType');
-goog.provide('goog.ui.Container.Orientation');
 
-goog.require('goog.a11y.aria');
-goog.require('goog.a11y.aria.State');
+goog.provide('goog.iter');
+goog.provide('goog.iter.Iterable');
+goog.provide('goog.iter.Iterator');
+goog.provide('goog.iter.StopIteration');
+
+goog.require('goog.array');
 goog.require('goog.asserts');
-goog.require('goog.dom');
-goog.require('goog.events.EventType');
-goog.require('goog.events.KeyCodes');
-goog.require('goog.events.KeyHandler');
-goog.require('goog.object');
-goog.require('goog.style');
-goog.require('goog.ui.Component');
-goog.require('goog.ui.ContainerRenderer');
-goog.require('goog.ui.Control');
+goog.require('goog.functions');
+goog.require('goog.math');
+
+
+/**
+ * @typedef {goog.iter.Iterator|{length:number}|{__iterator__}}
+ */
+goog.iter.Iterable;
+
+
+/**
+ * Singleton Error object that is used to terminate iterations.
+ * @const {!Error}
+ */
+goog.iter.StopIteration = ('StopIteration' in goog.global) ?
+    // For script engines that support legacy iterators.
+    goog.global['StopIteration'] :
+    {message: 'StopIteration', stack: ''};
 
 
 
 /**
- * Base class for containers.  Extends {@link goog.ui.Component} by adding
- * the following:
- *  <ul>
- *    <li>a {@link goog.events.KeyHandler}, to simplify keyboard handling,
- *    <li>a pluggable <em>renderer</em> framework, to simplify the creation of
- *        containers without the need to subclass this class,
- *    <li>methods to manage child controls hosted in the container,
- *    <li>default mouse and keyboard event handling methods.
- *  </ul>
- * @param {?goog.ui.Container.Orientation=} opt_orientation Container
- *     orientation; defaults to {@code VERTICAL}.
- * @param {goog.ui.ContainerRenderer=} opt_renderer Renderer used to render or
- *     decorate the container; defaults to {@link goog.ui.ContainerRenderer}.
- * @param {goog.dom.DomHelper=} opt_domHelper DOM helper, used for document
- *     interaction.
- * @extends {goog.ui.Component}
+ * Class/interface for iterators.  An iterator needs to implement a {@code next}
+ * method and it needs to throw a {@code goog.iter.StopIteration} when the
+ * iteration passes beyond the end.  Iterators have no {@code hasNext} method.
+ * It is recommended to always use the helper functions to iterate over the
+ * iterator or in case you are only targeting JavaScript 1.7 for in loops.
  * @constructor
+ * @template VALUE
  */
-goog.ui.Container = function(opt_orientation, opt_renderer, opt_domHelper) {
-  goog.ui.Component.call(this, opt_domHelper);
-  this.renderer_ = opt_renderer || goog.ui.ContainerRenderer.getInstance();
-  this.orientation_ = opt_orientation || this.renderer_.getDefaultOrientation();
-};
-goog.inherits(goog.ui.Container, goog.ui.Component);
-goog.tagUnsealableClass(goog.ui.Container);
+goog.iter.Iterator = function() {};
 
 
 /**
- * Container-specific events.
- * @enum {string}
+ * Returns the next value of the iteration.  This will throw the object
+ * {@see goog.iter#StopIteration} when the iteration passes the end.
+ * @return {VALUE} Any object or value.
  */
-goog.ui.Container.EventType = {
-  /**
-   * Dispatched after a goog.ui.Container becomes visible. Non-cancellable.
-   * NOTE(user): This event really shouldn't exist, because the
-   * goog.ui.Component.EventType.SHOW event should behave like this one. But the
-   * SHOW event for containers has been behaving as other components'
-   * BEFORE_SHOW event for a long time, and too much code relies on that old
-   * behavior to fix it now.
-   */
-  AFTER_SHOW: 'aftershow',
-
-  /**
-   * Dispatched after a goog.ui.Container becomes invisible. Non-cancellable.
-   */
-  AFTER_HIDE: 'afterhide'
+goog.iter.Iterator.prototype.next = function() {
+  throw goog.iter.StopIteration;
 };
 
 
 /**
- * Container orientation constants.
- * @enum {string}
+ * Returns the {@code Iterator} object itself.  This is used to implement
+ * the iterator protocol in JavaScript 1.7
+ * @param {boolean=} opt_keys  Whether to return the keys or values. Default is
+ *     to only return the values.  This is being used by the for-in loop (true)
+ *     and the for-each-in loop (false).  Even though the param gives a hint
+ *     about what the iterator will return there is no guarantee that it will
+ *     return the keys when true is passed.
+ * @return {!goog.iter.Iterator<VALUE>} The object itself.
  */
-goog.ui.Container.Orientation = {
-  HORIZONTAL: 'horizontal',
-  VERTICAL: 'vertical'
+goog.iter.Iterator.prototype.__iterator__ = function(opt_keys) {
+  return this;
 };
 
 
 /**
- * Allows an alternative element to be set to receive key events, otherwise
- * defers to the renderer's element choice.
- * @type {Element|undefined}
- * @private
+ * Returns an iterator that knows how to iterate over the values in the object.
+ * @param {goog.iter.Iterator<VALUE>|goog.iter.Iterable} iterable  If the
+ *     object is an iterator it will be returned as is.  If the object has an
+ *     {@code __iterator__} method that will be called to get the value
+ *     iterator.  If the object is an array-like object we create an iterator
+ *     for that.
+ * @return {!goog.iter.Iterator<VALUE>} An iterator that knows how to iterate
+ *     over the values in {@code iterable}.
+ * @template VALUE
  */
-goog.ui.Container.prototype.keyEventTarget_ = null;
+goog.iter.toIterator = function(iterable) {
+  if (iterable instanceof goog.iter.Iterator) {
+    return iterable;
+  }
+  if (typeof iterable.__iterator__ == 'function') {
+    return iterable.__iterator__(false);
+  }
+  if (goog.isArrayLike(iterable)) {
+    var i = 0;
+    var newIter = new goog.iter.Iterator;
+    newIter.next = function() {
+      while (true) {
+        if (i >= iterable.length) {
+          throw goog.iter.StopIteration;
+        }
+        // Don't include deleted elements.
+        if (!(i in iterable)) {
+          i++;
+          continue;
+        }
+        return iterable[i++];
+      }
+    };
+    return newIter;
+  }
 
 
-/**
- * Keyboard event handler.
- * @type {goog.events.KeyHandler?}
- * @private
- */
-goog.ui.Container.prototype.keyHandler_ = null;
-
-
-/**
- * Renderer for the container.  Defaults to {@link goog.ui.ContainerRenderer}.
- * @type {goog.ui.ContainerRenderer?}
- * @private
- */
-goog.ui.Container.prototype.renderer_ = null;
-
-
-/**
- * Container orientation; determines layout and default keyboard navigation.
- * @type {?goog.ui.Container.Orientation}
- * @private
- */
-goog.ui.Container.prototype.orientation_ = null;
-
-
-/**
- * Whether the container is set to be visible.  Defaults to true.
- * @type {boolean}
- * @private
- */
-goog.ui.Container.prototype.visible_ = true;
-
-
-/**
- * Whether the container is enabled and reacting to keyboard and mouse events.
- * Defaults to true.
- * @type {boolean}
- * @private
- */
-goog.ui.Container.prototype.enabled_ = true;
-
-
-/**
- * Whether the container supports keyboard focus.  Defaults to true.  Focusable
- * containers have a {@code tabIndex} and can be navigated to via the keyboard.
- * @type {boolean}
- * @private
- */
-goog.ui.Container.prototype.focusable_ = true;
-
-
-/**
- * The 0-based index of the currently highlighted control in the container
- * (-1 if none).
- * @type {number}
- * @private
- */
-goog.ui.Container.prototype.highlightedIndex_ = -1;
-
-
-/**
- * The currently open (expanded) control in the container (null if none).
- * @type {goog.ui.Control?}
- * @private
- */
-goog.ui.Container.prototype.openItem_ = null;
-
-
-/**
- * Whether the mouse button is held down.  Defaults to false.  This flag is set
- * when the user mouses down over the container, and remains set until they
- * release the mouse button.
- * @type {boolean}
- * @private
- */
-goog.ui.Container.prototype.mouseButtonPressed_ = false;
-
-
-/**
- * Whether focus of child components should be allowed.  Only effective if
- * focusable_ is set to false.
- * @type {boolean}
- * @private
- */
-goog.ui.Container.prototype.allowFocusableChildren_ = false;
-
-
-/**
- * Whether highlighting a child component should also open it.
- * @type {boolean}
- * @private
- */
-goog.ui.Container.prototype.openFollowsHighlight_ = true;
-
-
-/**
- * Map of DOM IDs to child controls.  Each key is the DOM ID of a child
- * control's root element; each value is a reference to the child control
- * itself.  Used for looking up the child control corresponding to a DOM
- * node in O(1) time.
- * @type {Object}
- * @private
- */
-goog.ui.Container.prototype.childElementIdMap_ = null;
-
-
-// Event handler and renderer management.
-
-
-/**
- * Returns the DOM element on which the container is listening for keyboard
- * events (null if none).
- * @return {Element} Element on which the container is listening for key
- *     events.
- */
-goog.ui.Container.prototype.getKeyEventTarget = function() {
-  // Delegate to renderer, unless we've set an explicit target.
-  return this.keyEventTarget_ || this.renderer_.getKeyEventTarget(this);
+  // TODO(arv): Should we fall back on goog.structs.getValues()?
+  throw Error('Not implemented');
 };
 
 
 /**
- * Attaches an element on which to listen for key events.
- * @param {Element|undefined} element The element to attach, or null/undefined
- *     to attach to the default element.
+ * Calls a function for each element in the iterator with the element of the
+ * iterator passed as argument.
+ *
+ * @param {goog.iter.Iterator<VALUE>|goog.iter.Iterable} iterable  The iterator
+ *     to iterate over. If the iterable is an object {@code toIterator} will be
+ *     called on it.
+ * @param {function(this:THIS,VALUE,?,!goog.iter.Iterator<VALUE>)} f
+ *     The function to call for every element.  This function takes 3 arguments
+ *     (the element, undefined, and the iterator) and the return value is
+ *     irrelevant.  The reason for passing undefined as the second argument is
+ *     so that the same function can be used in {@see goog.array#forEach} as
+ *     well as others.  The third parameter is of type "number" for
+ *     arraylike objects, undefined, otherwise.
+ * @param {THIS=} opt_obj  The object to be used as the value of 'this' within
+ *     {@code f}.
+ * @template THIS, VALUE
  */
-goog.ui.Container.prototype.setKeyEventTarget = function(element) {
-  if (this.focusable_) {
-    var oldTarget = this.getKeyEventTarget();
-    var inDocument = this.isInDocument();
-
-    this.keyEventTarget_ = element;
-    var newTarget = this.getKeyEventTarget();
-
-    if (inDocument) {
-      // Unlisten for events on the old key target.  Requires us to reset
-      // key target state temporarily.
-      this.keyEventTarget_ = oldTarget;
-      this.enableFocusHandling_(false);
-      this.keyEventTarget_ = element;
-
-      // Listen for events on the new key target.
-      this.getKeyHandler().attach(newTarget);
-      this.enableFocusHandling_(true);
+goog.iter.forEach = function(iterable, f, opt_obj) {
+  if (goog.isArrayLike(iterable)) {
+    /** @preserveTry */
+    try {
+      // NOTES: this passes the index number to the second parameter
+      // of the callback contrary to the documentation above.
+      goog.array.forEach(
+          /** @type {goog.array.ArrayLike} */ (iterable), f, opt_obj);
+    } catch (ex) {
+      if (ex !== goog.iter.StopIteration) {
+        throw ex;
+      }
     }
   } else {
-    throw Error(
-        'Can\'t set key event target for container ' +
-        'that doesn\'t support keyboard focus!');
-  }
-};
-
-
-/**
- * Returns the keyboard event handler for this container, lazily created the
- * first time this method is called.  The keyboard event handler listens for
- * keyboard events on the container's key event target, as determined by its
- * renderer.
- * @return {!goog.events.KeyHandler} Keyboard event handler for this container.
- */
-goog.ui.Container.prototype.getKeyHandler = function() {
-  return this.keyHandler_ ||
-      (this.keyHandler_ = new goog.events.KeyHandler(this.getKeyEventTarget()));
-};
-
-
-/**
- * Returns the renderer used by this container to render itself or to decorate
- * an existing element.
- * @return {goog.ui.ContainerRenderer} Renderer used by the container.
- */
-goog.ui.Container.prototype.getRenderer = function() {
-  return this.renderer_;
-};
-
-
-/**
- * Registers the given renderer with the container.  Changing renderers after
- * the container has already been rendered or decorated is an error.
- * @param {goog.ui.ContainerRenderer} renderer Renderer used by the container.
- */
-goog.ui.Container.prototype.setRenderer = function(renderer) {
-  if (this.getElement()) {
-    // Too late.
-    throw Error(goog.ui.Component.Error.ALREADY_RENDERED);
-  }
-
-  this.renderer_ = renderer;
-};
-
-
-// Standard goog.ui.Component implementation.
-
-
-/**
- * Creates the container's DOM.
- * @override
- */
-goog.ui.Container.prototype.createDom = function() {
-  // Delegate to renderer.
-  this.setElementInternal(this.renderer_.createDom(this));
-};
-
-
-/**
- * Returns the DOM element into which child components are to be rendered,
- * or null if the container itself hasn't been rendered yet.  Overrides
- * {@link goog.ui.Component#getContentElement} by delegating to the renderer.
- * @return {Element} Element to contain child elements (null if none).
- * @override
- */
-goog.ui.Container.prototype.getContentElement = function() {
-  // Delegate to renderer.
-  return this.renderer_.getContentElement(this.getElement());
-};
-
-
-/**
- * Returns true if the given element can be decorated by this container.
- * Overrides {@link goog.ui.Component#canDecorate}.
- * @param {Element} element Element to decorate.
- * @return {boolean} True iff the element can be decorated.
- * @override
- */
-goog.ui.Container.prototype.canDecorate = function(element) {
-  // Delegate to renderer.
-  return this.renderer_.canDecorate(element);
-};
-
-
-/**
- * Decorates the given element with this container. Overrides {@link
- * goog.ui.Component#decorateInternal}.  Considered protected.
- * @param {Element} element Element to decorate.
- * @override
- */
-goog.ui.Container.prototype.decorateInternal = function(element) {
-  // Delegate to renderer.
-  this.setElementInternal(this.renderer_.decorate(this, element));
-  // Check whether the decorated element is explicitly styled to be invisible.
-  if (element.style.display == 'none') {
-    this.visible_ = false;
-  }
-};
-
-
-/**
- * Configures the container after its DOM has been rendered, and sets up event
- * handling.  Overrides {@link goog.ui.Component#enterDocument}.
- * @override
- */
-goog.ui.Container.prototype.enterDocument = function() {
-  goog.ui.Container.superClass_.enterDocument.call(this);
-
-  this.forEachChild(function(child) {
-    if (child.isInDocument()) {
-      this.registerChildId_(child);
+    iterable = goog.iter.toIterator(iterable);
+    /** @preserveTry */
+    try {
+      while (true) {
+        f.call(opt_obj, iterable.next(), undefined, iterable);
+      }
+    } catch (ex) {
+      if (ex !== goog.iter.StopIteration) {
+        throw ex;
+      }
     }
-  }, this);
-
-  var elem = this.getElement();
-
-  // Call the renderer's initializeDom method to initialize the container's DOM.
-  this.renderer_.initializeDom(this);
-
-  // Initialize visibility (opt_force = true, so we don't dispatch events).
-  this.setVisible(this.visible_, true);
-
-  // Handle events dispatched by child controls.
-  this.getHandler()
-      .listen(this, goog.ui.Component.EventType.ENTER, this.handleEnterItem)
-      .listen(
-          this, goog.ui.Component.EventType.HIGHLIGHT, this.handleHighlightItem)
-      .listen(
-          this, goog.ui.Component.EventType.UNHIGHLIGHT,
-          this.handleUnHighlightItem)
-      .listen(this, goog.ui.Component.EventType.OPEN, this.handleOpenItem)
-      .listen(this, goog.ui.Component.EventType.CLOSE, this.handleCloseItem)
-      .
-
-      // Handle mouse events.
-      listen(elem, goog.events.EventType.MOUSEDOWN, this.handleMouseDown)
-      .listen(
-          goog.dom.getOwnerDocument(elem), goog.events.EventType.MOUSEUP,
-          this.handleDocumentMouseUp)
-      .
-
-      // Handle mouse events on behalf of controls in the container.
-      listen(
-          elem,
-          [
-            goog.events.EventType.MOUSEDOWN, goog.events.EventType.MOUSEUP,
-            goog.events.EventType.MOUSEOVER, goog.events.EventType.MOUSEOUT,
-            goog.events.EventType.CONTEXTMENU
-          ],
-          this.handleChildMouseEvents);
-
-  // If the container is focusable, set up keyboard event handling.
-  if (this.isFocusable()) {
-    this.enableFocusHandling_(true);
   }
 };
 
 
 /**
- * Sets up listening for events applicable to focusable containers.
- * @param {boolean} enable Whether to enable or disable focus handling.
+ * Calls a function for every element in the iterator, and if the function
+ * returns true adds the element to a new iterator.
+ *
+ * @param {goog.iter.Iterator<VALUE>|goog.iter.Iterable} iterable The iterator
+ *     to iterate over.
+ * @param {
+ *     function(this:THIS,VALUE,undefined,!goog.iter.Iterator<VALUE>):boolean} f
+ *     The function to call for every element. This function takes 3 arguments
+ *     (the element, undefined, and the iterator) and should return a boolean.
+ *     If the return value is true the element will be included in the returned
+ *     iterator.  If it is false the element is not included.
+ * @param {THIS=} opt_obj The object to be used as the value of 'this' within
+ *     {@code f}.
+ * @return {!goog.iter.Iterator<VALUE>} A new iterator in which only elements
+ *     that passed the test are present.
+ * @template THIS, VALUE
+ */
+goog.iter.filter = function(iterable, f, opt_obj) {
+  var iterator = goog.iter.toIterator(iterable);
+  var newIter = new goog.iter.Iterator;
+  newIter.next = function() {
+    while (true) {
+      var val = iterator.next();
+      if (f.call(opt_obj, val, undefined, iterator)) {
+        return val;
+      }
+    }
+  };
+  return newIter;
+};
+
+
+/**
+ * Calls a function for every element in the iterator, and if the function
+ * returns false adds the element to a new iterator.
+ *
+ * @param {goog.iter.Iterator<VALUE>|goog.iter.Iterable} iterable The iterator
+ *     to iterate over.
+ * @param {
+ *     function(this:THIS,VALUE,undefined,!goog.iter.Iterator<VALUE>):boolean} f
+ *     The function to call for every element. This function takes 3 arguments
+ *     (the element, undefined, and the iterator) and should return a boolean.
+ *     If the return value is false the element will be included in the returned
+ *     iterator.  If it is true the element is not included.
+ * @param {THIS=} opt_obj The object to be used as the value of 'this' within
+ *     {@code f}.
+ * @return {!goog.iter.Iterator<VALUE>} A new iterator in which only elements
+ *     that did not pass the test are present.
+ * @template THIS, VALUE
+ */
+goog.iter.filterFalse = function(iterable, f, opt_obj) {
+  return goog.iter.filter(iterable, goog.functions.not(f), opt_obj);
+};
+
+
+/**
+ * Creates a new iterator that returns the values in a range.  This function
+ * can take 1, 2 or 3 arguments:
+ * <pre>
+ * range(5) same as range(0, 5, 1)
+ * range(2, 5) same as range(2, 5, 1)
+ * </pre>
+ *
+ * @param {number} startOrStop  The stop value if only one argument is provided.
+ *     The start value if 2 or more arguments are provided.  If only one
+ *     argument is used the start value is 0.
+ * @param {number=} opt_stop  The stop value.  If left out then the first
+ *     argument is used as the stop value.
+ * @param {number=} opt_step  The number to increment with between each call to
+ *     next.  This can be negative.
+ * @return {!goog.iter.Iterator<number>} A new iterator that returns the values
+ *     in the range.
+ */
+goog.iter.range = function(startOrStop, opt_stop, opt_step) {
+  var start = 0;
+  var stop = startOrStop;
+  var step = opt_step || 1;
+  if (arguments.length > 1) {
+    start = startOrStop;
+    stop = opt_stop;
+  }
+  if (step == 0) {
+    throw Error('Range step argument must not be zero');
+  }
+
+  var newIter = new goog.iter.Iterator;
+  newIter.next = function() {
+    if (step > 0 && start >= stop || step < 0 && start <= stop) {
+      throw goog.iter.StopIteration;
+    }
+    var rv = start;
+    start += step;
+    return rv;
+  };
+  return newIter;
+};
+
+
+/**
+ * Joins the values in a iterator with a delimiter.
+ * @param {goog.iter.Iterator<VALUE>|goog.iter.Iterable} iterable The iterator
+ *     to get the values from.
+ * @param {string} deliminator  The text to put between the values.
+ * @return {string} The joined value string.
+ * @template VALUE
+ */
+goog.iter.join = function(iterable, deliminator) {
+  return goog.iter.toArray(iterable).join(deliminator);
+};
+
+
+/**
+ * For every element in the iterator call a function and return a new iterator
+ * with that value.
+ *
+ * @param {!goog.iter.Iterator<VALUE>|!goog.iter.Iterable} iterable The
+ *     iterator to iterate over.
+ * @param {
+ *     function(this:THIS,VALUE,undefined,!goog.iter.Iterator<VALUE>):RESULT} f
+ *     The function to call for every element.  This function takes 3 arguments
+ *     (the element, undefined, and the iterator) and should return a new value.
+ * @param {THIS=} opt_obj The object to be used as the value of 'this' within
+ *     {@code f}.
+ * @return {!goog.iter.Iterator<RESULT>} A new iterator that returns the
+ *     results of applying the function to each element in the original
+ *     iterator.
+ * @template THIS, VALUE, RESULT
+ */
+goog.iter.map = function(iterable, f, opt_obj) {
+  var iterator = goog.iter.toIterator(iterable);
+  var newIter = new goog.iter.Iterator;
+  newIter.next = function() {
+    var val = iterator.next();
+    return f.call(opt_obj, val, undefined, iterator);
+  };
+  return newIter;
+};
+
+
+/**
+ * Passes every element of an iterator into a function and accumulates the
+ * result.
+ *
+ * @param {goog.iter.Iterator<VALUE>|goog.iter.Iterable} iterable The iterator
+ *     to iterate over.
+ * @param {function(this:THIS,VALUE,VALUE):VALUE} f The function to call for
+ *     every element. This function takes 2 arguments (the function's previous
+ *     result or the initial value, and the value of the current element).
+ *     function(previousValue, currentElement) : newValue.
+ * @param {VALUE} val The initial value to pass into the function on the first
+ *     call.
+ * @param {THIS=} opt_obj  The object to be used as the value of 'this' within
+ *     f.
+ * @return {VALUE} Result of evaluating f repeatedly across the values of
+ *     the iterator.
+ * @template THIS, VALUE
+ */
+goog.iter.reduce = function(iterable, f, val, opt_obj) {
+  var rval = val;
+  goog.iter.forEach(
+      iterable, function(val) { rval = f.call(opt_obj, rval, val); });
+  return rval;
+};
+
+
+/**
+ * Goes through the values in the iterator. Calls f for each of these, and if
+ * any of them returns true, this returns true (without checking the rest). If
+ * all return false this will return false.
+ *
+ * @param {goog.iter.Iterator<VALUE>|goog.iter.Iterable} iterable The iterator
+ *     object.
+ * @param {
+ *     function(this:THIS,VALUE,undefined,!goog.iter.Iterator<VALUE>):boolean} f
+ *     The function to call for every value. This function takes 3 arguments
+ *     (the value, undefined, and the iterator) and should return a boolean.
+ * @param {THIS=} opt_obj The object to be used as the value of 'this' within
+ *     {@code f}.
+ * @return {boolean} true if any value passes the test.
+ * @template THIS, VALUE
+ */
+goog.iter.some = function(iterable, f, opt_obj) {
+  iterable = goog.iter.toIterator(iterable);
+  /** @preserveTry */
+  try {
+    while (true) {
+      if (f.call(opt_obj, iterable.next(), undefined, iterable)) {
+        return true;
+      }
+    }
+  } catch (ex) {
+    if (ex !== goog.iter.StopIteration) {
+      throw ex;
+    }
+  }
+  return false;
+};
+
+
+/**
+ * Goes through the values in the iterator. Calls f for each of these and if any
+ * of them returns false this returns false (without checking the rest). If all
+ * return true this will return true.
+ *
+ * @param {goog.iter.Iterator<VALUE>|goog.iter.Iterable} iterable The iterator
+ *     object.
+ * @param {
+ *     function(this:THIS,VALUE,undefined,!goog.iter.Iterator<VALUE>):boolean} f
+ *     The function to call for every value. This function takes 3 arguments
+ *     (the value, undefined, and the iterator) and should return a boolean.
+ * @param {THIS=} opt_obj The object to be used as the value of 'this' within
+ *     {@code f}.
+ * @return {boolean} true if every value passes the test.
+ * @template THIS, VALUE
+ */
+goog.iter.every = function(iterable, f, opt_obj) {
+  iterable = goog.iter.toIterator(iterable);
+  /** @preserveTry */
+  try {
+    while (true) {
+      if (!f.call(opt_obj, iterable.next(), undefined, iterable)) {
+        return false;
+      }
+    }
+  } catch (ex) {
+    if (ex !== goog.iter.StopIteration) {
+      throw ex;
+    }
+  }
+  return true;
+};
+
+
+/**
+ * Takes zero or more iterables and returns one iterator that will iterate over
+ * them in the order chained.
+ * @param {...!goog.iter.Iterator<VALUE>|!goog.iter.Iterable} var_args Any
+ *     number of iterable objects.
+ * @return {!goog.iter.Iterator<VALUE>} Returns a new iterator that will
+ *     iterate over all the given iterables' contents.
+ * @template VALUE
+ */
+goog.iter.chain = function(var_args) {
+  return goog.iter.chainFromIterable(arguments);
+};
+
+
+/**
+ * Takes a single iterable containing zero or more iterables and returns one
+ * iterator that will iterate over each one in the order given.
+ * @see https://goo.gl/5NRp5d
+ * @param {goog.iter.Iterable} iterable The iterable of iterables to chain.
+ * @return {!goog.iter.Iterator<VALUE>} Returns a new iterator that will
+ *     iterate over all the contents of the iterables contained within
+ *     {@code iterable}.
+ * @template VALUE
+ */
+goog.iter.chainFromIterable = function(iterable) {
+  var iterator = goog.iter.toIterator(iterable);
+  var iter = new goog.iter.Iterator();
+  var current = null;
+
+  iter.next = function() {
+    while (true) {
+      if (current == null) {
+        var it = iterator.next();
+        current = goog.iter.toIterator(it);
+      }
+      try {
+        return current.next();
+      } catch (ex) {
+        if (ex !== goog.iter.StopIteration) {
+          throw ex;
+        }
+        current = null;
+      }
+    }
+  };
+
+  return iter;
+};
+
+
+/**
+ * Builds a new iterator that iterates over the original, but skips elements as
+ * long as a supplied function returns true.
+ * @param {goog.iter.Iterator<VALUE>|goog.iter.Iterable} iterable The iterator
+ *     object.
+ * @param {
+ *     function(this:THIS,VALUE,undefined,!goog.iter.Iterator<VALUE>):boolean} f
+ *     The function to call for every value. This function takes 3 arguments
+ *     (the value, undefined, and the iterator) and should return a boolean.
+ * @param {THIS=} opt_obj The object to be used as the value of 'this' within
+ *     {@code f}.
+ * @return {!goog.iter.Iterator<VALUE>} A new iterator that drops elements from
+ *     the original iterator as long as {@code f} is true.
+ * @template THIS, VALUE
+ */
+goog.iter.dropWhile = function(iterable, f, opt_obj) {
+  var iterator = goog.iter.toIterator(iterable);
+  var newIter = new goog.iter.Iterator;
+  var dropping = true;
+  newIter.next = function() {
+    while (true) {
+      var val = iterator.next();
+      if (dropping && f.call(opt_obj, val, undefined, iterator)) {
+        continue;
+      } else {
+        dropping = false;
+      }
+      return val;
+    }
+  };
+  return newIter;
+};
+
+
+/**
+ * Builds a new iterator that iterates over the original, but only as long as a
+ * supplied function returns true.
+ * @param {goog.iter.Iterator<VALUE>|goog.iter.Iterable} iterable The iterator
+ *     object.
+ * @param {
+ *     function(this:THIS,VALUE,undefined,!goog.iter.Iterator<VALUE>):boolean} f
+ *     The function to call for every value. This function takes 3 arguments
+ *     (the value, undefined, and the iterator) and should return a boolean.
+ * @param {THIS=} opt_obj This is used as the 'this' object in f when called.
+ * @return {!goog.iter.Iterator<VALUE>} A new iterator that keeps elements in
+ *     the original iterator as long as the function is true.
+ * @template THIS, VALUE
+ */
+goog.iter.takeWhile = function(iterable, f, opt_obj) {
+  var iterator = goog.iter.toIterator(iterable);
+  var iter = new goog.iter.Iterator();
+  iter.next = function() {
+    var val = iterator.next();
+    if (f.call(opt_obj, val, undefined, iterator)) {
+      return val;
+    }
+    throw goog.iter.StopIteration;
+  };
+  return iter;
+};
+
+
+/**
+ * Converts the iterator to an array
+ * @param {goog.iter.Iterator<VALUE>|goog.iter.Iterable} iterable The iterator
+ *     to convert to an array.
+ * @return {!Array<VALUE>} An array of the elements the iterator iterates over.
+ * @template VALUE
+ */
+goog.iter.toArray = function(iterable) {
+  // Fast path for array-like.
+  if (goog.isArrayLike(iterable)) {
+    return goog.array.toArray(/** @type {!goog.array.ArrayLike} */ (iterable));
+  }
+  iterable = goog.iter.toIterator(iterable);
+  var array = [];
+  goog.iter.forEach(iterable, function(val) { array.push(val); });
+  return array;
+};
+
+
+/**
+ * Iterates over two iterables and returns true if they contain the same
+ * sequence of elements and have the same length.
+ * @param {!goog.iter.Iterator<VALUE>|!goog.iter.Iterable} iterable1 The first
+ *     iterable object.
+ * @param {!goog.iter.Iterator<VALUE>|!goog.iter.Iterable} iterable2 The second
+ *     iterable object.
+ * @param {function(VALUE,VALUE):boolean=} opt_equalsFn Optional comparison
+ *     function.
+ *     Should take two arguments to compare, and return true if the arguments
+ *     are equal. Defaults to {@link goog.array.defaultCompareEquality} which
+ *     compares the elements using the built-in '===' operator.
+ * @return {boolean} true if the iterables contain the same sequence of elements
+ *     and have the same length.
+ * @template VALUE
+ */
+goog.iter.equals = function(iterable1, iterable2, opt_equalsFn) {
+  var fillValue = {};
+  var pairs = goog.iter.zipLongest(fillValue, iterable1, iterable2);
+  var equalsFn = opt_equalsFn || goog.array.defaultCompareEquality;
+  return goog.iter.every(
+      pairs, function(pair) { return equalsFn(pair[0], pair[1]); });
+};
+
+
+/**
+ * Advances the iterator to the next position, returning the given default value
+ * instead of throwing an exception if the iterator has no more entries.
+ * @param {goog.iter.Iterator<VALUE>|goog.iter.Iterable} iterable The iterable
+ *     object.
+ * @param {VALUE} defaultValue The value to return if the iterator is empty.
+ * @return {VALUE} The next item in the iteration, or defaultValue if the
+ *     iterator was empty.
+ * @template VALUE
+ */
+goog.iter.nextOrValue = function(iterable, defaultValue) {
+  try {
+    return goog.iter.toIterator(iterable).next();
+  } catch (e) {
+    if (e != goog.iter.StopIteration) {
+      throw e;
+    }
+    return defaultValue;
+  }
+};
+
+
+/**
+ * Cartesian product of zero or more sets.  Gives an iterator that gives every
+ * combination of one element chosen from each set.  For example,
+ * ([1, 2], [3, 4]) gives ([1, 3], [1, 4], [2, 3], [2, 4]).
+ * @see http://docs.python.org/library/itertools.html#itertools.product
+ * @param {...!goog.array.ArrayLike<VALUE>} var_args Zero or more sets, as
+ *     arrays.
+ * @return {!goog.iter.Iterator<!Array<VALUE>>} An iterator that gives each
+ *     n-tuple (as an array).
+ * @template VALUE
+ */
+goog.iter.product = function(var_args) {
+  var someArrayEmpty =
+      goog.array.some(arguments, function(arr) { return !arr.length; });
+
+  // An empty set in a cartesian product gives an empty set.
+  if (someArrayEmpty || !arguments.length) {
+    return new goog.iter.Iterator();
+  }
+
+  var iter = new goog.iter.Iterator();
+  var arrays = arguments;
+
+  // The first indices are [0, 0, ...]
+  var indicies = goog.array.repeat(0, arrays.length);
+
+  iter.next = function() {
+
+    if (indicies) {
+      var retVal = goog.array.map(indicies, function(valueIndex, arrayIndex) {
+        return arrays[arrayIndex][valueIndex];
+      });
+
+      // Generate the next-largest indices for the next call.
+      // Increase the rightmost index. If it goes over, increase the next
+      // rightmost (like carry-over addition).
+      for (var i = indicies.length - 1; i >= 0; i--) {
+        // Assertion prevents compiler warning below.
+        goog.asserts.assert(indicies);
+        if (indicies[i] < arrays[i].length - 1) {
+          indicies[i]++;
+          break;
+        }
+
+        // We're at the last indices (the last element of every array), so
+        // the iteration is over on the next call.
+        if (i == 0) {
+          indicies = null;
+          break;
+        }
+        // Reset the index in this column and loop back to increment the
+        // next one.
+        indicies[i] = 0;
+      }
+      return retVal;
+    }
+
+    throw goog.iter.StopIteration;
+  };
+
+  return iter;
+};
+
+
+/**
+ * Create an iterator to cycle over the iterable's elements indefinitely.
+ * For example, ([1, 2, 3]) would return : 1, 2, 3, 1, 2, 3, ...
+ * @see: http://docs.python.org/library/itertools.html#itertools.cycle.
+ * @param {!goog.iter.Iterator<VALUE>|!goog.iter.Iterable} iterable The
+ *     iterable object.
+ * @return {!goog.iter.Iterator<VALUE>} An iterator that iterates indefinitely
+ *     over the values in {@code iterable}.
+ * @template VALUE
+ */
+goog.iter.cycle = function(iterable) {
+  var baseIterator = goog.iter.toIterator(iterable);
+
+  // We maintain a cache to store the iterable elements as we iterate
+  // over them. The cache is used to return elements once we have
+  // iterated over the iterable once.
+  var cache = [];
+  var cacheIndex = 0;
+
+  var iter = new goog.iter.Iterator();
+
+  // This flag is set after the iterable is iterated over once
+  var useCache = false;
+
+  iter.next = function() {
+    var returnElement = null;
+
+    // Pull elements off the original iterator if not using cache
+    if (!useCache) {
+      try {
+        // Return the element from the iterable
+        returnElement = baseIterator.next();
+        cache.push(returnElement);
+        return returnElement;
+      } catch (e) {
+        // If an exception other than StopIteration is thrown
+        // or if there are no elements to iterate over (the iterable was empty)
+        // throw an exception
+        if (e != goog.iter.StopIteration || goog.array.isEmpty(cache)) {
+          throw e;
+        }
+        // set useCache to true after we know that a 'StopIteration' exception
+        // was thrown and the cache is not empty (to handle the 'empty iterable'
+        // use case)
+        useCache = true;
+      }
+    }
+
+    returnElement = cache[cacheIndex];
+    cacheIndex = (cacheIndex + 1) % cache.length;
+
+    return returnElement;
+  };
+
+  return iter;
+};
+
+
+/**
+ * Creates an iterator that counts indefinitely from a starting value.
+ * @see http://docs.python.org/2/library/itertools.html#itertools.count
+ * @param {number=} opt_start The starting value. Default is 0.
+ * @param {number=} opt_step The number to increment with between each call to
+ *     next. Negative and floating point numbers are allowed. Default is 1.
+ * @return {!goog.iter.Iterator<number>} A new iterator that returns the values
+ *     in the series.
+ */
+goog.iter.count = function(opt_start, opt_step) {
+  var counter = opt_start || 0;
+  var step = goog.isDef(opt_step) ? opt_step : 1;
+  var iter = new goog.iter.Iterator();
+
+  iter.next = function() {
+    var returnValue = counter;
+    counter += step;
+    return returnValue;
+  };
+
+  return iter;
+};
+
+
+/**
+ * Creates an iterator that returns the same object or value repeatedly.
+ * @param {VALUE} value Any object or value to repeat.
+ * @return {!goog.iter.Iterator<VALUE>} A new iterator that returns the
+ *     repeated value.
+ * @template VALUE
+ */
+goog.iter.repeat = function(value) {
+  var iter = new goog.iter.Iterator();
+
+  iter.next = goog.functions.constant(value);
+
+  return iter;
+};
+
+
+/**
+ * Creates an iterator that returns running totals from the numbers in
+ * {@code iterable}. For example, the array {@code [1, 2, 3, 4, 5]} yields
+ * {@code 1 -> 3 -> 6 -> 10 -> 15}.
+ * @see http://docs.python.org/3.2/library/itertools.html#itertools.accumulate
+ * @param {!goog.iter.Iterable<number>} iterable The iterable of numbers to
+ *     accumulate.
+ * @return {!goog.iter.Iterator<number>} A new iterator that returns the
+ *     numbers in the series.
+ */
+goog.iter.accumulate = function(iterable) {
+  var iterator = goog.iter.toIterator(iterable);
+  var total = 0;
+  var iter = new goog.iter.Iterator();
+
+  iter.next = function() {
+    total += iterator.next();
+    return total;
+  };
+
+  return iter;
+};
+
+
+/**
+ * Creates an iterator that returns arrays containing the ith elements from the
+ * provided iterables. The returned arrays will be the same size as the number
+ * of iterables given in {@code var_args}. Once the shortest iterable is
+ * exhausted, subsequent calls to {@code next()} will throw
+ * {@code goog.iter.StopIteration}.
+ * @see http://docs.python.org/2/library/itertools.html#itertools.izip
+ * @param {...!goog.iter.Iterator<VALUE>|!goog.iter.Iterable} var_args Any
+ *     number of iterable objects.
+ * @return {!goog.iter.Iterator<!Array<VALUE>>} A new iterator that returns
+ *     arrays of elements from the provided iterables.
+ * @template VALUE
+ */
+goog.iter.zip = function(var_args) {
+  var args = arguments;
+  var iter = new goog.iter.Iterator();
+
+  if (args.length > 0) {
+    var iterators = goog.array.map(args, goog.iter.toIterator);
+    iter.next = function() {
+      var arr = goog.array.map(iterators, function(it) { return it.next(); });
+      return arr;
+    };
+  }
+
+  return iter;
+};
+
+
+/**
+ * Creates an iterator that returns arrays containing the ith elements from the
+ * provided iterables. The returned arrays will be the same size as the number
+ * of iterables given in {@code var_args}. Shorter iterables will be extended
+ * with {@code fillValue}. Once the longest iterable is exhausted, subsequent
+ * calls to {@code next()} will throw {@code goog.iter.StopIteration}.
+ * @see http://docs.python.org/2/library/itertools.html#itertools.izip_longest
+ * @param {VALUE} fillValue The object or value used to fill shorter iterables.
+ * @param {...!goog.iter.Iterator<VALUE>|!goog.iter.Iterable} var_args Any
+ *     number of iterable objects.
+ * @return {!goog.iter.Iterator<!Array<VALUE>>} A new iterator that returns
+ *     arrays of elements from the provided iterables.
+ * @template VALUE
+ */
+goog.iter.zipLongest = function(fillValue, var_args) {
+  var args = goog.array.slice(arguments, 1);
+  var iter = new goog.iter.Iterator();
+
+  if (args.length > 0) {
+    var iterators = goog.array.map(args, goog.iter.toIterator);
+
+    iter.next = function() {
+      var iteratorsHaveValues = false;  // false when all iterators are empty.
+      var arr = goog.array.map(iterators, function(it) {
+        var returnValue;
+        try {
+          returnValue = it.next();
+          // Iterator had a value, so we've not exhausted the iterators.
+          // Set flag accordingly.
+          iteratorsHaveValues = true;
+        } catch (ex) {
+          if (ex !== goog.iter.StopIteration) {
+            throw ex;
+          }
+          returnValue = fillValue;
+        }
+        return returnValue;
+      });
+
+      if (!iteratorsHaveValues) {
+        throw goog.iter.StopIteration;
+      }
+      return arr;
+    };
+  }
+
+  return iter;
+};
+
+
+/**
+ * Creates an iterator that filters {@code iterable} based on a series of
+ * {@code selectors}. On each call to {@code next()}, one item is taken from
+ * both the {@code iterable} and {@code selectors} iterators. If the item from
+ * {@code selectors} evaluates to true, the item from {@code iterable} is given.
+ * Otherwise, it is skipped. Once either {@code iterable} or {@code selectors}
+ * is exhausted, subsequent calls to {@code next()} will throw
+ * {@code goog.iter.StopIteration}.
+ * @see http://docs.python.org/2/library/itertools.html#itertools.compress
+ * @param {!goog.iter.Iterator<VALUE>|!goog.iter.Iterable} iterable The
+ *     iterable to filter.
+ * @param {!goog.iter.Iterator<VALUE>|!goog.iter.Iterable} selectors An
+ *     iterable of items to be evaluated in a boolean context to determine if
+ *     the corresponding element in {@code iterable} should be included in the
+ *     result.
+ * @return {!goog.iter.Iterator<VALUE>} A new iterator that returns the
+ *     filtered values.
+ * @template VALUE
+ */
+goog.iter.compress = function(iterable, selectors) {
+  var selectorIterator = goog.iter.toIterator(selectors);
+
+  return goog.iter.filter(
+      iterable, function() { return !!selectorIterator.next(); });
+};
+
+
+
+/**
+ * Implements the {@code goog.iter.groupBy} iterator.
+ * @param {!goog.iter.Iterator<VALUE>|!goog.iter.Iterable} iterable The
+ *     iterable to group.
+ * @param {function(...VALUE): KEY=} opt_keyFunc  Optional function for
+ *     determining the key value for each group in the {@code iterable}. Default
+ *     is the identity function.
+ * @constructor
+ * @extends {goog.iter.Iterator<!Array<?>>}
+ * @template KEY, VALUE
  * @private
  */
-goog.ui.Container.prototype.enableFocusHandling_ = function(enable) {
-  var handler = this.getHandler();
-  var keyTarget = this.getKeyEventTarget();
-  if (enable) {
-    handler.listen(keyTarget, goog.events.EventType.FOCUS, this.handleFocus)
-        .listen(keyTarget, goog.events.EventType.BLUR, this.handleBlur)
-        .listen(
-            this.getKeyHandler(), goog.events.KeyHandler.EventType.KEY,
-            this.handleKeyEvent);
-  } else {
-    handler.unlisten(keyTarget, goog.events.EventType.FOCUS, this.handleFocus)
-        .unlisten(keyTarget, goog.events.EventType.BLUR, this.handleBlur)
-        .unlisten(
-            this.getKeyHandler(), goog.events.KeyHandler.EventType.KEY,
-            this.handleKeyEvent);
-  }
+goog.iter.GroupByIterator_ = function(iterable, opt_keyFunc) {
+
+  /**
+   * The iterable to group, coerced to an iterator.
+   * @type {!goog.iter.Iterator}
+   */
+  this.iterator = goog.iter.toIterator(iterable);
+
+  /**
+   * A function for determining the key value for each element in the iterable.
+   * If no function is provided, the identity function is used and returns the
+   * element unchanged.
+   * @type {function(...VALUE): KEY}
+   */
+  this.keyFunc = opt_keyFunc || goog.functions.identity;
+
+  /**
+   * The target key for determining the start of a group.
+   * @type {KEY}
+   */
+  this.targetKey;
+
+  /**
+   * The current key visited during iteration.
+   * @type {KEY}
+   */
+  this.currentKey;
+
+  /**
+   * The current value being added to the group.
+   * @type {VALUE}
+   */
+  this.currentValue;
 };
-
-
-/**
- * Cleans up the container before its DOM is removed from the document, and
- * removes event handlers.  Overrides {@link goog.ui.Component#exitDocument}.
- * @override
- */
-goog.ui.Container.prototype.exitDocument = function() {
-  // {@link #setHighlightedIndex} has to be called before
-  // {@link goog.ui.Component#exitDocument}, otherwise it has no effect.
-  this.setHighlightedIndex(-1);
-
-  if (this.openItem_) {
-    this.openItem_.setOpen(false);
-  }
-
-  this.mouseButtonPressed_ = false;
-
-  goog.ui.Container.superClass_.exitDocument.call(this);
-};
+goog.inherits(goog.iter.GroupByIterator_, goog.iter.Iterator);
 
 
 /** @override */
-goog.ui.Container.prototype.disposeInternal = function() {
-  goog.ui.Container.superClass_.disposeInternal.call(this);
-
-  if (this.keyHandler_) {
-    this.keyHandler_.dispose();
-    this.keyHandler_ = null;
+goog.iter.GroupByIterator_.prototype.next = function() {
+  while (this.currentKey == this.targetKey) {
+    this.currentValue = this.iterator.next();  // Exits on StopIteration
+    this.currentKey = this.keyFunc(this.currentValue);
   }
-
-  this.keyEventTarget_ = null;
-  this.childElementIdMap_ = null;
-  this.openItem_ = null;
-  this.renderer_ = null;
-};
-
-
-// Default event handlers.
-
-
-/**
- * Handles ENTER events raised by child controls when they are navigated to.
- * @param {goog.events.Event} e ENTER event to handle.
- * @return {boolean} Whether to prevent handleMouseOver from handling
- *    the event.
- */
-goog.ui.Container.prototype.handleEnterItem = function(e) {
-  // Allow the Control to highlight itself.
-  return true;
+  this.targetKey = this.currentKey;
+  return [this.currentKey, this.groupItems_(this.targetKey)];
 };
 
 
 /**
- * Handles HIGHLIGHT events dispatched by items in the container when
- * they are highlighted.
- * @param {goog.events.Event} e Highlight event to handle.
- */
-goog.ui.Container.prototype.handleHighlightItem = function(e) {
-  var index = this.indexOfChild(/** @type {goog.ui.Control} */ (e.target));
-  if (index > -1 && index != this.highlightedIndex_) {
-    var item = this.getHighlighted();
-    if (item) {
-      // Un-highlight previously highlighted item.
-      item.setHighlighted(false);
-    }
-
-    this.highlightedIndex_ = index;
-    item = this.getHighlighted();
-
-    if (this.isMouseButtonPressed()) {
-      // Activate item when mouse button is pressed, to allow MacOS-style
-      // dragging to choose menu items.  Although this should only truly
-      // happen if the highlight is due to mouse movements, there is little
-      // harm in doing it for keyboard or programmatic highlights.
-      item.setActive(true);
-    }
-
-    // Update open item if open item needs follow highlight.
-    if (this.openFollowsHighlight_ && this.openItem_ &&
-        item != this.openItem_) {
-      if (item.isSupportedState(goog.ui.Component.State.OPENED)) {
-        item.setOpen(true);
-      } else {
-        this.openItem_.setOpen(false);
-      }
-    }
-  }
-
-  var element = this.getElement();
-  goog.asserts.assert(
-      element, 'The DOM element for the container cannot be null.');
-  if (e.target.getElement() != null) {
-    goog.a11y.aria.setState(
-        element, goog.a11y.aria.State.ACTIVEDESCENDANT,
-        e.target.getElement().id);
-  }
-};
-
-
-/**
- * Handles UNHIGHLIGHT events dispatched by items in the container when
- * they are unhighlighted.
- * @param {goog.events.Event} e Unhighlight event to handle.
- */
-goog.ui.Container.prototype.handleUnHighlightItem = function(e) {
-  if (e.target == this.getHighlighted()) {
-    this.highlightedIndex_ = -1;
-  }
-  var element = this.getElement();
-  goog.asserts.assert(
-      element, 'The DOM element for the container cannot be null.');
-  // Setting certain ARIA attributes to empty strings is problematic.
-  // Just remove the attribute instead.
-  goog.a11y.aria.removeState(element, goog.a11y.aria.State.ACTIVEDESCENDANT);
-};
-
-
-/**
- * Handles OPEN events dispatched by items in the container when they are
- * opened.
- * @param {goog.events.Event} e Open event to handle.
- */
-goog.ui.Container.prototype.handleOpenItem = function(e) {
-  var item = /** @type {goog.ui.Control} */ (e.target);
-  if (item && item != this.openItem_ && item.getParent() == this) {
-    if (this.openItem_) {
-      this.openItem_.setOpen(false);
-    }
-    this.openItem_ = item;
-  }
-};
-
-
-/**
- * Handles CLOSE events dispatched by items in the container when they are
- * closed.
- * @param {goog.events.Event} e Close event to handle.
- */
-goog.ui.Container.prototype.handleCloseItem = function(e) {
-  if (e.target == this.openItem_) {
-    this.openItem_ = null;
-  }
-
-  var element = this.getElement();
-  var targetEl = e.target.getElement();
-  // Set the active descendant to the menu item when its submenu is closed and
-  // it is still highlighted. This can sometimes be called when the menuitem is
-  // unhighlighted because the focus moved elsewhere, do nothing at that point.
-  if (element && e.target.isHighlighted() && targetEl) {
-    goog.a11y.aria.setActiveDescendant(element, targetEl);
-  }
-};
-
-
-/**
- * Handles mousedown events over the container.  The default implementation
- * sets the "mouse button pressed" flag and, if the container is focusable,
- * grabs keyboard focus.
- * @param {goog.events.BrowserEvent} e Mousedown event to handle.
- */
-goog.ui.Container.prototype.handleMouseDown = function(e) {
-  if (this.enabled_) {
-    this.setMouseButtonPressed(true);
-  }
-
-  var keyTarget = this.getKeyEventTarget();
-  if (keyTarget && goog.dom.isFocusableTabIndex(keyTarget)) {
-    // The container is configured to receive keyboard focus.
-    keyTarget.focus();
-  } else {
-    // The control isn't configured to receive keyboard focus; prevent it
-    // from stealing focus or destroying the selection.
-    e.preventDefault();
-  }
-};
-
-
-/**
- * Handles mouseup events over the document.  The default implementation
- * clears the "mouse button pressed" flag.
- * @param {goog.events.BrowserEvent} e Mouseup event to handle.
- */
-goog.ui.Container.prototype.handleDocumentMouseUp = function(e) {
-  this.setMouseButtonPressed(false);
-};
-
-
-/**
- * Handles mouse events originating from nodes belonging to the controls hosted
- * in the container.  Locates the child control based on the DOM node that
- * dispatched the event, and forwards the event to the control for handling.
- * @param {goog.events.BrowserEvent} e Mouse event to handle.
- */
-goog.ui.Container.prototype.handleChildMouseEvents = function(e) {
-  var control = this.getOwnerControl(/** @type {Node} */ (e.target));
-  if (control) {
-    // Child control identified; forward the event.
-    switch (e.type) {
-      case goog.events.EventType.MOUSEDOWN:
-        control.handleMouseDown(e);
-        break;
-      case goog.events.EventType.MOUSEUP:
-        control.handleMouseUp(e);
-        break;
-      case goog.events.EventType.MOUSEOVER:
-        control.handleMouseOver(e);
-        break;
-      case goog.events.EventType.MOUSEOUT:
-        control.handleMouseOut(e);
-        break;
-      case goog.events.EventType.CONTEXTMENU:
-        control.handleContextMenu(e);
-        break;
-    }
-  }
-};
-
-
-/**
- * Returns the child control that owns the given DOM node, or null if no such
- * control is found.
- * @param {Node} node DOM node whose owner is to be returned.
- * @return {goog.ui.Control?} Control hosted in the container to which the node
- *     belongs (if found).
- * @protected
- */
-goog.ui.Container.prototype.getOwnerControl = function(node) {
-  // Ensure that this container actually has child controls before
-  // looking up the owner.
-  if (this.childElementIdMap_) {
-    var elem = this.getElement();
-    // See http://b/2964418 . IE9 appears to evaluate '!=' incorrectly, so
-    // using '!==' instead.
-    // TODO(user): Possibly revert this change if/when IE9 fixes the issue.
-    while (node && node !== elem) {
-      var id = node.id;
-      if (id in this.childElementIdMap_) {
-        return this.childElementIdMap_[id];
-      }
-      node = node.parentNode;
-    }
-  }
-  return null;
-};
-
-
-/**
- * Handles focus events raised when the container's key event target receives
- * keyboard focus.
- * @param {goog.events.BrowserEvent} e Focus event to handle.
- */
-goog.ui.Container.prototype.handleFocus = function(e) {
-  // No-op in the base class.
-};
-
-
-/**
- * Handles blur events raised when the container's key event target loses
- * keyboard focus.  The default implementation clears the highlight index.
- * @param {goog.events.BrowserEvent} e Blur event to handle.
- */
-goog.ui.Container.prototype.handleBlur = function(e) {
-  this.setHighlightedIndex(-1);
-  this.setMouseButtonPressed(false);
-  // If the container loses focus, and one of its children is open, close it.
-  if (this.openItem_) {
-    this.openItem_.setOpen(false);
-  }
-};
-
-
-/**
- * Attempts to handle a keyboard event, if the control is enabled, by calling
- * {@link handleKeyEventInternal}.  Considered protected; should only be used
- * within this package and by subclasses.
- * @param {goog.events.KeyEvent} e Key event to handle.
- * @return {boolean} Whether the key event was handled.
- */
-goog.ui.Container.prototype.handleKeyEvent = function(e) {
-  if (this.isEnabled() && this.isVisible() &&
-      (this.getChildCount() != 0 || this.keyEventTarget_) &&
-      this.handleKeyEventInternal(e)) {
-    e.preventDefault();
-    e.stopPropagation();
-    return true;
-  }
-  return false;
-};
-
-
-/**
- * Attempts to handle a keyboard event; returns true if the event was handled,
- * false otherwise.  If the container is enabled, and a child is highlighted,
- * calls the child control's {@code handleKeyEvent} method to give the control
- * a chance to handle the event first.
- * @param {goog.events.KeyEvent} e Key event to handle.
- * @return {boolean} Whether the event was handled by the container (or one of
- *     its children).
- */
-goog.ui.Container.prototype.handleKeyEventInternal = function(e) {
-  // Give the highlighted control the chance to handle the key event.
-  var highlighted = this.getHighlighted();
-  if (highlighted && typeof highlighted.handleKeyEvent == 'function' &&
-      highlighted.handleKeyEvent(e)) {
-    return true;
-  }
-
-  // Give the open control the chance to handle the key event.
-  if (this.openItem_ && this.openItem_ != highlighted &&
-      typeof this.openItem_.handleKeyEvent == 'function' &&
-      this.openItem_.handleKeyEvent(e)) {
-    return true;
-  }
-
-  // Do not handle the key event if any modifier key is pressed.
-  if (e.shiftKey || e.ctrlKey || e.metaKey || e.altKey) {
-    return false;
-  }
-
-  // Either nothing is highlighted, or the highlighted control didn't handle
-  // the key event, so attempt to handle it here.
-  switch (e.keyCode) {
-    case goog.events.KeyCodes.ESC:
-      if (this.isFocusable()) {
-        this.getKeyEventTarget().blur();
-      } else {
-        return false;
-      }
-      break;
-
-    case goog.events.KeyCodes.HOME:
-      this.highlightFirst();
-      break;
-
-    case goog.events.KeyCodes.END:
-      this.highlightLast();
-      break;
-
-    case goog.events.KeyCodes.UP:
-      if (this.orientation_ == goog.ui.Container.Orientation.VERTICAL) {
-        this.highlightPrevious();
-      } else {
-        return false;
-      }
-      break;
-
-    case goog.events.KeyCodes.LEFT:
-      if (this.orientation_ == goog.ui.Container.Orientation.HORIZONTAL) {
-        if (this.isRightToLeft()) {
-          this.highlightNext();
-        } else {
-          this.highlightPrevious();
-        }
-      } else {
-        return false;
-      }
-      break;
-
-    case goog.events.KeyCodes.DOWN:
-      if (this.orientation_ == goog.ui.Container.Orientation.VERTICAL) {
-        this.highlightNext();
-      } else {
-        return false;
-      }
-      break;
-
-    case goog.events.KeyCodes.RIGHT:
-      if (this.orientation_ == goog.ui.Container.Orientation.HORIZONTAL) {
-        if (this.isRightToLeft()) {
-          this.highlightPrevious();
-        } else {
-          this.highlightNext();
-        }
-      } else {
-        return false;
-      }
-      break;
-
-    default:
-      return false;
-  }
-
-  return true;
-};
-
-
-// Child component management.
-
-
-/**
- * Creates a DOM ID for the child control and registers it to an internal
- * hash table to be able to find it fast by id.
- * @param {goog.ui.Component} child The child control. Its root element has
- *     to be created yet.
+ * Performs the grouping of objects using the given key.
+ * @param {KEY} targetKey  The target key object for the group.
+ * @return {!Array<VALUE>} An array of grouped objects.
  * @private
  */
-goog.ui.Container.prototype.registerChildId_ = function(child) {
-  // Map the DOM ID of the control's root element to the control itself.
-  var childElem = child.getElement();
-
-  // If the control's root element doesn't have a DOM ID assign one.
-  var id = childElem.id || (childElem.id = child.getId());
-
-  // Lazily create the child element ID map on first use.
-  if (!this.childElementIdMap_) {
-    this.childElementIdMap_ = {};
+goog.iter.GroupByIterator_.prototype.groupItems_ = function(targetKey) {
+  var arr = [];
+  while (this.currentKey == targetKey) {
+    arr.push(this.currentValue);
+    try {
+      this.currentValue = this.iterator.next();
+    } catch (ex) {
+      if (ex !== goog.iter.StopIteration) {
+        throw ex;
+      }
+      break;
+    }
+    this.currentKey = this.keyFunc(this.currentValue);
   }
-  this.childElementIdMap_[id] = child;
+  return arr;
 };
 
 
 /**
- * Adds the specified control as the last child of this container.  See
- * {@link goog.ui.Container#addChildAt} for detailed semantics.
- * @param {goog.ui.Component} child The new child control.
- * @param {boolean=} opt_render Whether the new child should be rendered
- *     immediately after being added (defaults to false).
- * @override
+ * Creates an iterator that returns arrays containing elements from the
+ * {@code iterable} grouped by a key value. For iterables with repeated
+ * elements (i.e. sorted according to a particular key function), this function
+ * has a {@code uniq}-like effect. For example, grouping the array:
+ * {@code [A, B, B, C, C, A]} produces
+ * {@code [A, [A]], [B, [B, B]], [C, [C, C]], [A, [A]]}.
+ * @see http://docs.python.org/2/library/itertools.html#itertools.groupby
+ * @param {!goog.iter.Iterator<VALUE>|!goog.iter.Iterable} iterable The
+ *     iterable to group.
+ * @param {function(...VALUE): KEY=} opt_keyFunc  Optional function for
+ *     determining the key value for each group in the {@code iterable}. Default
+ *     is the identity function.
+ * @return {!goog.iter.Iterator<!Array<?>>} A new iterator that returns
+ *     arrays of consecutive key and groups.
+ * @template KEY, VALUE
  */
-goog.ui.Container.prototype.addChild = function(child, opt_render) {
-  goog.asserts.assertInstanceof(
-      child, goog.ui.Control, 'The child of a container must be a control');
-  goog.ui.Container.superClass_.addChild.call(this, child, opt_render);
+goog.iter.groupBy = function(iterable, opt_keyFunc) {
+  return new goog.iter.GroupByIterator_(iterable, opt_keyFunc);
 };
 
 
 /**
- * Overrides {@link goog.ui.Container#getChild} to make it clear that it
- * only returns {@link goog.ui.Control}s.
- * @param {string} id Child component ID.
- * @return {goog.ui.Control} The child with the given ID; null if none.
- * @override
+ * Gives an iterator that gives the result of calling the given function
+ * <code>f</code> with the arguments taken from the next element from
+ * <code>iterable</code> (the elements are expected to also be iterables).
+ *
+ * Similar to {@see goog.iter#map} but allows the function to accept multiple
+ * arguments from the iterable.
+ *
+ * @param {!goog.iter.Iterable<!goog.iter.Iterable>} iterable The iterable of
+ *     iterables to iterate over.
+ * @param {function(this:THIS,...*):RESULT} f The function to call for every
+ *     element.  This function takes N+2 arguments, where N represents the
+ *     number of items from the next element of the iterable. The two
+ *     additional arguments passed to the function are undefined and the
+ *     iterator itself. The function should return a new value.
+ * @param {THIS=} opt_obj The object to be used as the value of 'this' within
+ *     {@code f}.
+ * @return {!goog.iter.Iterator<RESULT>} A new iterator that returns the
+ *     results of applying the function to each element in the original
+ *     iterator.
+ * @template THIS, RESULT
  */
-goog.ui.Container.prototype.getChild;
+goog.iter.starMap = function(iterable, f, opt_obj) {
+  var iterator = goog.iter.toIterator(iterable);
+  var iter = new goog.iter.Iterator();
 
+  iter.next = function() {
+    var args = goog.iter.toArray(iterator.next());
+    return f.apply(opt_obj, goog.array.concat(args, undefined, iterator));
+  };
 
-/**
- * Overrides {@link goog.ui.Container#getChildAt} to make it clear that it
- * only returns {@link goog.ui.Control}s.
- * @param {number} index 0-based index.
- * @return {goog.ui.Control} The child with the given ID; null if none.
- * @override
- */
-goog.ui.Container.prototype.getChildAt;
-
-
-/**
- * Adds the control as a child of this container at the given 0-based index.
- * Overrides {@link goog.ui.Component#addChildAt} by also updating the
- * container's highlight index.  Since {@link goog.ui.Component#addChild} uses
- * {@link #addChildAt} internally, we only need to override this method.
- * @param {goog.ui.Component} control New child.
- * @param {number} index Index at which the new child is to be added.
- * @param {boolean=} opt_render Whether the new child should be rendered
- *     immediately after being added (defaults to false).
- * @override
- */
-goog.ui.Container.prototype.addChildAt = function(control, index, opt_render) {
-  goog.asserts.assertInstanceof(control, goog.ui.Control);
-
-  // Make sure the child control dispatches HIGHLIGHT, UNHIGHLIGHT, OPEN, and
-  // CLOSE events, and that it doesn't steal keyboard focus.
-  control.setDispatchTransitionEvents(goog.ui.Component.State.HOVER, true);
-  control.setDispatchTransitionEvents(goog.ui.Component.State.OPENED, true);
-  if (this.isFocusable() || !this.isFocusableChildrenAllowed()) {
-    control.setSupportedState(goog.ui.Component.State.FOCUSED, false);
-  }
-
-  // Disable mouse event handling by child controls.
-  control.setHandleMouseEvents(false);
-
-  var srcIndex =
-      (control.getParent() == this) ? this.indexOfChild(control) : -1;
-
-  // Let the superclass implementation do the work.
-  goog.ui.Container.superClass_.addChildAt.call(
-      this, control, index, opt_render);
-
-  if (control.isInDocument() && this.isInDocument()) {
-    this.registerChildId_(control);
-  }
-
-  this.updateHighlightedIndex_(srcIndex, index);
+  return iter;
 };
 
 
 /**
- * Updates the highlighted index when children are added or moved.
- * @param {number} fromIndex Index of the child before it was moved, or -1 if
- *     the child was added.
- * @param {number} toIndex Index of the child after it was moved or added.
+ * Returns an array of iterators each of which can iterate over the values in
+ * {@code iterable} without advancing the others.
+ * @see http://docs.python.org/2/library/itertools.html#itertools.tee
+ * @param {!goog.iter.Iterator<VALUE>|!goog.iter.Iterable} iterable The
+ *     iterable to tee.
+ * @param {number=} opt_num  The number of iterators to create. Default is 2.
+ * @return {!Array<goog.iter.Iterator<VALUE>>} An array of iterators.
+ * @template VALUE
+ */
+goog.iter.tee = function(iterable, opt_num) {
+  var iterator = goog.iter.toIterator(iterable);
+  var num = goog.isNumber(opt_num) ? opt_num : 2;
+  var buffers =
+      goog.array.map(goog.array.range(num), function() { return []; });
+
+  var addNextIteratorValueToBuffers = function() {
+    var val = iterator.next();
+    goog.array.forEach(buffers, function(buffer) { buffer.push(val); });
+  };
+
+  var createIterator = function(buffer) {
+    // Each tee'd iterator has an associated buffer (initially empty). When a
+    // tee'd iterator's buffer is empty, it calls
+    // addNextIteratorValueToBuffers(), adding the next value to all tee'd
+    // iterators' buffers, and then returns that value. This allows each
+    // iterator to be advanced independently.
+    var iter = new goog.iter.Iterator();
+
+    iter.next = function() {
+      if (goog.array.isEmpty(buffer)) {
+        addNextIteratorValueToBuffers();
+      }
+      goog.asserts.assert(!goog.array.isEmpty(buffer));
+      return buffer.shift();
+    };
+
+    return iter;
+  };
+
+  return goog.array.map(buffers, createIterator);
+};
+
+
+/**
+ * Creates an iterator that returns arrays containing a count and an element
+ * obtained from the given {@code iterable}.
+ * @see http://docs.python.org/2/library/functions.html#enumerate
+ * @param {!goog.iter.Iterator<VALUE>|!goog.iter.Iterable} iterable The
+ *     iterable to enumerate.
+ * @param {number=} opt_start  Optional starting value. Default is 0.
+ * @return {!goog.iter.Iterator<!Array<?>>} A new iterator containing
+ *     count/item pairs.
+ * @template VALUE
+ */
+goog.iter.enumerate = function(iterable, opt_start) {
+  return goog.iter.zip(goog.iter.count(opt_start), iterable);
+};
+
+
+/**
+ * Creates an iterator that returns the first {@code limitSize} elements from an
+ * iterable. If this number is greater than the number of elements in the
+ * iterable, all the elements are returned.
+ * @see http://goo.gl/V0sihp Inspired by the limit iterator in Guava.
+ * @param {!goog.iter.Iterator<VALUE>|!goog.iter.Iterable} iterable The
+ *     iterable to limit.
+ * @param {number} limitSize  The maximum number of elements to return.
+ * @return {!goog.iter.Iterator<VALUE>} A new iterator containing
+ *     {@code limitSize} elements.
+ * @template VALUE
+ */
+goog.iter.limit = function(iterable, limitSize) {
+  goog.asserts.assert(goog.math.isInt(limitSize) && limitSize >= 0);
+
+  var iterator = goog.iter.toIterator(iterable);
+
+  var iter = new goog.iter.Iterator();
+  var remaining = limitSize;
+
+  iter.next = function() {
+    if (remaining-- > 0) {
+      return iterator.next();
+    }
+    throw goog.iter.StopIteration;
+  };
+
+  return iter;
+};
+
+
+/**
+ * Creates an iterator that is advanced {@code count} steps ahead. Consumed
+ * values are silently discarded. If {@code count} is greater than the number
+ * of elements in {@code iterable}, an empty iterator is returned. Subsequent
+ * calls to {@code next()} will throw {@code goog.iter.StopIteration}.
+ * @param {!goog.iter.Iterator<VALUE>|!goog.iter.Iterable} iterable The
+ *     iterable to consume.
+ * @param {number} count  The number of elements to consume from the iterator.
+ * @return {!goog.iter.Iterator<VALUE>} An iterator advanced zero or more steps
+ *     ahead.
+ * @template VALUE
+ */
+goog.iter.consume = function(iterable, count) {
+  goog.asserts.assert(goog.math.isInt(count) && count >= 0);
+
+  var iterator = goog.iter.toIterator(iterable);
+
+  while (count-- > 0) {
+    goog.iter.nextOrValue(iterator, null);
+  }
+
+  return iterator;
+};
+
+
+/**
+ * Creates an iterator that returns a range of elements from an iterable.
+ * Similar to {@see goog.array#slice} but does not support negative indexes.
+ * @param {!goog.iter.Iterator<VALUE>|!goog.iter.Iterable} iterable The
+ *     iterable to slice.
+ * @param {number} start  The index of the first element to return.
+ * @param {number=} opt_end  The index after the last element to return. If
+ *     defined, must be greater than or equal to {@code start}.
+ * @return {!goog.iter.Iterator<VALUE>} A new iterator containing a slice of
+ *     the original.
+ * @template VALUE
+ */
+goog.iter.slice = function(iterable, start, opt_end) {
+  goog.asserts.assert(goog.math.isInt(start) && start >= 0);
+
+  var iterator = goog.iter.consume(iterable, start);
+
+  if (goog.isNumber(opt_end)) {
+    goog.asserts.assert(goog.math.isInt(opt_end) && opt_end >= start);
+    iterator = goog.iter.limit(iterator, opt_end - start /* limitSize */);
+  }
+
+  return iterator;
+};
+
+
+/**
+ * Checks an array for duplicate elements.
+ * @param {Array<VALUE>|goog.array.ArrayLike} arr The array to check for
+ *     duplicates.
+ * @return {boolean} True, if the array contains duplicates, false otherwise.
  * @private
+ * @template VALUE
  */
-goog.ui.Container.prototype.updateHighlightedIndex_ = function(
-    fromIndex, toIndex) {
-  if (fromIndex == -1) {
-    fromIndex = this.getChildCount();
-  }
-  if (fromIndex == this.highlightedIndex_) {
-    // The highlighted element itself was moved.
-    this.highlightedIndex_ = Math.min(this.getChildCount() - 1, toIndex);
-  } else if (
-      fromIndex > this.highlightedIndex_ && toIndex <= this.highlightedIndex_) {
-    // The control was added or moved behind the highlighted index.
-    this.highlightedIndex_++;
-  } else if (
-      fromIndex < this.highlightedIndex_ && toIndex > this.highlightedIndex_) {
-    // The control was moved from before to behind the highlighted index.
-    this.highlightedIndex_--;
-  }
+// TODO(user): Consider moving this into goog.array as a public function.
+goog.iter.hasDuplicates_ = function(arr) {
+  var deduped = [];
+  goog.array.removeDuplicates(arr, deduped);
+  return arr.length != deduped.length;
 };
 
 
 /**
- * Removes a child control.  Overrides {@link goog.ui.Component#removeChild} by
- * updating the highlight index.  Since {@link goog.ui.Component#removeChildAt}
- * uses {@link #removeChild} internally, we only need to override this method.
- * @param {string|goog.ui.Component} control The ID of the child to remove, or
- *     the control itself.
- * @param {boolean=} opt_unrender Whether to call {@code exitDocument} on the
- *     removed control, and detach its DOM from the document (defaults to
- *     false).
- * @return {goog.ui.Control} The removed control, if any.
- * @override
+ * Creates an iterator that returns permutations of elements in
+ * {@code iterable}.
+ *
+ * Permutations are obtained by taking the Cartesian product of
+ * {@code opt_length} iterables and filtering out those with repeated
+ * elements. For example, the permutations of {@code [1,2,3]} are
+ * {@code [[1,2,3], [1,3,2], [2,1,3], [2,3,1], [3,1,2], [3,2,1]]}.
+ * @see http://docs.python.org/2/library/itertools.html#itertools.permutations
+ * @param {!goog.iter.Iterator<VALUE>|!goog.iter.Iterable} iterable The
+ *     iterable from which to generate permutations.
+ * @param {number=} opt_length Length of each permutation. If omitted, defaults
+ *     to the length of {@code iterable}.
+ * @return {!goog.iter.Iterator<!Array<VALUE>>} A new iterator containing the
+ *     permutations of {@code iterable}.
+ * @template VALUE
  */
-goog.ui.Container.prototype.removeChild = function(control, opt_unrender) {
-  control = goog.isString(control) ? this.getChild(control) : control;
-  goog.asserts.assertInstanceof(control, goog.ui.Control);
+goog.iter.permutations = function(iterable, opt_length) {
+  var elements = goog.iter.toArray(iterable);
+  var length = goog.isNumber(opt_length) ? opt_length : elements.length;
 
-  if (control) {
-    var index = this.indexOfChild(control);
-    if (index != -1) {
-      if (index == this.highlightedIndex_) {
-        control.setHighlighted(false);
-        this.highlightedIndex_ = -1;
-      } else if (index < this.highlightedIndex_) {
-        this.highlightedIndex_--;
-      }
-    }
+  var sets = goog.array.repeat(elements, length);
+  var product = goog.iter.product.apply(undefined, sets);
 
-    // Remove the mapping from the child element ID map.
-    var childElem = control.getElement();
-    if (childElem && childElem.id && this.childElementIdMap_) {
-      goog.object.remove(this.childElementIdMap_, childElem.id);
-    }
-  }
-
-  control = /** @type {!goog.ui.Control} */ (
-      goog.ui.Container.superClass_.removeChild.call(
-          this, control, opt_unrender));
-
-  // Re-enable mouse event handling (in case the control is reused elsewhere).
-  control.setHandleMouseEvents(true);
-
-  return control;
-};
-
-
-// Container state management.
-
-
-/**
- * Returns the container's orientation.
- * @return {?goog.ui.Container.Orientation} Container orientation.
- */
-goog.ui.Container.prototype.getOrientation = function() {
-  return this.orientation_;
+  return goog.iter.filter(
+      product, function(arr) { return !goog.iter.hasDuplicates_(arr); });
 };
 
 
 /**
- * Sets the container's orientation.
- * @param {goog.ui.Container.Orientation} orientation Container orientation.
+ * Creates an iterator that returns combinations of elements from
+ * {@code iterable}.
+ *
+ * Combinations are obtained by taking the {@see goog.iter#permutations} of
+ * {@code iterable} and filtering those whose elements appear in the order they
+ * are encountered in {@code iterable}. For example, the 3-length combinations
+ * of {@code [0,1,2,3]} are {@code [[0,1,2], [0,1,3], [0,2,3], [1,2,3]]}.
+ * @see http://docs.python.org/2/library/itertools.html#itertools.combinations
+ * @param {!goog.iter.Iterator<VALUE>|!goog.iter.Iterable} iterable The
+ *     iterable from which to generate combinations.
+ * @param {number} length The length of each combination.
+ * @return {!goog.iter.Iterator<!Array<VALUE>>} A new iterator containing
+ *     combinations from the {@code iterable}.
+ * @template VALUE
  */
-// TODO(attila): Do we need to support containers with dynamic orientation?
-goog.ui.Container.prototype.setOrientation = function(orientation) {
-  if (this.getElement()) {
-    // Too late.
-    throw Error(goog.ui.Component.Error.ALREADY_RENDERED);
-  }
+goog.iter.combinations = function(iterable, length) {
+  var elements = goog.iter.toArray(iterable);
+  var indexes = goog.iter.range(elements.length);
+  var indexIterator = goog.iter.permutations(indexes, length);
+  // sortedIndexIterator will now give arrays of with the given length that
+  // indicate what indexes into "elements" should be returned on each iteration.
+  var sortedIndexIterator = goog.iter.filter(
+      indexIterator, function(arr) { return goog.array.isSorted(arr); });
 
-  this.orientation_ = orientation;
+  var iter = new goog.iter.Iterator();
+
+  function getIndexFromElements(index) { return elements[index]; }
+
+  iter.next = function() {
+    return goog.array.map(sortedIndexIterator.next(), getIndexFromElements);
+  };
+
+  return iter;
 };
 
 
 /**
- * Returns true if the container's visibility is set to visible, false if
- * it is set to hidden.  A container that is set to hidden is guaranteed
- * to be hidden from the user, but the reverse isn't necessarily true.
- * A container may be set to visible but can otherwise be obscured by another
- * element, rendered off-screen, or hidden using direct CSS manipulation.
- * @return {boolean} Whether the container is set to be visible.
+ * Creates an iterator that returns combinations of elements from
+ * {@code iterable}, with repeated elements possible.
+ *
+ * Combinations are obtained by taking the Cartesian product of {@code length}
+ * iterables and filtering those whose elements appear in the order they are
+ * encountered in {@code iterable}. For example, the 2-length combinations of
+ * {@code [1,2,3]} are {@code [[1,1], [1,2], [1,3], [2,2], [2,3], [3,3]]}.
+ * @see https://goo.gl/C0yXe4
+ * @see https://goo.gl/djOCsk
+ * @param {!goog.iter.Iterator<VALUE>|!goog.iter.Iterable} iterable The
+ *     iterable to combine.
+ * @param {number} length The length of each combination.
+ * @return {!goog.iter.Iterator<!Array<VALUE>>} A new iterator containing
+ *     combinations from the {@code iterable}.
+ * @template VALUE
  */
-goog.ui.Container.prototype.isVisible = function() {
-  return this.visible_;
-};
+goog.iter.combinationsWithReplacement = function(iterable, length) {
+  var elements = goog.iter.toArray(iterable);
+  var indexes = goog.array.range(elements.length);
+  var sets = goog.array.repeat(indexes, length);
+  var indexIterator = goog.iter.product.apply(undefined, sets);
+  // sortedIndexIterator will now give arrays of with the given length that
+  // indicate what indexes into "elements" should be returned on each iteration.
+  var sortedIndexIterator = goog.iter.filter(
+      indexIterator, function(arr) { return goog.array.isSorted(arr); });
 
+  var iter = new goog.iter.Iterator();
 
-/**
- * Shows or hides the container.  Does nothing if the container already has
- * the requested visibility.  Otherwise, dispatches a SHOW or HIDE event as
- * appropriate, giving listeners a chance to prevent the visibility change.
- * @param {boolean} visible Whether to show or hide the container.
- * @param {boolean=} opt_force If true, doesn't check whether the container
- *     already has the requested visibility, and doesn't dispatch any events.
- * @return {boolean} Whether the visibility was changed.
- */
-goog.ui.Container.prototype.setVisible = function(visible, opt_force) {
-  if (opt_force || (this.visible_ != visible &&
-                    this.dispatchEvent(
-                        visible ? goog.ui.Component.EventType.SHOW :
-                                  goog.ui.Component.EventType.HIDE))) {
-    this.visible_ = visible;
+  function getIndexFromElements(index) { return elements[index]; }
 
-    var elem = this.getElement();
-    if (elem) {
-      goog.style.setElementShown(elem, visible);
-      if (this.isFocusable()) {
-        // Enable keyboard access only for enabled & visible containers.
-        this.renderer_.enableTabIndex(
-            this.getKeyEventTarget(), this.enabled_ && this.visible_);
-      }
-      if (!opt_force) {
-        this.dispatchEvent(
-            this.visible_ ? goog.ui.Container.EventType.AFTER_SHOW :
-                            goog.ui.Container.EventType.AFTER_HIDE);
-      }
-    }
+  iter.next = function() {
+    return goog.array.map(
+        /** @type {!Array<number>} */
+        (sortedIndexIterator.next()), getIndexFromElements);
+  };
 
-    return true;
-  }
-
-  return false;
-};
-
-
-/**
- * Returns true if the container is enabled, false otherwise.
- * @return {boolean} Whether the container is enabled.
- */
-goog.ui.Container.prototype.isEnabled = function() {
-  return this.enabled_;
-};
-
-
-/**
- * Enables/disables the container based on the {@code enable} argument.
- * Dispatches an {@code ENABLED} or {@code DISABLED} event prior to changing
- * the container's state, which may be caught and canceled to prevent the
- * container from changing state.  Also enables/disables child controls.
- * @param {boolean} enable Whether to enable or disable the container.
- */
-goog.ui.Container.prototype.setEnabled = function(enable) {
-  if (this.enabled_ != enable &&
-      this.dispatchEvent(
-          enable ? goog.ui.Component.EventType.ENABLE :
-                   goog.ui.Component.EventType.DISABLE)) {
-    if (enable) {
-      // Flag the container as enabled first, then update children.  This is
-      // because controls can't be enabled if their parent is disabled.
-      this.enabled_ = true;
-      this.forEachChild(function(child) {
-        // Enable child control unless it is flagged.
-        if (child.wasDisabled) {
-          delete child.wasDisabled;
-        } else {
-          child.setEnabled(true);
-        }
-      });
-    } else {
-      // Disable children first, then flag the container as disabled.  This is
-      // because controls can't be disabled if their parent is already disabled.
-      this.forEachChild(function(child) {
-        // Disable child control, or flag it if it's already disabled.
-        if (child.isEnabled()) {
-          child.setEnabled(false);
-        } else {
-          child.wasDisabled = true;
-        }
-      });
-      this.enabled_ = false;
-      this.setMouseButtonPressed(false);
-    }
-
-    if (this.isFocusable()) {
-      // Enable keyboard access only for enabled & visible components.
-      this.renderer_.enableTabIndex(
-          this.getKeyEventTarget(), enable && this.visible_);
-    }
-  }
-};
-
-
-/**
- * Returns true if the container is focusable, false otherwise.  The default
- * is true.  Focusable containers always have a tab index and allocate a key
- * handler to handle keyboard events while focused.
- * @return {boolean} Whether the component is focusable.
- */
-goog.ui.Container.prototype.isFocusable = function() {
-  return this.focusable_;
-};
-
-
-/**
- * Sets whether the container is focusable.  The default is true.  Focusable
- * containers always have a tab index and allocate a key handler to handle
- * keyboard events while focused.
- * @param {boolean} focusable Whether the component is to be focusable.
- */
-goog.ui.Container.prototype.setFocusable = function(focusable) {
-  if (focusable != this.focusable_ && this.isInDocument()) {
-    this.enableFocusHandling_(focusable);
-  }
-  this.focusable_ = focusable;
-  if (this.enabled_ && this.visible_) {
-    this.renderer_.enableTabIndex(this.getKeyEventTarget(), focusable);
-  }
-};
-
-
-/**
- * Returns true if the container allows children to be focusable, false
- * otherwise.  Only effective if the container is not focusable.
- * @return {boolean} Whether children should be focusable.
- */
-goog.ui.Container.prototype.isFocusableChildrenAllowed = function() {
-  return this.allowFocusableChildren_;
-};
-
-
-/**
- * Sets whether the container allows children to be focusable, false
- * otherwise.  Only effective if the container is not focusable.
- * @param {boolean} focusable Whether the children should be focusable.
- */
-goog.ui.Container.prototype.setFocusableChildrenAllowed = function(focusable) {
-  this.allowFocusableChildren_ = focusable;
-};
-
-
-/**
- * @return {boolean} Whether highlighting a child component should also open it.
- */
-goog.ui.Container.prototype.isOpenFollowsHighlight = function() {
-  return this.openFollowsHighlight_;
-};
-
-
-/**
- * Sets whether highlighting a child component should also open it.
- * @param {boolean} follow Whether highlighting a child component also opens it.
- */
-goog.ui.Container.prototype.setOpenFollowsHighlight = function(follow) {
-  this.openFollowsHighlight_ = follow;
-};
-
-
-// Highlight management.
-
-
-/**
- * Returns the index of the currently highlighted item (-1 if none).
- * @return {number} Index of the currently highlighted item.
- */
-goog.ui.Container.prototype.getHighlightedIndex = function() {
-  return this.highlightedIndex_;
-};
-
-
-/**
- * Highlights the item at the given 0-based index (if any).  If another item
- * was previously highlighted, it is un-highlighted.
- * @param {number} index Index of item to highlight (-1 removes the current
- *     highlight).
- */
-goog.ui.Container.prototype.setHighlightedIndex = function(index) {
-  var child = this.getChildAt(index);
-  if (child) {
-    child.setHighlighted(true);
-  } else if (this.highlightedIndex_ > -1) {
-    this.getHighlighted().setHighlighted(false);
-  }
-};
-
-
-/**
- * Highlights the given item if it exists and is a child of the container;
- * otherwise un-highlights the currently highlighted item.
- * @param {goog.ui.Control} item Item to highlight.
- */
-goog.ui.Container.prototype.setHighlighted = function(item) {
-  this.setHighlightedIndex(this.indexOfChild(item));
-};
-
-
-/**
- * Returns the currently highlighted item (if any).
- * @return {goog.ui.Control?} Highlighted item (null if none).
- */
-goog.ui.Container.prototype.getHighlighted = function() {
-  return this.getChildAt(this.highlightedIndex_);
-};
-
-
-/**
- * Highlights the first highlightable item in the container
- */
-goog.ui.Container.prototype.highlightFirst = function() {
-  this.highlightHelper(function(index, max) {
-    return (index + 1) % max;
-  }, this.getChildCount() - 1);
-};
-
-
-/**
- * Highlights the last highlightable item in the container.
- */
-goog.ui.Container.prototype.highlightLast = function() {
-  this.highlightHelper(function(index, max) {
-    index--;
-    return index < 0 ? max - 1 : index;
-  }, 0);
-};
-
-
-/**
- * Highlights the next highlightable item (or the first if nothing is currently
- * highlighted).
- */
-goog.ui.Container.prototype.highlightNext = function() {
-  this.highlightHelper(function(index, max) {
-    return (index + 1) % max;
-  }, this.highlightedIndex_);
-};
-
-
-/**
- * Highlights the previous highlightable item (or the last if nothing is
- * currently highlighted).
- */
-goog.ui.Container.prototype.highlightPrevious = function() {
-  this.highlightHelper(function(index, max) {
-    index--;
-    return index < 0 ? max - 1 : index;
-  }, this.highlightedIndex_);
-};
-
-
-/**
- * Helper function that manages the details of moving the highlight among
- * child controls in response to keyboard events.
- * @param {function(this: goog.ui.Container, number, number) : number} fn
- *     Function that accepts the current and maximum indices, and returns the
- *     next index to check.
- * @param {number} startIndex Start index.
- * @return {boolean} Whether the highlight has changed.
- * @protected
- */
-goog.ui.Container.prototype.highlightHelper = function(fn, startIndex) {
-  // If the start index is -1 (meaning there's nothing currently highlighted),
-  // try starting from the currently open item, if any.
-  var curIndex =
-      startIndex < 0 ? this.indexOfChild(this.openItem_) : startIndex;
-  var numItems = this.getChildCount();
-
-  curIndex = fn.call(this, curIndex, numItems);
-  var visited = 0;
-  while (visited <= numItems) {
-    var control = this.getChildAt(curIndex);
-    if (control && this.canHighlightItem(control)) {
-      this.setHighlightedIndexFromKeyEvent(curIndex);
-      return true;
-    }
-    visited++;
-    curIndex = fn.call(this, curIndex, numItems);
-  }
-  return false;
-};
-
-
-/**
- * Returns whether the given item can be highlighted.
- * @param {goog.ui.Control} item The item to check.
- * @return {boolean} Whether the item can be highlighted.
- * @protected
- */
-goog.ui.Container.prototype.canHighlightItem = function(item) {
-  return item.isVisible() && item.isEnabled() &&
-      item.isSupportedState(goog.ui.Component.State.HOVER);
-};
-
-
-/**
- * Helper method that sets the highlighted index to the given index in response
- * to a keyboard event.  The base class implementation simply calls the
- * {@link #setHighlightedIndex} method, but subclasses can override this
- * behavior as needed.
- * @param {number} index Index of item to highlight.
- * @protected
- */
-goog.ui.Container.prototype.setHighlightedIndexFromKeyEvent = function(index) {
-  this.setHighlightedIndex(index);
-};
-
-
-/**
- * Returns the currently open (expanded) control in the container (null if
- * none).
- * @return {goog.ui.Control?} The currently open control.
- */
-goog.ui.Container.prototype.getOpenItem = function() {
-  return this.openItem_;
-};
-
-
-/**
- * Returns true if the mouse button is pressed, false otherwise.
- * @return {boolean} Whether the mouse button is pressed.
- */
-goog.ui.Container.prototype.isMouseButtonPressed = function() {
-  return this.mouseButtonPressed_;
-};
-
-
-/**
- * Sets or clears the "mouse button pressed" flag.
- * @param {boolean} pressed Whether the mouse button is presed.
- */
-goog.ui.Container.prototype.setMouseButtonPressed = function(pressed) {
-  this.mouseButtonPressed_ = pressed;
+  return iter;
 };

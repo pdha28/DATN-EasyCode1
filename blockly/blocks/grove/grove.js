@@ -845,3 +845,29 @@ Blockly.Blocks['AirsenseReadDataMHZ14A'] =  {
   },
 
 }
+Blockly.Blocks['SetDateDS3231'] = {
+  init: function() {
+    this.appendDummyInput()
+        .appendField(Blockly.Msg.GetDateTimeDS3231)
+        .appendField("Nhập ngày, tháng, năm : ")
+        .appendField(new Blockly.FieldTextInput(" "), 'DATE');
+    this.setPreviousStatement(true, null);
+    this.setNextStatement(true, null);
+    this.setColour('#00abd6');
+ this.setTooltip("");
+ this.setHelpUrl("");
+  }
+};
+Blockly.Blocks['SetTimeDS3231'] = {
+  init: function() {
+    this.appendDummyInput()
+        .appendField(Blockly.Msg.GetDateTimeDS3231)
+        .appendField("Nhập thời gian : ")
+        .appendField(new Blockly.FieldTextInput(" "), 'TIME');
+    this.setPreviousStatement(true, null);
+    this.setNextStatement(true, null);
+    this.setColour('#00abd6');
+ this.setTooltip("");
+ this.setHelpUrl("");
+  }
+};

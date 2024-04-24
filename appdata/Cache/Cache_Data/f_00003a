@@ -1,881 +1,837 @@
-// Copyright 2006 The Closure Library Authors. All Rights Reserved.
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//      http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS-IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+/**
+ * @license Licensed under the Apache License, Version 2.0 (the "License"):
+ *          http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * @fileoverview General javaScript for Arduino app with material design.
+ */
+'use strict';
+
+/** Create a namespace for the application. */
+var Ardublockly = Ardublockly || {};
+
+/** Initialize function for Ardublockly, to be called on page load. */
+Ardublockly.init = function() {
+ // console.log();
+  Ardublockly.initLanguage();
+  // Inject Blockly into content_blocks and fetch additional blocks
+  var toolbox=Ardublockly.TOOLBOX_XML(Ardublockly.getUrlBoard ());
+ if(Ardublockly.getCode()=="python") toolbox=Ardublockly.TOOLBOX_XML_PYTHON();
+  Ardublockly.injectBlockly(document.getElementById('content_blocks'),toolbox
+                            , '../blockly/');
+  Ardublockly.importExtraBlocks();
+
+  Ardublockly.designJsInit();
+  Ardublockly.initialiseIdeButtons();
+
+  Ardublockly.bindDesignEventListeners();
+  Ardublockly.bindActionFunctions();
+  Ardublockly.bindBlocklyEventListeners();
+
+  // Hackish way to check if not running locally
+  if (document.location.hostname != 'localhost') {
+    Ardublockly.openNotConnectedModal();
+    console.log('Offline app modal opened as non localhost host name found: ' +
+                document.location.hostname)
+  }
+};
+
+
+Ardublockly.getUrlBoard = function() {
+  var langKey = 'board';
+  var val = location.search.match(new RegExp('[?&]' + langKey + '=([^&]+)'));
+  var board = val ? decodeURIComponent(val[1].replace(/\+/g, '%20')) : '';
+   langKey = 'name';
+   val = location.search.match(new RegExp('[?&]' + langKey + '=([^&]+)'));
+   var name = val ? decodeURIComponent(val[1].replace(/\+/g, '%20')) : '';
+  return {board:board,name:name};
+};
+Ardublockly.getCode = function() {
+  var langKey = 'code';
+  var val = location.search.match(new RegExp('[?&]' + langKey + '=([^&]+)'));
+  var code = val ? decodeURIComponent(val[1].replace(/\+/g, '%20')) : '';
+  return code==""?'arduino':code;
+};
+Ardublockly.changeBoard = function(board) {
+  let lang=Ardublockly.getUrlLanguage ();
+  // Ardublockly.initLanguage();
+  // var toolbox=Ardublockly.TOOLBOX_XML(board);
+  // document.getElementById('content_blocks').innerHTML='';
+  // Ardublockly.injectBlockly(document.getElementById('content_blocks'),toolbox
+  //                           , '../blockly/');
+  // Ardublockly.saveSessionStorageBlocks();
+  // board=JSON.stringify( board);
+  // //var languageMenu = document.getElementById('language');
+  // //var newLang = encodeURIComponent(
+  // //    languageMenu.options[languageMenu.selectedIndex].value);
+
+  // var newBoard = encodeURIComponent(board);
+  // var search = window.location.search;
+  // if (search.length <= 1) {
+  //   search = '?board=' + newBoard;
+  // } 
+  // else if (search.match(/[?&]board=[^&]*/)) {
+  //   search = search.replace(/([?&]board=)[^&]*/, '$1' + newBoard);
+  // } 
+  // else {
+  //   search = search.replace(/\?/, '?board=' + newBoard + '&');
+  // }
+   window.location = window.location.protocol + '//' +
+       window.location.host + window.location.pathname + '?lang='+lang+'&board='+board.board+'&name='+board.name;
+};
+
+/** Binds functions to each of the buttons, nav links, and related. */
+Ardublockly.bindActionFunctions = function() {
+  // Navigation buttons
+  Ardublockly.bindClick_('button_load', Ardublockly.loadUserXmlFile);
+  Ardublockly.bindClick_('button_save', Ardublockly.saveXmlFile);
+  Ardublockly.bindClick_('button_delete', Ardublockly.discardAllBlocks);
+
+  // Side menu buttons, they also close the side menu
+  Ardublockly.bindClick_('menu_load', function() {
+    Ardublockly.loadUserXmlFile();
+    $('.button-collapse').sideNav('hide');
+  });
+  Ardublockly.bindClick_('menu_save', function() {
+    Ardublockly.saveXmlFile();
+    $('.button-collapse').sideNav('hide');
+  });
+  Ardublockly.bindClick_('menu_delete', function() {
+    Ardublockly.discardAllBlocks();
+    $('.button-collapse').sideNav('hide');
+  });
+  Ardublockly.bindClick_('menu_settings', function() {
+    Ardublockly.openSettings();
+    $('.button-collapse').sideNav('hide');
+  });
+  Ardublockly.bindClick_('menu_example_1', function() {
+    Ardublockly.loadServerXmlFile('../examples/blink.xml');
+    $('.button-collapse').sideNav('hide');
+  });
+  Ardublockly.bindClick_('menu_example_2', function() {
+    Ardublockly.loadServerXmlFile('../examples/serial_print_ascii.xml');
+    $('.button-collapse').sideNav('hide');
+  });
+  Ardublockly.bindClick_('menu_example_3', function() {
+    Ardublockly.loadServerXmlFile('../examples/serial_repeat_game.xml');
+    $('.button-collapse').sideNav('hide');
+  });
+  Ardublockly.bindClick_('menu_example_4', function() {
+    Ardublockly.loadServerXmlFile('../examples/servo_knob.xml');
+    $('.button-collapse').sideNav('hide');
+  });
+  Ardublockly.bindClick_('menu_example_5', function() {
+    Ardublockly.loadServerXmlFile('../examples/stepper_knob.xml');
+    $('.button-collapse').sideNav('hide');
+  });
+  Ardublockly.bindClick_('menu_example_6', function() {
+  Ardublockly.loadServerXmlFile('../examples/dieu_khien_giong_noi.xml');
+  $('.button-collapse').sideNav('hide');
+  });
+
+  // Floating buttons
+  Ardublockly.bindClick_('button_ide_large', function() {
+    Ardublockly.ideButtonLargeAction();
+  });
+  Ardublockly.bindClick_('button_ide_middle', function() {
+      Ardublockly.ideButtonMiddleAction();
+  });
+  Ardublockly.bindClick_('button_ide_left', function() {
+    Ardublockly.ideButtonLeftAction();
+  });
+  Ardublockly.bindClick_('button_load_xml', Ardublockly.XmlTextareaToBlocks);
+  Ardublockly.bindClick_('button_toggle_toolbox', Ardublockly.toogleToolbox);
+
+  // Settings modal input field listeners only if they can be edited
+  var settingsPathInputListeners = function(elId, setValFunc, setHtmlCallback) {
+    var el = document.getElementById(elId);
+    if (el.readOnly === false) {
+      // Event listener that send the data when the user presses 'Enter'
+      el.onkeypress = function(e) {
+        if (!e) e = window.event;
+        var keyCode = e.keyCode || e.which;
+        if (keyCode == '13') {
+          setValFunc(el.value, function(jsonObj) {
+            setHtmlCallback(ArdublocklyServer.jsonToHtmlTextInput(jsonObj));
+          });
+          return false;
+        }
+      };
+      // Event listener that send the data when moving out of the input field
+      el.onblur = function() {
+        setValFunc(el.value, function(jsonObj) {
+          setHtmlCallback(ArdublocklyServer.jsonToHtmlTextInput(jsonObj));
+        });
+      };
+    }
+  };
+  settingsPathInputListeners('settings_compiler_location',
+                             ArdublocklyServer.setCompilerLocation,
+                             Ardublockly.setCompilerLocationHtml);
+  settingsPathInputListeners('settings_sketch_location',
+                             ArdublocklyServer.setSketchLocationHtml,
+                             Ardublockly.setSketchLocationHtml);
+};
+
+/** Sets the Ardublockly server IDE setting to upload and sends the code. */
+Ardublockly.ideSendUpload = function() {
+  // Check if this is the currently selected option before edit sever setting
+  if (Ardublockly.ideButtonLargeAction !== Ardublockly.ideSendUpload) {
+    Ardublockly.showExtraIdeButtons(false);
+    Ardublockly.setIdeSettings(null, 'upload');
+  }
+  Ardublockly.shortMessage(Ardublockly.getLocalStr('uploadingSketch'));
+  Ardublockly.resetIdeOutputContent();
+  Ardublockly.sendCode();
+};
+
+/** Sets the Ardublockly server IDE setting to verify and sends the code. */
+Ardublockly.ideSendVerify = function() {
+  // Check if this is the currently selected option before edit sever setting
+  if (Ardublockly.ideButtonLargeAction !== Ardublockly.ideSendVerify) {
+    Ardublockly.showExtraIdeButtons(false);
+    Ardublockly.setIdeSettings(null, 'verify');
+  }
+  Ardublockly.shortMessage(Ardublockly.getLocalStr('verifyingSketch'));
+  Ardublockly.resetIdeOutputContent();
+  Ardublockly.sendCode();
+};
+
+/** Sets the Ardublockly server IDE setting to open and sends the code. */
+Ardublockly.ideSendOpen = function() {
+  // Check if this is the currently selected option before edit sever setting
+  if (Ardublockly.ideButtonLargeAction !== Ardublockly.ideSendOpen) {
+    Ardublockly.showExtraIdeButtons(false);
+    Ardublockly.setIdeSettings(null, 'open');
+  }
+  Ardublockly.shortMessage(Ardublockly.getLocalStr('openingSketch'));
+  Ardublockly.resetIdeOutputContent();
+  Ardublockly.sendCode();
+};
+
+/** Function bound to the left IDE button, to be changed based on settings. */
+Ardublockly.ideButtonLargeAction = Ardublockly.ideSendUpload;
+
+/** Function bound to the middle IDE button, to be changed based on settings. */
+Ardublockly.ideButtonMiddleAction = Ardublockly.ideSendVerify;
+
+/** Function bound to the large IDE button, to be changed based on settings. */
+Ardublockly.ideButtonLeftAction = Ardublockly.ideSendOpen;
+
+/** Initialises the IDE buttons with the default option from the server. */
+Ardublockly.initialiseIdeButtons = function() {
+  document.getElementById('button_ide_left').title =
+      Ardublockly.getLocalStr('openSketch');
+  document.getElementById('button_ide_middle').title =
+      Ardublockly.getLocalStr('verifySketch');
+  document.getElementById('button_ide_large').title =
+      Ardublockly.getLocalStr('uploadSketch');
+  ArdublocklyServer.requestIdeOptions(function(jsonObj) {
+    if (jsonObj != null) {
+      Ardublockly.changeIdeButtons(jsonObj.selected);
+    } // else Null: Ardublockly server is not running, do nothing
+  });
+};
 
 /**
- * @fileoverview Functions for dealing with date/time formatting.
+ * Changes the IDE launch buttons based on the option indicated in the argument.
+ * @param {!string} value One of the 3 possible values from the drop down select
+ *     in the settings modal: 'upload', 'verify', or 'open'.
  */
-
+Ardublockly.changeIdeButtons = function(value) {
+  var largeButton = document.getElementById('button_ide_large');
+  var middleButton = document.getElementById('button_ide_middle');
+  var leftButton = document.getElementById('button_ide_left');
+  var openTitle = Ardublockly.getLocalStr('openSketch');
+  var verifyTitle = Ardublockly.getLocalStr('verifySketch');
+  var uploadTitle = Ardublockly.getLocalStr('uploadSketch');
+  if (value === 'upload') {
+    Ardublockly.changeIdeButtonsDesign(value);
+    Ardublockly.ideButtonLeftAction = Ardublockly.ideSendOpen;
+    Ardublockly.ideButtonMiddleAction = Ardublockly.ideSendVerify;
+    Ardublockly.ideButtonLargeAction = Ardublockly.ideSendUpload;
+    leftButton.title = openTitle;
+    middleButton.title = verifyTitle;
+    largeButton.title = uploadTitle;
+  } else if (value === 'verify') {
+    Ardublockly.changeIdeButtonsDesign(value);
+    Ardublockly.ideButtonLeftAction = Ardublockly.ideSendOpen;
+    Ardublockly.ideButtonMiddleAction = Ardublockly.ideSendUpload;
+    Ardublockly.ideButtonLargeAction = Ardublockly.ideSendVerify;
+    leftButton.title = openTitle;
+    middleButton.title = uploadTitle;
+    largeButton.title = verifyTitle;
+  } else if (value === 'open') {
+    Ardublockly.changeIdeButtonsDesign(value);
+    Ardublockly.ideButtonLeftAction = Ardublockly.ideSendVerify;
+    Ardublockly.ideButtonMiddleAction = Ardublockly.ideSendUpload;
+    Ardublockly.ideButtonLargeAction = Ardublockly.ideSendOpen;
+    leftButton.title = verifyTitle;
+    middleButton.title = uploadTitle;
+    largeButton.title = openTitle;
+  }
+};
 
 /**
- * Namespace for i18n date/time formatting functions
+ * Loads an XML file from the server and replaces the current blocks into the
+ * Blockly workspace.
+ * @param {!string} xmlFile Server location of the XML file to load.
  */
-goog.provide('goog.i18n.DateTimeFormat');
-goog.provide('goog.i18n.DateTimeFormat.Format');
+Ardublockly.loadServerXmlFile = function(xmlFile) {
+  var loadXmlfileAccepted = function() {
+    // loadXmlBlockFile loads the file asynchronously and needs a callback
+    var loadXmlCb = function(sucess) {
+      if (sucess) {
+        Ardublockly.renderContent();
+      } else {
+        Ardublockly.alertMessage(
+            Ardublockly.getLocalStr('invalidXmlTitle'),
+            Ardublockly.getLocalStr('invalidXmlBody'),
+            false);
+      }
+    };
+    var connectionErrorCb = function() {
+      Ardublockly.openNotConnectedModal();
+    };
+    Ardublockly.loadXmlBlockFile(xmlFile, loadXmlCb, connectionErrorCb);
+  };
 
-goog.require('goog.asserts');
-goog.require('goog.date');
-goog.require('goog.i18n.DateTimeSymbols');
-goog.require('goog.i18n.TimeZone');
-goog.require('goog.string');
-
+  if (Ardublockly.isWorkspaceEmpty()) {
+    loadXmlfileAccepted();
+  } else {
+    Ardublockly.alertMessage(
+        Ardublockly.getLocalStr('loadNewBlocksTitle'),
+        Ardublockly.getLocalStr('loadNewBlocksBody'),
+        true, loadXmlfileAccepted);
+  }
+};
 
 /**
- * Datetime formatting functions following the pattern specification as defined
- * in JDK, ICU and CLDR, with minor modification for typical usage in JS.
- * Pattern specification:
- * {@link http://userguide.icu-project.org/formatparse/datetime}
- * <pre>
- * Symbol   Meaning                    Presentation       Example
- * ------   -------                    ------------       -------
- * G#       era designator             (Text)             AD
- * y#       year                       (Number)           1996
- * Y*       year (week of year)        (Number)           1997
- * u*       extended year              (Number)           4601
- * Q#       quarter                    (Text)             Q3 & 3rd quarter
- * M        month in year              (Text & Number)    July & 07
- * L        month in year (standalone) (Text & Number)    July & 07
- * d        day in month               (Number)           10
- * h        hour in am/pm (1~12)       (Number)           12
- * H        hour in day (0~23)         (Number)           0
- * m        minute in hour             (Number)           30
- * s        second in minute           (Number)           55
- * S        fractional second          (Number)           978
- * E#       day of week                (Text)             Tue & Tuesday
- * e*       day of week (local 1~7)    (Number)           2
- * c#       day of week (standalone)   (Text & Number)    2 & Tues & Tuesday & T
- * D*       day in year                (Number)           189
- * F*       day of week in month       (Number)           2 (2nd Wed in July)
- * w        week in year               (Number)           27
- * W*       week in month              (Number)           2
- * a        am/pm marker               (Text)             PM
- * k        hour in day (1~24)         (Number)           24
- * K        hour in am/pm (0~11)       (Number)           0
- * z        time zone                  (Text)             Pacific Standard Time
- * Z#       time zone (RFC 822)        (Number)           -0800
- * v#       time zone (generic)        (Text)             America/Los_Angeles
- * V#       time zone                  (Text)             Los Angeles Time
- * g*       Julian day                 (Number)           2451334
- * A*       milliseconds in day        (Number)           69540000
- * '        escape for text            (Delimiter)        'Date='
- * ''       single quote               (Literal)          'o''clock'
- *
- * Item marked with '*' are not supported yet.
- * Item marked with '#' works different than java
- *
- * The count of pattern letters determine the format.
- * (Text): 4 or more, use full form, <4, use short or abbreviated form if it
- * exists. (e.g., "EEEE" produces "Monday", "EEE" produces "Mon")
- *
- * (Number): the minimum number of digits. Shorter numbers are zero-padded to
- * this amount (e.g. if "m" produces "6", "mm" produces "06"). Year is handled
- * specially; that is, if the count of 'y' is 2, the Year will be truncated to
- * 2 digits. (e.g., if "yyyy" produces "1997", "yy" produces "97".) Unlike other
- * fields, fractional seconds are padded on the right with zero.
- *
- * :(Text & Number) 3 or over, use text, otherwise use number. (e.g., "M"
- * produces "1", "MM" produces "01", "MMM" produces "Jan", and "MMMM" produces
- * "January".)
- *
- * Any characters in the pattern that are not in the ranges of ['a'..'z'] and
- * ['A'..'Z'] will be treated as quoted text. For instance, characters like ':',
- * '.', ' ', '#' and '@' will appear in the resulting time text even they are
- * not embraced within single quotes.
- * </pre>
+ * Loads an XML file from the users file system and adds the blocks into the
+ * Blockly workspace.
  */
+Ardublockly.loadUserXmlFile = function() {
+  // Create File Reader event listener function
+  var parseInputXMLfile = function(e) {
+    var xmlFile = e.target.files[0];
+    var filename = xmlFile.name;
+    if(xmlFile.path.length>0) sessionStorage.setItem("path", xmlFile.path);
+    var extensionPosition = filename.lastIndexOf('.');
+    if (extensionPosition !== -1) {
+      filename = filename.substr(0, extensionPosition);
+    }
+
+    var reader = new FileReader();
+    reader.onload = function() {
+      var success = Ardublockly.replaceBlocksfromXml(reader.result);
+      if (success) {
+        Ardublockly.renderContent();
+        Ardublockly.sketchNameSet(filename);
+      } else {
+        Ardublockly.alertMessage(
+            Ardublockly.getLocalStr('invalidXmlTitle'),
+            Ardublockly.getLocalStr('invalidXmlBody'),
+            false);
+      }
+    };
+    reader.readAsText(xmlFile);
+  };
+
+  // Create once invisible browse button with event listener, and click it
+  var selectFile = document.getElementById('select_file');
+  if (selectFile === null) {
+    var selectFileDom = document.createElement('INPUT');
+    selectFileDom.type = 'file';
+    selectFileDom.id = 'select_file';
+
+    var selectFileWrapperDom = document.createElement('DIV');
+    selectFileWrapperDom.id = 'select_file_wrapper';
+    selectFileWrapperDom.style.display = 'none';
+    selectFileWrapperDom.appendChild(selectFileDom);
+
+    document.body.appendChild(selectFileWrapperDom);
+    selectFile = document.getElementById('select_file');
+    selectFile.addEventListener('change', parseInputXMLfile, false);
+  }
+  selectFile.click();
+};
 
 /**
- * Construct a DateTimeFormat object based on current locale.
- * @constructor
- * @param {string|number} pattern pattern specification or pattern type.
- * @param {!Object=} opt_dateTimeSymbols Optional symbols to use for this
- *     instance rather than the global symbols.
- * @final
+ * Creates an XML file containing the blocks from the Blockly workspace and
+ * prompts the users to save it into their local file system.
  */
-goog.i18n.DateTimeFormat = function(pattern, opt_dateTimeSymbols) {
-  goog.asserts.assert(goog.isDef(pattern), 'Pattern must be defined');
-  goog.asserts.assert(
-      goog.isDef(opt_dateTimeSymbols) || goog.isDef(goog.i18n.DateTimeSymbols),
-      'goog.i18n.DateTimeSymbols or explicit symbols must be defined');
+var pathSaveXmlFile;
+Ardublockly.saveXmlFile = function() {
+  Ardublockly.saveTextFileAs(
+      document.getElementById('sketch_name').value + '.xml',
+      Ardublockly.generateXml());
+};
 
-  this.patternParts_ = [];
+Ardublockly.continuossaveXmlFile=function(){
+  if(sessionStorage.getItem("path") && sessionStorage.getItem("path")!='null'){
+ return JSON.stringify({content:Ardublockly.generateXml(),name:document.getElementById('sketch_name').value + '.xml',path:sessionStorage.getItem("path")});
+
+}
+else{
+ return JSON.stringify({content:Ardublockly.generateXml(),name:document.getElementById('sketch_name').value + '.xml',path:null});
+}
+
+};
+
+/**
+ * Creates an Arduino Sketch file containing the Arduino code generated from
+ * the Blockly workspace and prompts the users to save it into their local file
+ * system.
+ */
+Ardublockly.saveSketchFile = function() {
+  Ardublockly.saveTextFileAs(
+      document.getElementById('sketch_name').value + '.ino',
+      Ardublockly.generateArduino());
+};
+
+/**
+ * Creates an text file with the input content and files name, and prompts the
+ * users to save it into their local file system.
+ * @param {!string} fileName Name for the file to be saved.
+ * @param {!string} content Text datd to be saved in to the file.
+ */
+Ardublockly.saveTextFileAs = function(fileName, content) {
+  var blob = new Blob([content], {type: 'text/plain;charset=utf-8'});
+  saveAs(blob, fileName);
+};
+
+/**
+ * Retrieves the Settings from ArdublocklyServer to populates the form data
+ * and opens the Settings modal dialog.
+ */
+Ardublockly.openSettings = function() {
+  ArdublocklyServer.requestCompilerLocation(function(jsonObj) {
+    Ardublockly.setCompilerLocationHtml(
+        ArdublocklyServer.jsonToHtmlTextInput(jsonObj));
+  });
+  ArdublocklyServer.requestSketchLocation(function(jsonObj) {
+    Ardublockly.setSketchLocationHtml(
+        ArdublocklyServer.jsonToHtmlTextInput(jsonObj));
+  });
+  ArdublocklyServer.requestArduinoBoards(function(jsonObj) {
+    Ardublockly.setArduinoBoardsHtml(
+        ArdublocklyServer.jsonToHtmlDropdown(jsonObj));
+  });
+  ArdublocklyServer.requestSerialPorts(function(jsonObj) {
+    Ardublockly.setSerialPortsHtml(
+        ArdublocklyServer.jsonToHtmlDropdown(jsonObj));
+  });
+  ArdublocklyServer.requestIdeOptions(function(jsonObj) {
+    Ardublockly.setIdeHtml(ArdublocklyServer.jsonToHtmlDropdown(jsonObj));
+  });
+  // Language menu only set on page load within Ardublockly.initLanguage()
+  Ardublockly.openSettingsModal();
+};
+
+
+Ardublockly.openSettingCom = function() {
+  ArdublocklyServer.requestSerialPorts(function(jsonObj) {
+    Ardublockly.setSerialPortsHtml(
+        ArdublocklyServer.jsonToHtmlDropdown(jsonObj));
+  });
+  // Language menu only set on page load within Ardublockly.initLanguage()
+  Ardublockly.openSettingComModal();
+};
+
+/**
+ * Sets the compiler location form data retrieve from an updated element.
+ * @param {element} jsonResponse JSON data coming back from the server.
+ * @return {undefined} Might exit early if response is null.
+ */
+Ardublockly.setCompilerLocationHtml = function(newEl) {
+  if (newEl === null) return Ardublockly.openNotConnectedModal();
+
+  var compLocIp = document.getElementById('settings_compiler_location');
+  if (compLocIp != null) {
+    compLocIp.value = newEl.value || compLocIp.value ||
+        'Please enter the location of the Arduino IDE executable';
+    compLocIp.style.cssText = newEl.style.cssText;
+  }
+};
+
+/**
+ * Sets the sketch location form data retrieve from an updated element.
+ * @param {element} jsonResponse JSON data coming back from the server.
+ * @return {undefined} Might exit early if response is null.
+ */
+Ardublockly.setSketchLocationHtml = function(newEl) {
+  if (newEl === null) return Ardublockly.openNotConnectedModal();
+
+  var sketchLocIp = document.getElementById('settings_sketch_location');
+  if (sketchLocIp != null) {
+    sketchLocIp.value = newEl.value || sketchLocIp.value ||
+        'Please enter a folder to store the Arduino Sketch';
+    sketchLocIp.style.cssText = newEl.style.cssText;
+  }
+};
+
+/**
+ * Replaces the Arduino Boards form data with a new HTMl element.
+ * Ensures there is a change listener to call 'setSerialPort' function
+ * @param {element} jsonObj JSON data coming back from the server.
+ * @return {undefined} Might exit early if response is null.
+ */
+Ardublockly.setArduinoBoardsHtml = function(newEl) {
+  if (newEl === null) return Ardublockly.openNotConnectedModal();
+
+  var boardDropdown = document.getElementById('board');
+  if (boardDropdown !== null) {
+    // Restarting the select elements built by materialize
+    $('select').material_select('destroy');
+    newEl.name = 'settings_board';
+    newEl.id = 'board';
+    newEl.onchange = Ardublockly.setBoard;
+    boardDropdown.parentNode.replaceChild(newEl, boardDropdown);
+    // Refresh the materialize select menus
+    $('select').material_select();
+  }
+};
+
+/**
+ * Sets the Arduino Board type with the selected user input from the drop down.
+ */
+Ardublockly.setBoard = function(board) {
+  // var el = document.getElementById('board');
+  // var boardValue = el.options[el.selectedIndex].value;
+  var boardValue=board;
+  ArdublocklyServer.setArduinoBoard(boardValue, function(jsonObj) {
+    var newEl = ArdublocklyServer.jsonToHtmlDropdown(jsonObj);
+    Ardublockly.setArduinoBoardsHtml(newEl);
+  });
+  Ardublockly.changeBlocklyArduinoBoard(
+      boardValue.toLowerCase().replace(/ /g, '_'));
+};
+
+/**
+ * Replaces the Serial Port form data with a new HTMl element.
+ * Ensures there is a change listener to call 'setSerialPort' function
+ * @param {element} jsonResponse JSON data coming back from the server.
+ * @return {undefined} Might exit early if response is null.
+ */
+Ardublockly.setSerialPortsHtml = function(newEl) {
+  if (newEl === null) return Ardublockly.openNotConnectedModal();
+
+  var serialDropdown = document.getElementById('serial_port');
+  if (serialDropdown !== null) {
+    // Restarting the select elements built by materialize
+    $('select').material_select('destroy');
+    newEl.name = 'settings_serial';
+    newEl.id = 'serial_port';
+    newEl.onchange = Ardublockly.setSerial;
+    serialDropdown.parentNode.replaceChild(newEl, serialDropdown);
+    // Refresh the materialize select menus
+    $('select').material_select();
+  }
+};
+
+/** Sets the Serial Port with the selected user input from the drop down. */
+Ardublockly.setSerial = function() {
+  var el = document.getElementById('serial_port');
+  var serialValue = el.options[el.selectedIndex].value;
+  ArdublocklyServer.setSerialPort(serialValue, function(jsonObj) {
+    var newEl = ArdublocklyServer.jsonToHtmlDropdown(jsonObj);
+    Ardublockly.setSerialPortsHtml(newEl);
+  });
+};
+
+/**
+ * Replaces IDE options form data with a new HTMl element.
+ * Ensures there is a change listener to call 'setIdeSettings' function
+ * @param {element} jsonResponse JSON data coming back from the server.
+ * @return {undefined} Might exit early if response is null.
+ */
+Ardublockly.setIdeHtml = function(newEl) {
+  if (newEl === null) return Ardublockly.openNotConnectedModal();
+
+  var ideDropdown = document.getElementById('ide_settings');
+  if (ideDropdown !== null) {
+    // Restarting the select elements built by materialize
+    $('select').material_select('destroy');
+    newEl.name = 'settings_ide';
+    newEl.id = 'ide_settings';
+    newEl.onchange = Ardublockly.setIdeSettings;
+    ideDropdown.parentNode.replaceChild(newEl, ideDropdown);
+    // Refresh the materialize select menus
+    $('select').material_select();
+  }
+};
+
+/**
+ * Sets the IDE settings data with the selected user input from the drop down.
+ * @param {Event} e Event that triggered this function call. Required for link
+ *     it to the listeners, but not used.
+ * @param {string} preset A value to set the IDE settings bypassing the drop
+ *     down selected value. Valid data: 'upload', 'verify', or 'open'.
+ */
+Ardublockly.setIdeSettings = function(e, preset) {
+  if (preset !== undefined) {
+    var ideValue = preset;
+  } else {
+    var el = document.getElementById('ide_settings');
+    var ideValue = el.options[el.selectedIndex].value;
+  }
+  Ardublockly.changeIdeButtons(ideValue);
+  ArdublocklyServer.setIdeOptions(ideValue, function(jsonObj) {
+    Ardublockly.setIdeHtml(ArdublocklyServer.jsonToHtmlDropdown(jsonObj));
+  });
+};
+
+/**
+ * Send the Arduino Code to the ArdublocklyServer to process.
+ * Shows a loader around the button, blocking it (unblocked upon received
+ * message from server).
+ */
+Ardublockly.sendCode = function() {
+  Ardublockly.largeIdeButtonSpinner(true);
 
   /**
-   * Data structure that with all the locale info needed for date formatting.
-   * (day/month names, most common patterns, rules for week-end, etc.)
-   * @private {!goog.i18n.DateTimeSymbolsType}
+   * Receives the IDE data back to be displayed and stops spinner.
+   * @param {element} jsonResponse JSON data coming back from the server.
+   * @return {undefined} Might exit early if response is null.
    */
-  this.dateTimeSymbols_ = /** @type {!goog.i18n.DateTimeSymbolsType} */ (
-      opt_dateTimeSymbols || goog.i18n.DateTimeSymbols);
-  if (typeof pattern == 'number') {
-    this.applyStandardPattern_(pattern);
+  var sendCodeReturn = function(jsonObj) {
+    Ardublockly.largeIdeButtonSpinner(false);
+    if (jsonObj === null) return Ardublockly.openNotConnectedModal();
+    var dataBack = ArdublocklyServer.jsonToIdeModal(jsonObj);
+    Ardublockly.arduinoIdeOutput(dataBack);
+  };
+
+  
+  ArdublocklyServer.sendSketchToServer(
+      Ardublockly.generateArduino(), sendCodeReturn);
+};
+
+/** Populate the workspace blocks with the XML written in the XML text area. */
+Ardublockly.XmlTextareaToBlocks = function() {
+  var success = Ardublockly.replaceBlocksfromXml(
+      document.getElementById('content_xml').value);
+  if (success) {
+    Ardublockly.renderContent();
   } else {
-    this.applyPattern_(pattern);
+    Ardublockly.alertMessage(
+        Ardublockly.getLocalStr('invalidXmlTitle'),
+        Ardublockly.getLocalStr('invalidXmlBody'),
+        false);
   }
 };
 
-
 /**
- * Enum to identify predefined Date/Time format pattern.
- * @enum {number}
- */
-goog.i18n.DateTimeFormat.Format = {
-  FULL_DATE: 0,
-  LONG_DATE: 1,
-  MEDIUM_DATE: 2,
-  SHORT_DATE: 3,
-  FULL_TIME: 4,
-  LONG_TIME: 5,
-  MEDIUM_TIME: 6,
-  SHORT_TIME: 7,
-  FULL_DATETIME: 8,
-  LONG_DATETIME: 9,
-  MEDIUM_DATETIME: 10,
-  SHORT_DATETIME: 11
-};
-
-
-/**
- * regular expression pattern for parsing pattern string
- * @type {Array<RegExp>}
+ * Private variable to save the previous version of the Arduino Code.
+ * @type {!String}
  * @private
  */
-goog.i18n.DateTimeFormat.TOKENS_ = [
-  // quote string
-  /^\'(?:[^\']|\'\')*\'/,
-  // pattern chars
-  /^(?:G+|y+|M+|k+|S+|E+|a+|h+|K+|H+|c+|L+|Q+|d+|m+|s+|v+|V+|w+|z+|Z+)/,
-  // and all the other chars
-  /^[^\'GyMkSEahKHcLQdmsvVwzZ]+/  // and all the other chars
-];
-
+Ardublockly.PREV_ARDUINO_CODE_ = 'void setup() {\n\n}\n\n\nvoid loop() {\n\n}';
 
 /**
- * These are token types, corresponding to above token definitions.
- * @enum {number}
- * @private
+ * Populate the Arduino Code and Blocks XML panels with content generated from
+ * the blocks.
  */
-goog.i18n.DateTimeFormat.PartTypes_ = {
-  QUOTED_STRING: 0,
-  FIELD: 1,
-  LITERAL: 2
-};
-
-
-/**
- * @param {!goog.date.DateLike} date
- * @private
- */
-goog.i18n.DateTimeFormat.getHours_ = function(date) {
-  return date.getHours ? date.getHours() : 0;
-};
-
-
-/**
- * Apply specified pattern to this formatter object.
- * @param {string} pattern String specifying how the date should be formatted.
- * @private
- */
-goog.i18n.DateTimeFormat.prototype.applyPattern_ = function(pattern) {
-  if (goog.i18n.DateTimeFormat.removeRlmInPatterns_) {
-    // Remove RLM unicode control character from pattern.
-    pattern = pattern.replace(/\u200f/g, '');
-  }
-  // lex the pattern, once for all uses
-  while (pattern) {
-    for (var i = 0; i < goog.i18n.DateTimeFormat.TOKENS_.length; ++i) {
-      var m = pattern.match(goog.i18n.DateTimeFormat.TOKENS_[i]);
-      if (m) {
-        var part = m[0];
-        pattern = pattern.substring(part.length);
-        if (i == goog.i18n.DateTimeFormat.PartTypes_.QUOTED_STRING) {
-          if (part == "''") {
-            part = "'";  // '' -> '
-          } else {
-            part = part.substring(1, part.length - 1);  // strip quotes
-            part = part.replace(/\'\'/, "'");
-          }
+Ardublockly.renderContent = function() {
+  // Render Arduino Code with latest change highlight and syntax highlighting
+  var arduinoCode = Ardublockly.generateArduino();
+  if (arduinoCode !== Ardublockly.PREV_ARDUINO_CODE_) {
+    var diff = JsDiff.diffWords(Ardublockly.PREV_ARDUINO_CODE_, arduinoCode);
+    var resultStringArray = [];
+    for (var i = 0; i < diff.length; i++) {
+      if (!diff[i].removed) {
+        var escapedCode = diff[i].value.replace(/</g, '&lt;')
+                                       .replace(/>/g, '&gt;');
+        if (diff[i].added) {
+          resultStringArray.push(
+              '<span class="code_highlight_new">' + escapedCode + '</span>');
+        } else {
+          resultStringArray.push(escapedCode);
         }
-        this.patternParts_.push({text: part, type: i});
-        break;
       }
     }
+    document.getElementById('content_arduino').innerHTML =
+        prettyPrintOne(resultStringArray.join(''), 'cpp', false);
+    Ardublockly.PREV_ARDUINO_CODE_ = arduinoCode;
   }
+
+  // Generate plain XML into element
+  document.getElementById('content_xml').value = Ardublockly.generateXml();
 };
 
-
 /**
- * Format the given date object according to preset pattern and current locale.
- * @param {goog.date.DateLike} date The Date object that is being formatted.
- * @param {goog.i18n.TimeZone=} opt_timeZone optional, if specified, time
- *    related fields will be formatted based on its setting. When this field
- *    is not specified, "undefined" will be pass around and those function
- *    that really need time zone service will create a default one.
- * @return {string} Formatted string for the given date.
- *    Throws an error if the date is null or if one tries to format a date-only
- *    object (for instance goog.date.Date) using a pattern with time fields.
- */
-goog.i18n.DateTimeFormat.prototype.format = function(date, opt_timeZone) {
-  if (!date) throw Error('The date to format must be non-null.');
-
-  // We don't want to write code to calculate each date field because we
-  // want to maximize performance and minimize code size.
-  // JavaScript only provide API to render local time.
-  // Suppose target date is: 16:00 GMT-0400
-  // OS local time is:       12:00 GMT-0800
-  // We want to create a Local Date Object : 16:00 GMT-0800, and fix the
-  // time zone display ourselves.
-  // Thing get a little bit tricky when daylight time transition happens. For
-  // example, suppose OS timeZone is America/Los_Angeles, it is impossible to
-  // represent "2006/4/2 02:30" even for those timeZone that has no transition
-  // at this time. Because 2:00 to 3:00 on that day does not exist in
-  // America/Los_Angeles time zone. To avoid calculating date field through
-  // our own code, we uses 3 Date object instead, one for "Year, month, day",
-  // one for time within that day, and one for timeZone object since it need
-  // the real time to figure out actual time zone offset.
-  var diff = opt_timeZone ?
-      (date.getTimezoneOffset() - opt_timeZone.getOffset(date)) * 60000 :
-      0;
-  var dateForDate = diff ? new Date(date.getTime() + diff) : date;
-  var dateForTime = dateForDate;
-  // When the time manipulation applied above spans the DST on/off hour, this
-  // could alter the time incorrectly by adding or subtracting an additional
-  // hour.
-  // We can mitigate this by:
-  // - Adding the difference in timezone offset to the date. This ensures that
-  //   the dateForDate is still within the right day if the extra DST hour
-  //   affected the date.
-  // - Move the time one day forward if we applied a timezone offset backwards,
-  //   or vice versa. This trick ensures that the time is in the same offset
-  //   as the original date, so we remove the additional hour added or
-  //   subtracted by the DST switch.
-  if (opt_timeZone &&
-      dateForDate.getTimezoneOffset() != date.getTimezoneOffset()) {
-    var dstDiff =
-        (dateForDate.getTimezoneOffset() - date.getTimezoneOffset()) * 60000;
-    dateForDate = new Date(dateForDate.getTime() + dstDiff);
-
-    diff += diff > 0 ? -goog.date.MS_PER_DAY : goog.date.MS_PER_DAY;
-    dateForTime = new Date(date.getTime() + diff);
-  }
-
-  var out = [];
-  for (var i = 0; i < this.patternParts_.length; ++i) {
-    var text = this.patternParts_[i].text;
-    if (goog.i18n.DateTimeFormat.PartTypes_.FIELD ==
-        this.patternParts_[i].type) {
-      out.push(
-          this.formatField_(
-              text, date, dateForDate, dateForTime, opt_timeZone));
-    } else {
-      out.push(text);
-    }
-  }
-  return out.join('');
-};
-
-
-/**
- * Apply a predefined pattern as identified by formatType, which is stored in
- * locale specific repository.
- * @param {number} formatType A number that identified the predefined pattern.
+ * Private variable to indicate if the toolbox is meant to be shown.
+ * @type {!boolean}
  * @private
  */
-goog.i18n.DateTimeFormat.prototype.applyStandardPattern_ = function(
-    formatType) {
-  var pattern;
-  if (formatType < 4) {
-    pattern = this.dateTimeSymbols_.DATEFORMATS[formatType];
-  } else if (formatType < 8) {
-    pattern = this.dateTimeSymbols_.TIMEFORMATS[formatType - 4];
-  } else if (formatType < 12) {
-    pattern = this.dateTimeSymbols_.DATETIMEFORMATS[formatType - 8];
-    pattern = pattern.replace(
-        '{1}', this.dateTimeSymbols_.DATEFORMATS[formatType - 8]);
-    pattern = pattern.replace(
-        '{0}', this.dateTimeSymbols_.TIMEFORMATS[formatType - 8]);
+Ardublockly.TOOLBAR_SHOWING_ = true;
+
+/**
+ * Toggles the blockly toolbox and the Ardublockly toolbox button On and Off.
+ * Uses namespace member variable TOOLBAR_SHOWING_ to toggle state.
+ */
+Ardublockly.toogleToolbox = function() {
+  if (Ardublockly.TOOLBAR_SHOWING_) {
+    Ardublockly.blocklyCloseToolbox();
+    Ardublockly.displayToolbox(false);
   } else {
-    this.applyStandardPattern_(goog.i18n.DateTimeFormat.Format.MEDIUM_DATETIME);
-    return;
+    Ardublockly.displayToolbox(true);
   }
-  this.applyPattern_(pattern);
+  Ardublockly.TOOLBAR_SHOWING_ = !Ardublockly.TOOLBAR_SHOWING_;
 };
 
+/** @return {boolean} Indicates if the toolbox is currently visible. */
+Ardublockly.isToolboxVisible = function() {
+  return Ardublockly.TOOLBAR_SHOWING_;
+};
 
 /**
- * Localizes a string potentially containing numbers, replacing ASCII digits
- * with native digits if specified so by the locale. Leaves other characters.
- * @param {string} input the string to be localized, using ASCII digits.
- * @return {string} localized string, potentially using native digits.
+ * Lazy loads the additional block JS files from the ./block directory.
+ * Initialises any additional Ardublockly extensions.
+ * TODO: Loads the examples into the examples modal
+ */
+Ardublockly.importExtraBlocks = function() {
+  /**
+   * Parses the JSON data to find the block and languages js files.
+   * @param {jsonDataObj} jsonDataObj JSON in JavaScript object format, null
+   *     indicates an error occurred.
+   * @return {undefined} Might exit early if response is null.
+   */
+  var jsonDataCb = function(jsonDataObj) {
+    if (jsonDataObj === null) return Ardublockly.openNotConnectedModal();
+    if (jsonDataObj.categories !== undefined) {
+      var head = document.getElementsByTagName('head')[0];
+      for (var catDir in jsonDataObj.categories) {
+        var blocksJsLoad = document.createElement('script');
+        blocksJsLoad.src = '../blocks/' + catDir + '/blocks.js';
+        head.appendChild(blocksJsLoad);
+
+        var blocksLangJsLoad = document.createElement('script');
+        blocksLangJsLoad.src = '../blocks/' + catDir + '/msg/' + 'messages.js';
+            //'lang/' + Ardublockly.LANG + '.js';
+        head.appendChild(blocksLangJsLoad);
+
+        var blocksGeneratorJsLoad = document.createElement('script');
+        blocksGeneratorJsLoad.src = '../blocks/' + catDir +
+            '/generator_arduino.js';
+        head.appendChild(blocksGeneratorJsLoad);
+
+        // Check if the blocks add additional Ardublockly functionality
+        var extensions = jsonDataObj.categories[catDir].extensions;
+        if (extensions) {
+          for (var i = 0; i < extensions.length; i++) {
+            var blockExtensionJsLoad = document.createElement('script');
+            blockExtensionJsLoad.src = '../blocks/' + catDir + '/extensions.js';
+            head.appendChild(blockExtensionJsLoad);
+            // Add function to scheduler as lazy loading has to complete first
+            setTimeout(function(category, extension) {
+              var extensionNamespaces = extension.split('.');
+              var extensionCall = window;
+              var invalidFunc = false;
+              for (var j = 0; j < extensionNamespaces.length; j++) {
+                extensionCall = extensionCall[extensionNamespaces[j]];
+                if (extensionCall === undefined) {
+                  invalidFunc = true;
+                  break;
+                }
+              }
+              if (typeof extensionCall != 'function') {
+                invalidFunc = true;
+              }
+              if (invalidFunc) {
+                throw 'Blocks ' + category.categoryName + ' extension "' +
+                      extension + '" is not a valid function.';
+              } else {
+                extensionCall();
+              }
+            }, 800, jsonDataObj.categories[catDir], extensions[i]);
+          }
+        }
+      }
+    }
+  };
+  // Reads the JSON data containing all block categories from ./blocks directory
+  // TODO: Now reading a local file, to be replaced by server generated JSON
+  ArdublocklyServer.getJson('../blocks/blocks_data.json', jsonDataCb);
+};
+
+/** Opens a modal with a list of categories to add or remove to the toolbox */
+Ardublockly.openExtraCategoriesSelect = function() {
+  /**
+   * Parses the JSON data from the server into a list of additional categories.
+   * @param {jsonDataObj} jsonDataObj JSON in JavaScript object format, null
+   *     indicates an error occurred.
+   * @return {undefined} Might exit early if response is null.
+   */
+  var jsonDataCb = function(jsonDataObj) {
+    if (jsonDataObj === null) return Ardublockly.openNotConnectedModal();
+    var htmlContent = document.createElement('div');
+    if (jsonDataObj.categories !== undefined) {
+      for (var catDir in jsonDataObj.categories) {
+        // Function required to maintain each loop variable scope separated
+        (function(cat) {
+          var clickBind = function(tickValue) {
+            if (tickValue) {
+              var catDom = (new DOMParser()).parseFromString(
+                  cat.toolbox.join(''), 'text/xml').firstChild;
+              Ardublockly.addToolboxCategory(cat.toolboxName, catDom);
+            } else {
+              Ardublockly.removeToolboxCategory(cat.toolboxName);
+            }
+          };
+          htmlContent.appendChild(Ardublockly.createExtraBlocksCatHtml(
+              cat.categoryName, cat.description, clickBind));
+        })(jsonDataObj.categories[catDir]);
+      }
+    }
+    Ardublockly.openAdditionalBlocksModal(htmlContent);
+  };
+  // Reads the JSON data containing all block categories from ./blocks directory
+  // TODO: Now reading a local file, to be replaced by server generated JSON
+  ArdublocklyServer.getJson('../blocks/blocks_data.json', jsonDataCb);
+};
+
+/** Informs the user that the selected function is not yet implemented. */
+Ardublockly.functionNotImplemented = function() {
+  Ardublockly.shortMessage('Function not yet implemented');
+};
+
+/**
+ * Interface to display messages with a possible action.
+ * @param {!string} title HTML to include in title.
+ * @param {!element} body HTML to include in body.
+ * @param {boolean=} confirm Indicates if the user is shown a single option (ok)
+ *     or an option to cancel, with an action applied to the "ok".
+ * @param {string=|function=} callback If confirm option is selected this would
+ *     be the function called when clicked 'OK'.
+ */
+Ardublockly.alertMessage = function(title, body, confirm, callback) {
+  Ardublockly.materialAlert(title, body, confirm, callback);
+};
+
+/**
+ * Interface to displays a short message, which disappears after a time out.
+ * @param {!string} message Text to be temporarily displayed.
+ */
+Ardublockly.shortMessage = function(message) {
+  Ardublockly.MaterialToast(message);
+};
+
+/**
+ * Bind a function to a button's click event.
+ * On touch enabled browsers, ontouchend is treated as equivalent to onclick.
+ * @param {!Element|string} el Button element or ID thereof.
+ * @param {!function} func Event handler to bind.
  * @private
  */
-goog.i18n.DateTimeFormat.prototype.localizeNumbers_ = function(input) {
-  return goog.i18n.DateTimeFormat.localizeNumbers(input, this.dateTimeSymbols_);
-};
-
-
-/**
- * If the usage of Ascii digits should be enforced regardless of locale.
- * @type {boolean}
- * @private
- */
-goog.i18n.DateTimeFormat.enforceAsciiDigits_ = false;
-
-
-/**
- * If RLM unicode characters should be removed from date/time patterns (useful
- * when enforcing ASCII digits for Arabic). See {@code #setEnforceAsciiDigits}.
- * @type {boolean}
- * @private
- */
-goog.i18n.DateTimeFormat.removeRlmInPatterns_ = false;
-
-
-/**
- * Sets if the usage of Ascii digits in formatting should be enforced in
- * formatted date/time even for locales where native digits are indicated.
- * Also sets whether to remove RLM unicode control characters when using
- * standard enumerated patterns (they exist e.g. in standard d/M/y for Arabic).
- * Production code should call this once before any {@code DateTimeFormat}
- * object is instantiated.
- * Caveats:
- *    * Enforcing ASCII digits affects all future formatting by new or existing
- * {@code DateTimeFormat} objects.
- *    * Removal of RLM characters only applies to {@code DateTimeFormat} objects
- * instantiated after this call.
- * @param {boolean} enforceAsciiDigits Whether Ascii digits should be enforced.
- */
-goog.i18n.DateTimeFormat.setEnforceAsciiDigits = function(enforceAsciiDigits) {
-  goog.i18n.DateTimeFormat.enforceAsciiDigits_ = enforceAsciiDigits;
-
-  // Also setting removal of RLM chracters when forcing ASCII digits since it's
-  // the right thing to do for Arabic standard patterns. One could add an
-  // optional argument here or to the {@code DateTimeFormat} constructor to
-  // enable an alternative behavior.
-  goog.i18n.DateTimeFormat.removeRlmInPatterns_ = enforceAsciiDigits;
-};
-
-
-/**
- * @return {boolean} Whether enforcing ASCII digits for all locales. See
- *     {@code #setEnforceAsciiDigits} for more details.
- */
-goog.i18n.DateTimeFormat.isEnforceAsciiDigits = function() {
-  return goog.i18n.DateTimeFormat.enforceAsciiDigits_;
-};
-
-
-/**
- * Localizes a string potentially containing numbers, replacing ASCII digits
- * with native digits if specified so by the locale. Leaves other characters.
- * @param {number|string} input the string to be localized, using ASCII digits.
- * @param {!Object=} opt_dateTimeSymbols Optional symbols to use rather than
- *     the global symbols.
- * @return {string} localized string, potentially using native digits.
- */
-goog.i18n.DateTimeFormat.localizeNumbers = function(
-    input, opt_dateTimeSymbols) {
-  input = String(input);
-  var dateTimeSymbols = opt_dateTimeSymbols || goog.i18n.DateTimeSymbols;
-  if (dateTimeSymbols.ZERODIGIT === undefined ||
-      goog.i18n.DateTimeFormat.enforceAsciiDigits_) {
-    return input;
+Ardublockly.bindClick_ = function(el, func) {
+  if (typeof el == 'string') {
+    el = document.getElementById(el);
   }
-
-  var parts = [];
-  for (var i = 0; i < input.length; i++) {
-    var c = input.charCodeAt(i);
-    parts.push(
-        (0x30 <= c && c <= 0x39) ?  // '0' <= c <= '9'
-            String.fromCharCode(dateTimeSymbols.ZERODIGIT + c - 0x30) :
-            input.charAt(i));
-  }
-  return parts.join('');
-};
-
-
-/**
- * Formats Era field according to pattern specified.
- *
- * @param {number} count Number of time pattern char repeats, it controls
- *     how a field should be formatted.
- * @param {!goog.date.DateLike} date It holds the date object to be formatted.
- * @return {string} Formatted string that represent this field.
- * @private
- */
-goog.i18n.DateTimeFormat.prototype.formatEra_ = function(count, date) {
-  var value = date.getFullYear() > 0 ? 1 : 0;
-  return count >= 4 ? this.dateTimeSymbols_.ERANAMES[value] :
-                      this.dateTimeSymbols_.ERAS[value];
-};
-
-
-/**
- * Formats Year field according to pattern specified
- *   Javascript Date object seems incapable handling 1BC and
- *   year before. It can show you year 0 which does not exists.
- *   following we just keep consistent with javascript's
- *   toString method. But keep in mind those things should be
- *   unsupported.
- * @param {number} count Number of time pattern char repeats, it controls
- *     how a field should be formatted.
- * @param {!goog.date.DateLike} date It holds the date object to be formatted.
- * @return {string} Formatted string that represent this field.
- * @private
- */
-goog.i18n.DateTimeFormat.prototype.formatYear_ = function(count, date) {
-  var value = date.getFullYear();
-  if (value < 0) {
-    value = -value;
-  }
-  if (count == 2) {
-    // See comment about special casing 'yy' at the start of the file, this
-    // matches ICU and CLDR behaviour. See also:
-    // http://icu-project.org/apiref/icu4j/com/ibm/icu/text/SimpleDateFormat.html
-    // http://www.unicode.org/reports/tr35/tr35-dates.html
-    value = value % 100;
-  }
-  return this.localizeNumbers_(goog.string.padNumber(value, count));
-};
-
-
-/**
- * Formats Month field according to pattern specified
- *
- * @param {number} count Number of time pattern char repeats, it controls
- *     how a field should be formatted.
- * @param {!goog.date.DateLike} date It holds the date object to be formatted.
- * @return {string} Formatted string that represent this field.
- * @private
- */
-goog.i18n.DateTimeFormat.prototype.formatMonth_ = function(count, date) {
-  var value = date.getMonth();
-  switch (count) {
-    case 5:
-      return this.dateTimeSymbols_.NARROWMONTHS[value];
-    case 4:
-      return this.dateTimeSymbols_.MONTHS[value];
-    case 3:
-      return this.dateTimeSymbols_.SHORTMONTHS[value];
-    default:
-      return this.localizeNumbers_(goog.string.padNumber(value + 1, count));
-  }
-};
-
-
-/**
- * Validates is the goog.date.DateLike object to format has a time.
- * DateLike means Date|goog.date.Date, and goog.date.DateTime inherits
- * from goog.date.Date. But goog.date.Date does not have time related
- * members (getHours, getMinutes, getSeconds).
- * Formatting can be done, if there are no time placeholders in the pattern.
- *
- * @param {!goog.date.DateLike} date the object to validate.
- * @private
- */
-goog.i18n.DateTimeFormat.validateDateHasTime_ = function(date) {
-  if (date.getHours && date.getSeconds && date.getMinutes) return;
-  // if (date instanceof Date || date instanceof goog.date.DateTime)
-  throw Error(
-      'The date to format has no time (probably a goog.date.Date). ' +
-      'Use Date or goog.date.DateTime, or use a pattern without time fields.');
-};
-
-
-/**
- * Formats (1..24) Hours field according to pattern specified
- *
- * @param {number} count Number of time pattern char repeats. This controls
- *     how a field should be formatted.
- * @param {!goog.date.DateLike} date It holds the date object to be formatted.
- * @return {string} Formatted string that represent this field.
- * @private
- */
-goog.i18n.DateTimeFormat.prototype.format24Hours_ = function(count, date) {
-  goog.i18n.DateTimeFormat.validateDateHasTime_(date);
-  var hours = goog.i18n.DateTimeFormat.getHours_(date) || 24;
-  return this.localizeNumbers_(goog.string.padNumber(hours, count));
-};
-
-
-/**
- * Formats Fractional seconds field according to pattern
- * specified
- *
- * @param {number} count Number of time pattern char repeats, it controls
- *     how a field should be formatted.
- * @param {!goog.date.DateLike} date It holds the date object to be formatted.
- *
- * @return {string} Formatted string that represent this field.
- * @private
- */
-goog.i18n.DateTimeFormat.prototype.formatFractionalSeconds_ = function(
-    count, date) {
-  // Fractional seconds left-justify, append 0 for precision beyond 3
-  var value = date.getTime() % 1000 / 1000;
-  return this.localizeNumbers_(
-      value.toFixed(Math.min(3, count)).substr(2) +
-      (count > 3 ? goog.string.padNumber(0, count - 3) : ''));
-};
-
-
-/**
- * Formats Day of week field according to pattern specified
- *
- * @param {number} count Number of time pattern char repeats, it controls
- *     how a field should be formatted.
- * @param {!goog.date.DateLike} date It holds the date object to be formatted.
- * @return {string} Formatted string that represent this field.
- * @private
- */
-goog.i18n.DateTimeFormat.prototype.formatDayOfWeek_ = function(count, date) {
-  var value = date.getDay();
-  return count >= 4 ? this.dateTimeSymbols_.WEEKDAYS[value] :
-                      this.dateTimeSymbols_.SHORTWEEKDAYS[value];
-};
-
-
-/**
- * Formats Am/Pm field according to pattern specified
- *
- * @param {number} count Number of time pattern char repeats, it controls
- *     how a field should be formatted.
- * @param {!goog.date.DateLike} date It holds the date object to be formatted.
- * @return {string} Formatted string that represent this field.
- * @private
- */
-goog.i18n.DateTimeFormat.prototype.formatAmPm_ = function(count, date) {
-  goog.i18n.DateTimeFormat.validateDateHasTime_(date);
-  var hours = goog.i18n.DateTimeFormat.getHours_(date);
-  return this.dateTimeSymbols_.AMPMS[hours >= 12 && hours < 24 ? 1 : 0];
-};
-
-
-/**
- * Formats (1..12) Hours field according to pattern specified
- *
- * @param {number} count Number of time pattern char repeats, it controls
- *     how a field should be formatted.
- * @param {!goog.date.DateLike} date It holds the date object to be formatted.
- * @return {string} formatted string that represent this field.
- * @private
- */
-goog.i18n.DateTimeFormat.prototype.format1To12Hours_ = function(count, date) {
-  goog.i18n.DateTimeFormat.validateDateHasTime_(date);
-  var hours = goog.i18n.DateTimeFormat.getHours_(date) % 12 || 12;
-  return this.localizeNumbers_(goog.string.padNumber(hours, count));
-};
-
-
-/**
- * Formats (0..11) Hours field according to pattern specified
- *
- * @param {number} count Number of time pattern char repeats, it controls
- *     how a field should be formatted.
- * @param {!goog.date.DateLike} date It holds the date object to be formatted.
- * @return {string} formatted string that represent this field.
- * @private
- */
-goog.i18n.DateTimeFormat.prototype.format0To11Hours_ = function(count, date) {
-  goog.i18n.DateTimeFormat.validateDateHasTime_(date);
-  var hours = goog.i18n.DateTimeFormat.getHours_(date) % 12;
-  return this.localizeNumbers_(goog.string.padNumber(hours, count));
-};
-
-
-/**
- * Formats (0..23) Hours field according to pattern specified
- *
- * @param {number} count Number of time pattern char repeats, it controls
- *     how a field should be formatted.
- * @param {!goog.date.DateLike} date It holds the date object to be formatted.
- * @return {string} formatted string that represent this field.
- * @private
- */
-goog.i18n.DateTimeFormat.prototype.format0To23Hours_ = function(count, date) {
-  goog.i18n.DateTimeFormat.validateDateHasTime_(date);
-  var hours = goog.i18n.DateTimeFormat.getHours_(date);
-  return this.localizeNumbers_(goog.string.padNumber(hours, count));
-};
-
-
-/**
- * Formats Standalone weekday field according to pattern specified
- *
- * @param {number} count Number of time pattern char repeats, it controls
- *     how a field should be formatted.
- * @param {!goog.date.DateLike} date It holds the date object to be formatted.
- * @return {string} formatted string that represent this field.
- * @private
- */
-goog.i18n.DateTimeFormat.prototype.formatStandaloneDay_ = function(
-    count, date) {
-  var value = date.getDay();
-  switch (count) {
-    case 5:
-      return this.dateTimeSymbols_.STANDALONENARROWWEEKDAYS[value];
-    case 4:
-      return this.dateTimeSymbols_.STANDALONEWEEKDAYS[value];
-    case 3:
-      return this.dateTimeSymbols_.STANDALONESHORTWEEKDAYS[value];
-    default:
-      return this.localizeNumbers_(goog.string.padNumber(value, 1));
-  }
-};
-
-
-/**
- * Formats Standalone Month field according to pattern specified
- *
- * @param {number} count Number of time pattern char repeats, it controls
- *     how a field should be formatted.
- * @param {!goog.date.DateLike} date It holds the date object to be formatted.
- * @return {string} formatted string that represent this field.
- * @private
- */
-goog.i18n.DateTimeFormat.prototype.formatStandaloneMonth_ = function(
-    count, date) {
-  var value = date.getMonth();
-  switch (count) {
-    case 5:
-      return this.dateTimeSymbols_.STANDALONENARROWMONTHS[value];
-    case 4:
-      return this.dateTimeSymbols_.STANDALONEMONTHS[value];
-    case 3:
-      return this.dateTimeSymbols_.STANDALONESHORTMONTHS[value];
-    default:
-      return this.localizeNumbers_(goog.string.padNumber(value + 1, count));
-  }
-};
-
-
-/**
- * Formats Quarter field according to pattern specified
- *
- * @param {number} count Number of time pattern char repeats, it controls
- *     how a field should be formatted.
- * @param {!goog.date.DateLike} date It holds the date object to be formatted.
- * @return {string} Formatted string that represent this field.
- * @private
- */
-goog.i18n.DateTimeFormat.prototype.formatQuarter_ = function(count, date) {
-  var value = Math.floor(date.getMonth() / 3);
-  return count < 4 ? this.dateTimeSymbols_.SHORTQUARTERS[value] :
-                     this.dateTimeSymbols_.QUARTERS[value];
-};
-
-
-/**
- * Formats Date field according to pattern specified
- *
- * @param {number} count Number of time pattern char repeats, it controls
- *     how a field should be formatted.
- * @param {!goog.date.DateLike} date It holds the date object to be formatted.
- * @return {string} Formatted string that represent this field.
- * @private
- */
-goog.i18n.DateTimeFormat.prototype.formatDate_ = function(count, date) {
-  return this.localizeNumbers_(goog.string.padNumber(date.getDate(), count));
-};
-
-
-/**
- * Formats Minutes field according to pattern specified
- *
- * @param {number} count Number of time pattern char repeats, it controls
- *     how a field should be formatted.
- * @param {!goog.date.DateLike} date It holds the date object to be formatted.
- * @return {string} Formatted string that represent this field.
- * @private
- */
-goog.i18n.DateTimeFormat.prototype.formatMinutes_ = function(count, date) {
-  goog.i18n.DateTimeFormat.validateDateHasTime_(date);
-  return this.localizeNumbers_(
-      goog.string.padNumber(
-          /** @type {!goog.date.DateTime} */ (date).getMinutes(), count));
-};
-
-
-/**
- * Formats Seconds field according to pattern specified
- *
- * @param {number} count Number of time pattern char repeats, it controls
- *     how a field should be formatted.
- * @param {!goog.date.DateLike} date It holds the date object to be formatted.
- * @return {string} Formatted string that represent this field.
- * @private
- */
-goog.i18n.DateTimeFormat.prototype.formatSeconds_ = function(count, date) {
-  goog.i18n.DateTimeFormat.validateDateHasTime_(date);
-  return this.localizeNumbers_(
-      goog.string.padNumber(
-          /** @type {!goog.date.DateTime} */ (date).getSeconds(), count));
-};
-
-
-/**
- * Formats the week of year field according to pattern specified
- *
- * @param {number} count Number of time pattern char repeats, it controls
- *     how a field should be formatted.
- * @param {!goog.date.DateLike} date It holds the date object to be formatted.
- * @return {string} Formatted string that represent this field.
- * @private
- */
-goog.i18n.DateTimeFormat.prototype.formatWeekOfYear_ = function(count, date) {
-
-
-  var weekNum = goog.date.getWeekNumber(
-      date.getFullYear(), date.getMonth(), date.getDate(),
-      this.dateTimeSymbols_.FIRSTWEEKCUTOFFDAY,
-      this.dateTimeSymbols_.FIRSTDAYOFWEEK);
-
-  return this.localizeNumbers_(goog.string.padNumber(weekNum, count));
-};
-
-
-/**
- * Formats TimeZone field following RFC
- *
- * @param {number} count Number of time pattern char repeats, it controls
- *     how a field should be formatted.
- * @param {!goog.date.DateLike} date It holds the date object to be formatted.
- * @param {goog.i18n.TimeZone=} opt_timeZone This holds current time zone info.
- * @return {string} Formatted string that represent this field.
- * @private
- */
-goog.i18n.DateTimeFormat.prototype.formatTimeZoneRFC_ = function(
-    count, date, opt_timeZone) {
-  opt_timeZone = opt_timeZone ||
-      goog.i18n.TimeZone.createTimeZone(date.getTimezoneOffset());
-
-  // RFC 822 formats should be kept in ASCII, but localized GMT formats may need
-  // to use native digits.
-  return count < 4 ? opt_timeZone.getRFCTimeZoneString(date) :
-                     this.localizeNumbers_(opt_timeZone.getGMTString(date));
-};
-
-
-/**
- * Generate GMT timeZone string for given date
- * @param {number} count Number of time pattern char repeats, it controls
- *     how a field should be formatted.
- * @param {!goog.date.DateLike} date Whose value being evaluated.
- * @param {goog.i18n.TimeZone=} opt_timeZone This holds current time zone info.
- * @return {string} GMT timeZone string.
- * @private
- */
-goog.i18n.DateTimeFormat.prototype.formatTimeZone_ = function(
-    count, date, opt_timeZone) {
-  opt_timeZone = opt_timeZone ||
-      goog.i18n.TimeZone.createTimeZone(date.getTimezoneOffset());
-  return count < 4 ? opt_timeZone.getShortName(date) :
-                     opt_timeZone.getLongName(date);
-};
-
-
-/**
- * Generate GMT timeZone string for given date
- * @param {!goog.date.DateLike} date Whose value being evaluated.
- * @param {goog.i18n.TimeZone=} opt_timeZone This holds current time zone info.
- * @return {string} GMT timeZone string.
- * @private
- */
-goog.i18n.DateTimeFormat.prototype.formatTimeZoneId_ = function(
-    date, opt_timeZone) {
-  opt_timeZone = opt_timeZone ||
-      goog.i18n.TimeZone.createTimeZone(date.getTimezoneOffset());
-  return opt_timeZone.getTimeZoneId();
-};
-
-
-/**
- * Generate localized, location dependent time zone id
- * @param {number} count Number of time pattern char repeats, it controls
- *     how a field should be formatted.
- * @param {!goog.date.DateLike} date Whose value being evaluated.
- * @param {goog.i18n.TimeZone=} opt_timeZone This holds current time zone info.
- * @return {string} GMT timeZone string.
- * @private
- */
-goog.i18n.DateTimeFormat.prototype.formatTimeZoneLocationId_ = function(
-    count, date, opt_timeZone) {
-  opt_timeZone = opt_timeZone ||
-      goog.i18n.TimeZone.createTimeZone(date.getTimezoneOffset());
-  return count <= 2 ? opt_timeZone.getTimeZoneId() :
-                      opt_timeZone.getGenericLocation(date);
-};
-
-
-/**
- * Formatting one date field.
- * @param {string} patternStr The pattern string for the field being formatted.
- * @param {!goog.date.DateLike} date represents the real date to be formatted.
- * @param {!goog.date.DateLike} dateForDate used to resolve date fields
- *     for formatting.
- * @param {!goog.date.DateLike} dateForTime used to resolve time fields
- *     for formatting.
- * @param {goog.i18n.TimeZone=} opt_timeZone This holds current time zone info.
- * @return {string} string representation for the given field.
- * @private
- */
-goog.i18n.DateTimeFormat.prototype.formatField_ = function(
-    patternStr, date, dateForDate, dateForTime, opt_timeZone) {
-  var count = patternStr.length;
-  switch (patternStr.charAt(0)) {
-    case 'G':
-      return this.formatEra_(count, dateForDate);
-    case 'y':
-      return this.formatYear_(count, dateForDate);
-    case 'M':
-      return this.formatMonth_(count, dateForDate);
-    case 'k':
-      return this.format24Hours_(count, dateForTime);
-    case 'S':
-      return this.formatFractionalSeconds_(count, dateForTime);
-    case 'E':
-      return this.formatDayOfWeek_(count, dateForDate);
-    case 'a':
-      return this.formatAmPm_(count, dateForTime);
-    case 'h':
-      return this.format1To12Hours_(count, dateForTime);
-    case 'K':
-      return this.format0To11Hours_(count, dateForTime);
-    case 'H':
-      return this.format0To23Hours_(count, dateForTime);
-    case 'c':
-      return this.formatStandaloneDay_(count, dateForDate);
-    case 'L':
-      return this.formatStandaloneMonth_(count, dateForDate);
-    case 'Q':
-      return this.formatQuarter_(count, dateForDate);
-    case 'd':
-      return this.formatDate_(count, dateForDate);
-    case 'm':
-      return this.formatMinutes_(count, dateForTime);
-    case 's':
-      return this.formatSeconds_(count, dateForTime);
-    case 'v':
-      return this.formatTimeZoneId_(date, opt_timeZone);
-    case 'V':
-      return this.formatTimeZoneLocationId_(count, date, opt_timeZone);
-    case 'w':
-      return this.formatWeekOfYear_(count, dateForTime);
-    case 'z':
-      return this.formatTimeZone_(count, date, opt_timeZone);
-    case 'Z':
-      return this.formatTimeZoneRFC_(count, date, opt_timeZone);
-    default:
-      return '';
-  }
+  // Need to ensure both, touch and click, events don't fire for the same thing
+  var propagateOnce = function(e) {
+    e.stopPropagation();
+    e.preventDefault();
+    func();
+  };
+  el.addEventListener('ontouchend', propagateOnce);
+  el.addEventListener('click', propagateOnce);
 };

@@ -1,4 +1,4 @@
-// Copyright 2007 The Closure Library Authors. All Rights Reserved.
+// Copyright 2006 The Closure Library Authors. All Rights Reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,1525 +13,869 @@
 // limitations under the License.
 
 /**
- * @fileoverview Definition of the goog.ui.tree.BaseNode class.
- *
- * @author arv@google.com (Erik Arvidsson)
- * @author eae@google.com (Emil A Eklund)
- *
- * This is a based on the webfx tree control. It since been updated to add
- * typeahead support, as well as accessibility support using ARIA framework.
- * See file comment in treecontrol.js.
+ * @fileoverview Functions for dealing with date/time formatting.
  */
 
-goog.provide('goog.ui.tree.BaseNode');
-goog.provide('goog.ui.tree.BaseNode.EventType');
 
-goog.require('goog.Timer');
-goog.require('goog.a11y.aria');
+/**
+ * Namespace for i18n date/time formatting functions
+ */
+goog.provide('goog.i18n.DateTimeFormat');
+goog.provide('goog.i18n.DateTimeFormat.Format');
+
 goog.require('goog.asserts');
-goog.require('goog.dom.safe');
-goog.require('goog.events.Event');
-goog.require('goog.events.KeyCodes');
-goog.require('goog.html.SafeHtml');
-goog.require('goog.html.SafeStyle');
-goog.require('goog.html.legacyconversions');
+goog.require('goog.date');
+goog.require('goog.i18n.DateTimeSymbols');
+goog.require('goog.i18n.TimeZone');
 goog.require('goog.string');
-goog.require('goog.string.StringBuffer');
-goog.require('goog.style');
-goog.require('goog.ui.Component');
-
 
 
 /**
- * An abstract base class for a node in the tree.
+ * Datetime formatting functions following the pattern specification as defined
+ * in JDK, ICU and CLDR, with minor modification for typical usage in JS.
+ * Pattern specification:
+ * {@link http://userguide.icu-project.org/formatparse/datetime}
+ * <pre>
+ * Symbol   Meaning                    Presentation       Example
+ * ------   -------                    ------------       -------
+ * G#       era designator             (Text)             AD
+ * y#       year                       (Number)           1996
+ * Y*       year (week of year)        (Number)           1997
+ * u*       extended year              (Number)           4601
+ * Q#       quarter                    (Text)             Q3 & 3rd quarter
+ * M        month in year              (Text & Number)    July & 07
+ * L        month in year (standalone) (Text & Number)    July & 07
+ * d        day in month               (Number)           10
+ * h        hour in am/pm (1~12)       (Number)           12
+ * H        hour in day (0~23)         (Number)           0
+ * m        minute in hour             (Number)           30
+ * s        second in minute           (Number)           55
+ * S        fractional second          (Number)           978
+ * E#       day of week                (Text)             Tue & Tuesday
+ * e*       day of week (local 1~7)    (Number)           2
+ * c#       day of week (standalone)   (Text & Number)    2 & Tues & Tuesday & T
+ * D*       day in year                (Number)           189
+ * F*       day of week in month       (Number)           2 (2nd Wed in July)
+ * w        week in year               (Number)           27
+ * W*       week in month              (Number)           2
+ * a        am/pm marker               (Text)             PM
+ * k        hour in day (1~24)         (Number)           24
+ * K        hour in am/pm (0~11)       (Number)           0
+ * z        time zone                  (Text)             Pacific Standard Time
+ * Z#       time zone (RFC 822)        (Number)           -0800
+ * v#       time zone (generic)        (Text)             America/Los_Angeles
+ * V#       time zone                  (Text)             Los Angeles Time
+ * g*       Julian day                 (Number)           2451334
+ * A*       milliseconds in day        (Number)           69540000
+ * '        escape for text            (Delimiter)        'Date='
+ * ''       single quote               (Literal)          'o''clock'
  *
- * @param {string|!goog.html.SafeHtml} html The html content of the node label.
- * @param {Object=} opt_config The configuration for the tree. See
- *    {@link goog.ui.tree.BaseNode.defaultConfig}. If not specified the
- *    default config will be used.
- * @param {goog.dom.DomHelper=} opt_domHelper Optional DOM helper.
+ * Item marked with '*' are not supported yet.
+ * Item marked with '#' works different than java
+ *
+ * The count of pattern letters determine the format.
+ * (Text): 4 or more, use full form, <4, use short or abbreviated form if it
+ * exists. (e.g., "EEEE" produces "Monday", "EEE" produces "Mon")
+ *
+ * (Number): the minimum number of digits. Shorter numbers are zero-padded to
+ * this amount (e.g. if "m" produces "6", "mm" produces "06"). Year is handled
+ * specially; that is, if the count of 'y' is 2, the Year will be truncated to
+ * 2 digits. (e.g., if "yyyy" produces "1997", "yy" produces "97".) Unlike other
+ * fields, fractional seconds are padded on the right with zero.
+ *
+ * :(Text & Number) 3 or over, use text, otherwise use number. (e.g., "M"
+ * produces "1", "MM" produces "01", "MMM" produces "Jan", and "MMMM" produces
+ * "January".)
+ *
+ * Any characters in the pattern that are not in the ranges of ['a'..'z'] and
+ * ['A'..'Z'] will be treated as quoted text. For instance, characters like ':',
+ * '.', ' ', '#' and '@' will appear in the resulting time text even they are
+ * not embraced within single quotes.
+ * </pre>
+ */
+
+/**
+ * Construct a DateTimeFormat object based on current locale.
  * @constructor
- * @extends {goog.ui.Component}
+ * @param {string|number} pattern pattern specification or pattern type.
+ * @param {!Object=} opt_dateTimeSymbols Optional symbols to use for this
+ *     instance rather than the global symbols.
+ * @final
  */
-goog.ui.tree.BaseNode = function(html, opt_config, opt_domHelper) {
-  goog.ui.Component.call(this, opt_domHelper);
-
-  /**
-   * The configuration for the tree.
-   * @type {Object}
-   * @private
-   */
-  this.config_ = opt_config || goog.ui.tree.BaseNode.defaultConfig;
-
-  /**
-   * HTML content of the node label.
-   * @type {!goog.html.SafeHtml}
-   * @private
-   */
-  this.html_ =
-      (html instanceof goog.html.SafeHtml ?
-           html :
-           goog.html.legacyconversions.safeHtmlFromString(html));
-
-  /** @private {string} */
-  this.iconClass_;
-
-  /** @private {string} */
-  this.expandedIconClass_;
-
-  /** @protected {goog.ui.tree.TreeControl} */
-  this.tree;
-
-  /** @private {goog.ui.tree.BaseNode} */
-  this.previousSibling_;
-
-  /** @private {goog.ui.tree.BaseNode} */
-  this.nextSibling_;
-
-  /** @private {goog.ui.tree.BaseNode} */
-  this.firstChild_;
-
-  /** @private {goog.ui.tree.BaseNode} */
-  this.lastChild_;
-
-  /**
-   * Whether the tree item is selected.
-   * @private {boolean}
-   */
-  this.selected_ = false;
-
-  /**
-   * Whether the tree node is expanded.
-   * @private {boolean}
-   */
-  this.expanded_ = false;
-
-  /**
-   * Tooltip for the tree item
-   * @private {?string}
-   */
-  this.toolTip_ = null;
-
-  /**
-   * HTML that can appear after the label (so not inside the anchor).
-   * @private {!goog.html.SafeHtml}
-   */
-  this.afterLabelHtml_ = goog.html.SafeHtml.EMPTY;
-
-  /**
-   * Whether to allow user to collapse this node.
-   * @private {boolean}
-   */
-  this.isUserCollapsible_ = true;
-
-  /**
-   * Nesting depth of this node; cached result of computeDepth_.
-   * -1 if value has not been cached.
-   * @private {number}
-   */
-  this.depth_ = -1;
-};
-goog.inherits(goog.ui.tree.BaseNode, goog.ui.Component);
-
-
-/**
- * The event types dispatched by this class.
- * @enum {string}
- */
-goog.ui.tree.BaseNode.EventType = {
-  BEFORE_EXPAND: 'beforeexpand',
-  EXPAND: 'expand',
-  BEFORE_COLLAPSE: 'beforecollapse',
-  COLLAPSE: 'collapse'
-};
-
-
-/**
- * Map of nodes in existence. Needed to route events to the appropriate nodes.
- * Nodes are added to the map at {@link #enterDocument} time and removed at
- * {@link #exitDocument} time.
- * @type {Object}
- * @protected
- */
-goog.ui.tree.BaseNode.allNodes = {};
-
-
-/** @override */
-goog.ui.tree.BaseNode.prototype.disposeInternal = function() {
-  goog.ui.tree.BaseNode.superClass_.disposeInternal.call(this);
-  if (this.tree) {
-    this.tree.removeNode(this);
-    this.tree = null;
-  }
-  this.setElementInternal(null);
-};
-
-
-/**
- * Adds roles and states.
- * @protected
- */
-goog.ui.tree.BaseNode.prototype.initAccessibility = function() {
-  var el = this.getElement();
-  if (el) {
-    // Set an id for the label
-    var label = this.getLabelElement();
-    if (label && !label.id) {
-      label.id = this.getId() + '.label';
-    }
-
-    goog.a11y.aria.setRole(el, 'treeitem');
-    goog.a11y.aria.setState(el, 'selected', false);
-    goog.a11y.aria.setState(el, 'expanded', false);
-    goog.a11y.aria.setState(el, 'level', this.getDepth());
-    if (label) {
-      goog.a11y.aria.setState(el, 'labelledby', label.id);
-    }
-
-    var img = this.getIconElement();
-    if (img) {
-      goog.a11y.aria.setRole(img, 'presentation');
-    }
-    var ei = this.getExpandIconElement();
-    if (ei) {
-      goog.a11y.aria.setRole(ei, 'presentation');
-    }
-
-    var ce = this.getChildrenElement();
-    if (ce) {
-      goog.a11y.aria.setRole(ce, 'group');
-
-      // In case the children will be created lazily.
-      if (ce.hasChildNodes()) {
-        // do setsize for each child
-        var count = this.getChildCount();
-        for (var i = 1; i <= count; i++) {
-          var child = this.getChildAt(i - 1).getElement();
-          goog.asserts.assert(child, 'The child element cannot be null');
-          goog.a11y.aria.setState(child, 'setsize', count);
-          goog.a11y.aria.setState(child, 'posinset', i);
-        }
-      }
-    }
-  }
-};
-
-
-/** @override */
-goog.ui.tree.BaseNode.prototype.createDom = function() {
-  var element = this.getDomHelper().safeHtmlToNode(this.toSafeHtml());
-  this.setElementInternal(/** @type {!Element} */ (element));
-};
-
-
-/** @override */
-goog.ui.tree.BaseNode.prototype.enterDocument = function() {
-  goog.ui.tree.BaseNode.superClass_.enterDocument.call(this);
-  goog.ui.tree.BaseNode.allNodes[this.getId()] = this;
-  this.initAccessibility();
-};
-
-
-/** @override */
-goog.ui.tree.BaseNode.prototype.exitDocument = function() {
-  goog.ui.tree.BaseNode.superClass_.exitDocument.call(this);
-  delete goog.ui.tree.BaseNode.allNodes[this.getId()];
-};
-
-
-/**
- * The method assumes that the child doesn't have parent node yet.
- * The {@code opt_render} argument is not used. If the parent node is expanded,
- * the child node's state will be the same as the parent's. Otherwise the
- * child's DOM tree won't be created.
- * @override
- */
-goog.ui.tree.BaseNode.prototype.addChildAt = function(
-    child, index, opt_render) {
-  goog.asserts.assert(!child.getParent());
-  goog.asserts.assertInstanceof(child, goog.ui.tree.BaseNode);
-  var prevNode = this.getChildAt(index - 1);
-  var nextNode = this.getChildAt(index);
-
-  goog.ui.tree.BaseNode.superClass_.addChildAt.call(this, child, index);
-
-  child.previousSibling_ = prevNode;
-  child.nextSibling_ = nextNode;
-
-  if (prevNode) {
-    prevNode.nextSibling_ = child;
-  } else {
-    this.firstChild_ = child;
-  }
-  if (nextNode) {
-    nextNode.previousSibling_ = child;
-  } else {
-    this.lastChild_ = child;
-  }
-
-  var tree = this.getTree();
-  if (tree) {
-    child.setTreeInternal(tree);
-  }
-
-  child.setDepth_(this.getDepth() + 1);
-
-  if (this.getElement()) {
-    this.updateExpandIcon();
-    if (this.getExpanded()) {
-      var el = this.getChildrenElement();
-      if (!child.getElement()) {
-        child.createDom();
-      }
-      var childElement = child.getElement();
-      var nextElement = nextNode && nextNode.getElement();
-      el.insertBefore(childElement, nextElement);
-
-      if (this.isInDocument()) {
-        child.enterDocument();
-      }
-
-      if (!nextNode) {
-        if (prevNode) {
-          prevNode.updateExpandIcon();
-        } else {
-          goog.style.setElementShown(el, true);
-          this.setExpanded(this.getExpanded());
-        }
-      }
-    }
-  }
-};
-
-
-/**
- * Adds a node as a child to the current node.
- * @param {goog.ui.tree.BaseNode} child The child to add.
- * @param {goog.ui.tree.BaseNode=} opt_before If specified, the new child is
- *    added as a child before this one. If not specified, it's appended to the
- *    end.
- * @return {!goog.ui.tree.BaseNode} The added child.
- */
-goog.ui.tree.BaseNode.prototype.add = function(child, opt_before) {
+goog.i18n.DateTimeFormat = function(pattern, opt_dateTimeSymbols) {
+  goog.asserts.assert(goog.isDef(pattern), 'Pattern must be defined');
   goog.asserts.assert(
-      !opt_before || opt_before.getParent() == this,
-      'Can only add nodes before siblings');
-  if (child.getParent()) {
-    child.getParent().removeChild(child);
+      goog.isDef(opt_dateTimeSymbols) || goog.isDef(goog.i18n.DateTimeSymbols),
+      'goog.i18n.DateTimeSymbols or explicit symbols must be defined');
+
+  this.patternParts_ = [];
+
+  /**
+   * Data structure that with all the locale info needed for date formatting.
+   * (day/month names, most common patterns, rules for week-end, etc.)
+   * @private {!goog.i18n.DateTimeSymbolsType}
+   */
+  this.dateTimeSymbols_ = /** @type {!goog.i18n.DateTimeSymbolsType} */ (
+      opt_dateTimeSymbols || goog.i18n.DateTimeSymbols);
+  if (typeof pattern == 'number') {
+    this.applyStandardPattern_(pattern);
+  } else {
+    this.applyPattern_(pattern);
   }
-  this.addChildAt(
-      child, opt_before ? this.indexOfChild(opt_before) : this.getChildCount());
-  return child;
 };
 
 
 /**
- * Removes a child. The caller is responsible for disposing the node.
- * @param {goog.ui.Component|string} childNode The child to remove. Must be a
- *     {@link goog.ui.tree.BaseNode}.
- * @param {boolean=} opt_unrender Unused. The child will always be unrendered.
- * @return {!goog.ui.tree.BaseNode} The child that was removed.
- * @override
+ * Enum to identify predefined Date/Time format pattern.
+ * @enum {number}
  */
-goog.ui.tree.BaseNode.prototype.removeChild = function(
-    childNode, opt_unrender) {
-  // In reality, this only accepts BaseNodes.
-  var child = /** @type {goog.ui.tree.BaseNode} */ (childNode);
+goog.i18n.DateTimeFormat.Format = {
+  FULL_DATE: 0,
+  LONG_DATE: 1,
+  MEDIUM_DATE: 2,
+  SHORT_DATE: 3,
+  FULL_TIME: 4,
+  LONG_TIME: 5,
+  MEDIUM_TIME: 6,
+  SHORT_TIME: 7,
+  FULL_DATETIME: 8,
+  LONG_DATETIME: 9,
+  MEDIUM_DATETIME: 10,
+  SHORT_DATETIME: 11
+};
 
-  // if we remove selected or tree with the selected we should select this
-  var tree = this.getTree();
-  var selectedNode = tree ? tree.getSelectedItem() : null;
-  if (selectedNode == child || child.contains(selectedNode)) {
-    if (tree.hasFocus()) {
-      this.select();
-      goog.Timer.callOnce(this.onTimeoutSelect_, 10, this);
+
+/**
+ * regular expression pattern for parsing pattern string
+ * @type {Array<RegExp>}
+ * @private
+ */
+goog.i18n.DateTimeFormat.TOKENS_ = [
+  // quote string
+  /^\'(?:[^\']|\'\')*\'/,
+  // pattern chars
+  /^(?:G+|y+|M+|k+|S+|E+|a+|h+|K+|H+|c+|L+|Q+|d+|m+|s+|v+|V+|w+|z+|Z+)/,
+  // and all the other chars
+  /^[^\'GyMkSEahKHcLQdmsvVwzZ]+/  // and all the other chars
+];
+
+
+/**
+ * These are token types, corresponding to above token definitions.
+ * @enum {number}
+ * @private
+ */
+goog.i18n.DateTimeFormat.PartTypes_ = {
+  QUOTED_STRING: 0,
+  FIELD: 1,
+  LITERAL: 2
+};
+
+
+/**
+ * @param {!goog.date.DateLike} date
+ * @private
+ */
+goog.i18n.DateTimeFormat.getHours_ = function(date) {
+  return date.getHours ? date.getHours() : 0;
+};
+
+
+/**
+ * Apply specified pattern to this formatter object.
+ * @param {string} pattern String specifying how the date should be formatted.
+ * @private
+ */
+goog.i18n.DateTimeFormat.prototype.applyPattern_ = function(pattern) {
+  if (goog.i18n.DateTimeFormat.removeRlmInPatterns_) {
+    // Remove RLM unicode control character from pattern.
+    pattern = pattern.replace(/\u200f/g, '');
+  }
+  // lex the pattern, once for all uses
+  while (pattern) {
+    for (var i = 0; i < goog.i18n.DateTimeFormat.TOKENS_.length; ++i) {
+      var m = pattern.match(goog.i18n.DateTimeFormat.TOKENS_[i]);
+      if (m) {
+        var part = m[0];
+        pattern = pattern.substring(part.length);
+        if (i == goog.i18n.DateTimeFormat.PartTypes_.QUOTED_STRING) {
+          if (part == "''") {
+            part = "'";  // '' -> '
+          } else {
+            part = part.substring(1, part.length - 1);  // strip quotes
+            part = part.replace(/\'\'/, "'");
+          }
+        }
+        this.patternParts_.push({text: part, type: i});
+        break;
+      }
+    }
+  }
+};
+
+
+/**
+ * Format the given date object according to preset pattern and current locale.
+ * @param {goog.date.DateLike} date The Date object that is being formatted.
+ * @param {goog.i18n.TimeZone=} opt_timeZone optional, if specified, time
+ *    related fields will be formatted based on its setting. When this field
+ *    is not specified, "undefined" will be pass around and those function
+ *    that really need time zone service will create a default one.
+ * @return {string} Formatted string for the given date.
+ *    Throws an error if the date is null or if one tries to format a date-only
+ *    object (for instance goog.date.Date) using a pattern with time fields.
+ */
+goog.i18n.DateTimeFormat.prototype.format = function(date, opt_timeZone) {
+  if (!date) throw Error('The date to format must be non-null.');
+
+  // We don't want to write code to calculate each date field because we
+  // want to maximize performance and minimize code size.
+  // JavaScript only provide API to render local time.
+  // Suppose target date is: 16:00 GMT-0400
+  // OS local time is:       12:00 GMT-0800
+  // We want to create a Local Date Object : 16:00 GMT-0800, and fix the
+  // time zone display ourselves.
+  // Thing get a little bit tricky when daylight time transition happens. For
+  // example, suppose OS timeZone is America/Los_Angeles, it is impossible to
+  // represent "2006/4/2 02:30" even for those timeZone that has no transition
+  // at this time. Because 2:00 to 3:00 on that day does not exist in
+  // America/Los_Angeles time zone. To avoid calculating date field through
+  // our own code, we uses 3 Date object instead, one for "Year, month, day",
+  // one for time within that day, and one for timeZone object since it need
+  // the real time to figure out actual time zone offset.
+  var diff = opt_timeZone ?
+      (date.getTimezoneOffset() - opt_timeZone.getOffset(date)) * 60000 :
+      0;
+  var dateForDate = diff ? new Date(date.getTime() + diff) : date;
+  var dateForTime = dateForDate;
+  // When the time manipulation applied above spans the DST on/off hour, this
+  // could alter the time incorrectly by adding or subtracting an additional
+  // hour.
+  // We can mitigate this by:
+  // - Adding the difference in timezone offset to the date. This ensures that
+  //   the dateForDate is still within the right day if the extra DST hour
+  //   affected the date.
+  // - Move the time one day forward if we applied a timezone offset backwards,
+  //   or vice versa. This trick ensures that the time is in the same offset
+  //   as the original date, so we remove the additional hour added or
+  //   subtracted by the DST switch.
+  if (opt_timeZone &&
+      dateForDate.getTimezoneOffset() != date.getTimezoneOffset()) {
+    var dstDiff =
+        (dateForDate.getTimezoneOffset() - date.getTimezoneOffset()) * 60000;
+    dateForDate = new Date(dateForDate.getTime() + dstDiff);
+
+    diff += diff > 0 ? -goog.date.MS_PER_DAY : goog.date.MS_PER_DAY;
+    dateForTime = new Date(date.getTime() + diff);
+  }
+
+  var out = [];
+  for (var i = 0; i < this.patternParts_.length; ++i) {
+    var text = this.patternParts_[i].text;
+    if (goog.i18n.DateTimeFormat.PartTypes_.FIELD ==
+        this.patternParts_[i].type) {
+      out.push(
+          this.formatField_(
+              text, date, dateForDate, dateForTime, opt_timeZone));
     } else {
-      this.select();
+      out.push(text);
     }
   }
-
-  goog.ui.tree.BaseNode.superClass_.removeChild.call(this, child);
-
-  if (this.lastChild_ == child) {
-    this.lastChild_ = child.previousSibling_;
-  }
-  if (this.firstChild_ == child) {
-    this.firstChild_ = child.nextSibling_;
-  }
-  if (child.previousSibling_) {
-    child.previousSibling_.nextSibling_ = child.nextSibling_;
-  }
-  if (child.nextSibling_) {
-    child.nextSibling_.previousSibling_ = child.previousSibling_;
-  }
-
-  var wasLast = child.isLastSibling();
-
-  child.tree = null;
-  child.depth_ = -1;
-
-  if (tree) {
-    // Tell the tree control that this node is now removed.
-    tree.removeNode(this);
-
-    if (this.isInDocument()) {
-      var el = this.getChildrenElement();
-
-      if (child.isInDocument()) {
-        var childEl = child.getElement();
-        el.removeChild(childEl);
-
-        child.exitDocument();
-      }
-
-      if (wasLast) {
-        var newLast = this.getLastChild();
-        if (newLast) {
-          newLast.updateExpandIcon();
-        }
-      }
-      if (!this.hasChildren()) {
-        el.style.display = 'none';
-        this.updateExpandIcon();
-        this.updateIcon_();
-      }
-    }
-  }
-
-  return child;
+  return out.join('');
 };
 
 
 /**
- * @deprecated Use {@link #removeChild}.
- */
-goog.ui.tree.BaseNode.prototype.remove =
-    goog.ui.tree.BaseNode.prototype.removeChild;
-
-
-/**
- * Handler for setting focus asynchronously.
+ * Apply a predefined pattern as identified by formatType, which is stored in
+ * locale specific repository.
+ * @param {number} formatType A number that identified the predefined pattern.
  * @private
  */
-goog.ui.tree.BaseNode.prototype.onTimeoutSelect_ = function() {
-  this.select();
-};
-
-
-/**
- * Returns the tree.
- */
-goog.ui.tree.BaseNode.prototype.getTree = goog.abstractMethod;
-
-
-/**
- * Returns the depth of the node in the tree. Should not be overridden.
- * @return {number} The non-negative depth of this node (the root is zero).
- */
-goog.ui.tree.BaseNode.prototype.getDepth = function() {
-  var depth = this.depth_;
-  if (depth < 0) {
-    depth = this.computeDepth_();
-    this.setDepth_(depth);
-  }
-  return depth;
-};
-
-
-/**
- * Computes the depth of the node in the tree.
- * Called only by getDepth, when the depth hasn't already been cached.
- * @return {number} The non-negative depth of this node (the root is zero).
- * @private
- */
-goog.ui.tree.BaseNode.prototype.computeDepth_ = function() {
-  var parent = this.getParent();
-  if (parent) {
-    return parent.getDepth() + 1;
+goog.i18n.DateTimeFormat.prototype.applyStandardPattern_ = function(
+    formatType) {
+  var pattern;
+  if (formatType < 4) {
+    pattern = this.dateTimeSymbols_.DATEFORMATS[formatType];
+  } else if (formatType < 8) {
+    pattern = this.dateTimeSymbols_.TIMEFORMATS[formatType - 4];
+  } else if (formatType < 12) {
+    pattern = this.dateTimeSymbols_.DATETIMEFORMATS[formatType - 8];
+    pattern = pattern.replace(
+        '{1}', this.dateTimeSymbols_.DATEFORMATS[formatType - 8]);
+    pattern = pattern.replace(
+        '{0}', this.dateTimeSymbols_.TIMEFORMATS[formatType - 8]);
   } else {
-    return 0;
-  }
-};
-
-
-/**
- * Changes the depth of a node (and all its descendants).
- * @param {number} depth The new nesting depth; must be non-negative.
- * @private
- */
-goog.ui.tree.BaseNode.prototype.setDepth_ = function(depth) {
-  if (depth != this.depth_) {
-    this.depth_ = depth;
-    var row = this.getRowElement();
-    if (row) {
-      var indent = this.getPixelIndent_() + 'px';
-      if (this.isRightToLeft()) {
-        row.style.paddingRight = indent;
-      } else {
-        row.style.paddingLeft = indent;
-      }
-    }
-    this.forEachChild(function(child) { child.setDepth_(depth + 1); });
-  }
-};
-
-
-/**
- * Returns true if the node is a descendant of this node
- * @param {goog.ui.tree.BaseNode} node The node to check.
- * @return {boolean} True if the node is a descendant of this node, false
- *    otherwise.
- */
-goog.ui.tree.BaseNode.prototype.contains = function(node) {
-  var current = node;
-  while (current) {
-    if (current == this) {
-      return true;
-    }
-    current = current.getParent();
-  }
-  return false;
-};
-
-
-/**
- * An array of empty children to return for nodes that have no children.
- * @type {!Array<!goog.ui.tree.BaseNode>}
- * @private
- */
-goog.ui.tree.BaseNode.EMPTY_CHILDREN_ = [];
-
-
-/**
- * @param {number} index 0-based index.
- * @return {goog.ui.tree.BaseNode} The child at the given index; null if none.
- */
-goog.ui.tree.BaseNode.prototype.getChildAt;
-
-
-/**
- * Returns the children of this node.
- * @return {!Array<!goog.ui.tree.BaseNode>} The children.
- */
-goog.ui.tree.BaseNode.prototype.getChildren = function() {
-  var children = [];
-  this.forEachChild(function(child) { children.push(child); });
-  return children;
-};
-
-
-/**
- * @return {goog.ui.tree.BaseNode} The first child of this node.
- */
-goog.ui.tree.BaseNode.prototype.getFirstChild = function() {
-  return this.getChildAt(0);
-};
-
-
-/**
- * @return {goog.ui.tree.BaseNode} The last child of this node.
- */
-goog.ui.tree.BaseNode.prototype.getLastChild = function() {
-  return this.getChildAt(this.getChildCount() - 1);
-};
-
-
-/**
- * @return {goog.ui.tree.BaseNode} The previous sibling of this node.
- */
-goog.ui.tree.BaseNode.prototype.getPreviousSibling = function() {
-  return this.previousSibling_;
-};
-
-
-/**
- * @return {goog.ui.tree.BaseNode} The next sibling of this node.
- */
-goog.ui.tree.BaseNode.prototype.getNextSibling = function() {
-  return this.nextSibling_;
-};
-
-
-/**
- * @return {boolean} Whether the node is the last sibling.
- */
-goog.ui.tree.BaseNode.prototype.isLastSibling = function() {
-  return !this.nextSibling_;
-};
-
-
-/**
- * @return {boolean} Whether the node is selected.
- */
-goog.ui.tree.BaseNode.prototype.isSelected = function() {
-  return this.selected_;
-};
-
-
-/**
- * Selects the node.
- */
-goog.ui.tree.BaseNode.prototype.select = function() {
-  var tree = this.getTree();
-  if (tree) {
-    tree.setSelectedItem(this);
-  }
-};
-
-
-/**
- * Originally it was intended to deselect the node but never worked.
- * @deprecated Use {@code tree.setSelectedItem(null)}.
- */
-goog.ui.tree.BaseNode.prototype.deselect = goog.nullFunction;
-
-
-/**
- * Called from the tree to instruct the node change its selection state.
- * @param {boolean} selected The new selection state.
- * @protected
- */
-goog.ui.tree.BaseNode.prototype.setSelectedInternal = function(selected) {
-  if (this.selected_ == selected) {
+    this.applyStandardPattern_(goog.i18n.DateTimeFormat.Format.MEDIUM_DATETIME);
     return;
   }
-  this.selected_ = selected;
-
-  this.updateRow();
-
-  var el = this.getElement();
-  if (el) {
-    goog.a11y.aria.setState(el, 'selected', selected);
-    if (selected) {
-      var treeElement = this.getTree().getElement();
-      goog.asserts.assert(
-          treeElement, 'The DOM element for the tree cannot be null');
-      goog.a11y.aria.setState(treeElement, 'activedescendant', this.getId());
-    }
-  }
+  this.applyPattern_(pattern);
 };
 
 
 /**
- * @return {boolean} Whether the node is expanded.
- */
-goog.ui.tree.BaseNode.prototype.getExpanded = function() {
-  return this.expanded_;
-};
-
-
-/**
- * Sets the node to be expanded internally, without state change events.
- * @param {boolean} expanded Whether to expand or close the node.
- */
-goog.ui.tree.BaseNode.prototype.setExpandedInternal = function(expanded) {
-  this.expanded_ = expanded;
-};
-
-
-/**
- * Sets the node to be expanded.
- * @param {boolean} expanded Whether to expand or close the node.
- */
-goog.ui.tree.BaseNode.prototype.setExpanded = function(expanded) {
-  var isStateChange = expanded != this.expanded_;
-  if (isStateChange) {
-    // Only fire events if the expanded state has actually changed.
-    var prevented = !this.dispatchEvent(
-        expanded ? goog.ui.tree.BaseNode.EventType.BEFORE_EXPAND :
-                   goog.ui.tree.BaseNode.EventType.BEFORE_COLLAPSE);
-    if (prevented) return;
-  }
-  var ce;
-  this.expanded_ = expanded;
-  var tree = this.getTree();
-  var el = this.getElement();
-
-  if (this.hasChildren()) {
-    if (!expanded && tree && this.contains(tree.getSelectedItem())) {
-      this.select();
-    }
-
-    if (el) {
-      ce = this.getChildrenElement();
-      if (ce) {
-        goog.style.setElementShown(ce, expanded);
-
-        // Make sure we have the HTML for the children here.
-        if (expanded && this.isInDocument() && !ce.hasChildNodes()) {
-          var children = [];
-          this.forEachChild(function(child) {
-            children.push(child.toSafeHtml());
-          });
-          goog.dom.safe.setInnerHtml(ce, goog.html.SafeHtml.concat(children));
-          this.forEachChild(function(child) { child.enterDocument(); });
-        }
-      }
-      this.updateExpandIcon();
-    }
-  } else {
-    ce = this.getChildrenElement();
-    if (ce) {
-      goog.style.setElementShown(ce, false);
-    }
-  }
-  if (el) {
-    this.updateIcon_();
-    goog.a11y.aria.setState(el, 'expanded', expanded);
-  }
-
-  if (isStateChange) {
-    this.dispatchEvent(
-        expanded ? goog.ui.tree.BaseNode.EventType.EXPAND :
-                   goog.ui.tree.BaseNode.EventType.COLLAPSE);
-  }
-};
-
-
-/**
- * Toggles the expanded state of the node.
- */
-goog.ui.tree.BaseNode.prototype.toggle = function() {
-  this.setExpanded(!this.getExpanded());
-};
-
-
-/**
- * Expands the node.
- */
-goog.ui.tree.BaseNode.prototype.expand = function() {
-  this.setExpanded(true);
-};
-
-
-/**
- * Collapses the node.
- */
-goog.ui.tree.BaseNode.prototype.collapse = function() {
-  this.setExpanded(false);
-};
-
-
-/**
- * Collapses the children of the node.
- */
-goog.ui.tree.BaseNode.prototype.collapseChildren = function() {
-  this.forEachChild(function(child) { child.collapseAll(); });
-};
-
-
-/**
- * Collapses the children and the node.
- */
-goog.ui.tree.BaseNode.prototype.collapseAll = function() {
-  this.collapseChildren();
-  this.collapse();
-};
-
-
-/**
- * Expands the children of the node.
- */
-goog.ui.tree.BaseNode.prototype.expandChildren = function() {
-  this.forEachChild(function(child) { child.expandAll(); });
-};
-
-
-/**
- * Expands the children and the node.
- */
-goog.ui.tree.BaseNode.prototype.expandAll = function() {
-  this.expandChildren();
-  this.expand();
-};
-
-
-/**
- * Expands the parent chain of this node so that it is visible.
- */
-goog.ui.tree.BaseNode.prototype.reveal = function() {
-  var parent = this.getParent();
-  if (parent) {
-    parent.setExpanded(true);
-    parent.reveal();
-  }
-};
-
-
-/**
- * Sets whether the node will allow the user to collapse it.
- * @param {boolean} isCollapsible Whether to allow node collapse.
- */
-goog.ui.tree.BaseNode.prototype.setIsUserCollapsible = function(isCollapsible) {
-  this.isUserCollapsible_ = isCollapsible;
-  if (!this.isUserCollapsible_) {
-    this.expand();
-  }
-  if (this.getElement()) {
-    this.updateExpandIcon();
-  }
-};
-
-
-/**
- * @return {boolean} Whether the node is collapsible by user actions.
- */
-goog.ui.tree.BaseNode.prototype.isUserCollapsible = function() {
-  return this.isUserCollapsible_;
-};
-
-
-/**
- * Creates HTML for the node.
- * @return {!goog.html.SafeHtml}
- * @protected
- */
-goog.ui.tree.BaseNode.prototype.toSafeHtml = function() {
-  var tree = this.getTree();
-  var hideLines = !tree.getShowLines() ||
-      tree == this.getParent() && !tree.getShowRootLines();
-
-  var childClass =
-      hideLines ? this.config_.cssChildrenNoLines : this.config_.cssChildren;
-
-  var nonEmptyAndExpanded = this.getExpanded() && this.hasChildren();
-
-  var attributes = {'class': childClass, 'style': this.getLineStyle()};
-
-  var content = [];
-  if (nonEmptyAndExpanded) {
-    // children
-    this.forEachChild(function(child) { content.push(child.toSafeHtml()); });
-  }
-
-  var children = goog.html.SafeHtml.create('div', attributes, content);
-
-  return goog.html.SafeHtml.create(
-      'div', {'class': this.config_.cssItem, 'id': this.getId()},
-      [this.getRowSafeHtml(), children]);
-};
-
-
-/**
- * @return {number} The pixel indent of the row.
+ * Localizes a string potentially containing numbers, replacing ASCII digits
+ * with native digits if specified so by the locale. Leaves other characters.
+ * @param {string} input the string to be localized, using ASCII digits.
+ * @return {string} localized string, potentially using native digits.
  * @private
  */
-goog.ui.tree.BaseNode.prototype.getPixelIndent_ = function() {
-  return Math.max(0, (this.getDepth() - 1) * this.config_.indentWidth);
+goog.i18n.DateTimeFormat.prototype.localizeNumbers_ = function(input) {
+  return goog.i18n.DateTimeFormat.localizeNumbers(input, this.dateTimeSymbols_);
 };
 
 
 /**
- * @return {!goog.html.SafeHtml} The html for the row.
- * @protected
- */
-goog.ui.tree.BaseNode.prototype.getRowSafeHtml = function() {
-  var style = {};
-  style['padding-' + (this.isRightToLeft() ? 'right' : 'left')] =
-      this.getPixelIndent_() + 'px';
-  var attributes = {'class': this.getRowClassName(), 'style': style};
-  var content = [
-    this.getExpandIconSafeHtml(), this.getIconSafeHtml(),
-    this.getLabelSafeHtml()
-  ];
-  return goog.html.SafeHtml.create('div', attributes, content);
-};
-
-
-/**
- * @return {string} The class name for the row.
- * @protected
- */
-goog.ui.tree.BaseNode.prototype.getRowClassName = function() {
-  var selectedClass;
-  if (this.isSelected()) {
-    selectedClass = ' ' + this.config_.cssSelectedRow;
-  } else {
-    selectedClass = '';
-  }
-  return this.config_.cssTreeRow + selectedClass;
-};
-
-
-/**
- * @return {!goog.html.SafeHtml} The html for the label.
- * @protected
- */
-goog.ui.tree.BaseNode.prototype.getLabelSafeHtml = function() {
-  var html = goog.html.SafeHtml.create(
-      'span',
-      {'class': this.config_.cssItemLabel, 'title': this.getToolTip() || null},
-      this.getSafeHtml());
-  return goog.html.SafeHtml.concat(
-      html,
-      goog.html.SafeHtml.create('span', {}, this.getAfterLabelSafeHtml()));
-};
-
-
-/**
- * Returns the html that appears after the label. This is useful if you want to
- * put extra UI on the row of the label but not inside the anchor tag.
- * @return {string} The html.
- * @final
- */
-goog.ui.tree.BaseNode.prototype.getAfterLabelHtml = function() {
-  return goog.html.SafeHtml.unwrap(this.getAfterLabelSafeHtml());
-};
-
-
-/**
- * Returns the html that appears after the label. This is useful if you want to
- * put extra UI on the row of the label but not inside the anchor tag.
- * @return {!goog.html.SafeHtml} The html.
- */
-goog.ui.tree.BaseNode.prototype.getAfterLabelSafeHtml = function() {
-  return this.afterLabelHtml_;
-};
-
-
-/**
- * Sets the html that appears after the label. This is useful if you want to
- * put extra UI on the row of the label but not inside the anchor tag.
- * @param {string} html The html.
- * @deprecated Use setAfterLabelSafeHtml.
- */
-goog.ui.tree.BaseNode.prototype.setAfterLabelHtml = function(html) {
-  this.setAfterLabelSafeHtml(
-      goog.html.legacyconversions.safeHtmlFromString(html));
-};
-
-
-/**
- * Sets the html that appears after the label. This is useful if you want to
- * put extra UI on the row of the label but not inside the anchor tag.
- * @param {!goog.html.SafeHtml} html The html.
- */
-goog.ui.tree.BaseNode.prototype.setAfterLabelSafeHtml = function(html) {
-  this.afterLabelHtml_ = html;
-  var el = this.getAfterLabelElement();
-  if (el) {
-    goog.dom.safe.setInnerHtml(el, html);
-  }
-};
-
-
-/**
- * @return {!goog.html.SafeHtml} The html for the icon.
- * @protected
- */
-goog.ui.tree.BaseNode.prototype.getIconSafeHtml = function() {
-  return goog.html.SafeHtml.create('span', {
-    'style': {'display': 'inline-block'},
-    'class': this.getCalculatedIconClass()
-  });
-};
-
-
-/**
- * Gets the calculated icon class.
- * @protected
- */
-goog.ui.tree.BaseNode.prototype.getCalculatedIconClass = goog.abstractMethod;
-
-
-/**
- * @return {!goog.html.SafeHtml} The source for the icon.
- * @protected
- */
-goog.ui.tree.BaseNode.prototype.getExpandIconSafeHtml = function() {
-  return goog.html.SafeHtml.create('span', {
-    'type': 'expand',
-    'style': {'display': 'inline-block'},
-    'class': this.getExpandIconClass()
-  });
-};
-
-
-/**
- * @return {string} The class names of the icon used for expanding the node.
- * @protected
- */
-goog.ui.tree.BaseNode.prototype.getExpandIconClass = function() {
-  var tree = this.getTree();
-  var hideLines = !tree.getShowLines() ||
-      tree == this.getParent() && !tree.getShowRootLines();
-
-  var config = this.config_;
-  var sb = new goog.string.StringBuffer();
-  sb.append(config.cssTreeIcon, ' ', config.cssExpandTreeIcon, ' ');
-
-  if (this.hasChildren()) {
-    var bits = 0;
-    /*
-      Bitmap used to determine which icon to use
-      1  Plus
-      2  Minus
-      4  T Line
-      8  L Line
-    */
-
-    if (tree.getShowExpandIcons() && this.isUserCollapsible_) {
-      if (this.getExpanded()) {
-        bits = 2;
-      } else {
-        bits = 1;
-      }
-    }
-
-    if (!hideLines) {
-      if (this.isLastSibling()) {
-        bits += 4;
-      } else {
-        bits += 8;
-      }
-    }
-
-    switch (bits) {
-      case 1:
-        sb.append(config.cssExpandTreeIconPlus);
-        break;
-      case 2:
-        sb.append(config.cssExpandTreeIconMinus);
-        break;
-      case 4:
-        sb.append(config.cssExpandTreeIconL);
-        break;
-      case 5:
-        sb.append(config.cssExpandTreeIconLPlus);
-        break;
-      case 6:
-        sb.append(config.cssExpandTreeIconLMinus);
-        break;
-      case 8:
-        sb.append(config.cssExpandTreeIconT);
-        break;
-      case 9:
-        sb.append(config.cssExpandTreeIconTPlus);
-        break;
-      case 10:
-        sb.append(config.cssExpandTreeIconTMinus);
-        break;
-      default:  // 0
-        sb.append(config.cssExpandTreeIconBlank);
-    }
-  } else {
-    if (hideLines) {
-      sb.append(config.cssExpandTreeIconBlank);
-    } else if (this.isLastSibling()) {
-      sb.append(config.cssExpandTreeIconL);
-    } else {
-      sb.append(config.cssExpandTreeIconT);
-    }
-  }
-  return sb.toString();
-};
-
-
-/**
- * @return {!goog.html.SafeStyle} The line style.
- */
-goog.ui.tree.BaseNode.prototype.getLineStyle = function() {
-  var nonEmptyAndExpanded = this.getExpanded() && this.hasChildren();
-  return goog.html.SafeStyle.create({
-    'background-position': this.getBackgroundPosition(),
-    'display': nonEmptyAndExpanded ? null : 'none'
-  });
-};
-
-
-/**
- * @return {string} The background position style value.
- */
-goog.ui.tree.BaseNode.prototype.getBackgroundPosition = function() {
-  return (this.isLastSibling() ? '-100' : (this.getDepth() - 1) *
-                  this.config_.indentWidth) +
-      'px 0';
-};
-
-
-/**
- * @return {Element} The element for the tree node.
- * @override
- */
-goog.ui.tree.BaseNode.prototype.getElement = function() {
-  var el = goog.ui.tree.BaseNode.superClass_.getElement.call(this);
-  if (!el) {
-    el = this.getDomHelper().getElement(this.getId());
-    this.setElementInternal(el);
-  }
-  return el;
-};
-
-
-/**
- * @return {Element} The row is the div that is used to draw the node without
- *     the children.
- */
-goog.ui.tree.BaseNode.prototype.getRowElement = function() {
-  var el = this.getElement();
-  return el ? /** @type {Element} */ (el.firstChild) : null;
-};
-
-
-/**
- * @return {Element} The expanded icon element.
- * @protected
- */
-goog.ui.tree.BaseNode.prototype.getExpandIconElement = function() {
-  var el = this.getRowElement();
-  return el ? /** @type {Element} */ (el.firstChild) : null;
-};
-
-
-/**
- * @return {Element} The icon element.
- * @protected
- */
-goog.ui.tree.BaseNode.prototype.getIconElement = function() {
-  var el = this.getRowElement();
-  return el ? /** @type {Element} */ (el.childNodes[1]) : null;
-};
-
-
-/**
- * @return {Element} The label element.
- */
-goog.ui.tree.BaseNode.prototype.getLabelElement = function() {
-  var el = this.getRowElement();
-  // TODO: find/fix race condition that requires us to add
-  // the lastChild check
-  return el && el.lastChild ?
-      /** @type {Element} */ (el.lastChild.previousSibling) :
-                             null;
-};
-
-
-/**
- * @return {Element} The element after the label.
- */
-goog.ui.tree.BaseNode.prototype.getAfterLabelElement = function() {
-  var el = this.getRowElement();
-  return el ? /** @type {Element} */ (el.lastChild) : null;
-};
-
-
-/**
- * @return {Element} The div containing the children.
- * @protected
- */
-goog.ui.tree.BaseNode.prototype.getChildrenElement = function() {
-  var el = this.getElement();
-  return el ? /** @type {Element} */ (el.lastChild) : null;
-};
-
-
-/**
- * Sets the icon class for the node.
- * @param {string} s The icon class.
- */
-goog.ui.tree.BaseNode.prototype.setIconClass = function(s) {
-  this.iconClass_ = s;
-  if (this.isInDocument()) {
-    this.updateIcon_();
-  }
-};
-
-
-/**
- * Gets the icon class for the node.
- * @return {string} s The icon source.
- */
-goog.ui.tree.BaseNode.prototype.getIconClass = function() {
-  return this.iconClass_;
-};
-
-
-/**
- * Sets the icon class for when the node is expanded.
- * @param {string} s The expanded icon class.
- */
-goog.ui.tree.BaseNode.prototype.setExpandedIconClass = function(s) {
-  this.expandedIconClass_ = s;
-  if (this.isInDocument()) {
-    this.updateIcon_();
-  }
-};
-
-
-/**
- * Gets the icon class for when the node is expanded.
- * @return {string} The class.
- */
-goog.ui.tree.BaseNode.prototype.getExpandedIconClass = function() {
-  return this.expandedIconClass_;
-};
-
-
-/**
- * Sets the text of the label.
- * @param {string} s The plain text of the label.
- */
-goog.ui.tree.BaseNode.prototype.setText = function(s) {
-  this.setSafeHtml(goog.html.SafeHtml.htmlEscape(s));
-};
-
-
-/**
- * Returns the text of the label. If the text was originally set as HTML, the
- * return value is unspecified.
- * @return {string} The plain text of the label.
- */
-goog.ui.tree.BaseNode.prototype.getText = function() {
-  return goog.string.unescapeEntities(goog.html.SafeHtml.unwrap(this.html_));
-};
-
-
-/**
- * Sets the html of the label.
- * @param {string} s The html string for the label.
- * @deprecated Use setSafeHtml.
- */
-goog.ui.tree.BaseNode.prototype.setHtml = function(s) {
-  this.setSafeHtml(goog.html.legacyconversions.safeHtmlFromString(s));
-};
-
-
-/**
- * Sets the HTML of the label.
- * @param {!goog.html.SafeHtml} html The HTML object for the label.
- */
-goog.ui.tree.BaseNode.prototype.setSafeHtml = function(html) {
-  this.html_ = html;
-  var el = this.getLabelElement();
-  if (el) {
-    goog.dom.safe.setInnerHtml(el, html);
-  }
-  var tree = this.getTree();
-  if (tree) {
-    // Tell the tree control about the updated label text.
-    tree.setNode(this);
-  }
-};
-
-
-/**
- * Returns the html of the label.
- * @return {string} The html string of the label.
- * @final
- */
-goog.ui.tree.BaseNode.prototype.getHtml = function() {
-  return goog.html.SafeHtml.unwrap(this.getSafeHtml());
-};
-
-
-/**
- * Returns the html of the label.
- * @return {!goog.html.SafeHtml} The html string of the label.
- */
-goog.ui.tree.BaseNode.prototype.getSafeHtml = function() {
-  return this.html_;
-};
-
-
-/**
- * Sets the text of the tooltip.
- * @param {string} s The tooltip text to set.
- */
-goog.ui.tree.BaseNode.prototype.setToolTip = function(s) {
-  this.toolTip_ = s;
-  var el = this.getLabelElement();
-  if (el) {
-    el.title = s;
-  }
-};
-
-
-/**
- * Returns the text of the tooltip.
- * @return {?string} The tooltip text.
- */
-goog.ui.tree.BaseNode.prototype.getToolTip = function() {
-  return this.toolTip_;
-};
-
-
-/**
- * Updates the row styles.
- */
-goog.ui.tree.BaseNode.prototype.updateRow = function() {
-  var rowEl = this.getRowElement();
-  if (rowEl) {
-    rowEl.className = this.getRowClassName();
-  }
-};
-
-
-/**
- * Updates the expand icon of the node.
- */
-goog.ui.tree.BaseNode.prototype.updateExpandIcon = function() {
-  var img = this.getExpandIconElement();
-  if (img) {
-    img.className = this.getExpandIconClass();
-  }
-  var cel = this.getChildrenElement();
-  if (cel) {
-    cel.style.backgroundPosition = this.getBackgroundPosition();
-  }
-};
-
-
-/**
- * Updates the icon of the node. Assumes that this.getElement() is created.
+ * If the usage of Ascii digits should be enforced regardless of locale.
+ * @type {boolean}
  * @private
  */
-goog.ui.tree.BaseNode.prototype.updateIcon_ = function() {
-  this.getIconElement().className = this.getCalculatedIconClass();
+goog.i18n.DateTimeFormat.enforceAsciiDigits_ = false;
+
+
+/**
+ * If RLM unicode characters should be removed from date/time patterns (useful
+ * when enforcing ASCII digits for Arabic). See {@code #setEnforceAsciiDigits}.
+ * @type {boolean}
+ * @private
+ */
+goog.i18n.DateTimeFormat.removeRlmInPatterns_ = false;
+
+
+/**
+ * Sets if the usage of Ascii digits in formatting should be enforced in
+ * formatted date/time even for locales where native digits are indicated.
+ * Also sets whether to remove RLM unicode control characters when using
+ * standard enumerated patterns (they exist e.g. in standard d/M/y for Arabic).
+ * Production code should call this once before any {@code DateTimeFormat}
+ * object is instantiated.
+ * Caveats:
+ *    * Enforcing ASCII digits affects all future formatting by new or existing
+ * {@code DateTimeFormat} objects.
+ *    * Removal of RLM characters only applies to {@code DateTimeFormat} objects
+ * instantiated after this call.
+ * @param {boolean} enforceAsciiDigits Whether Ascii digits should be enforced.
+ */
+goog.i18n.DateTimeFormat.setEnforceAsciiDigits = function(enforceAsciiDigits) {
+  goog.i18n.DateTimeFormat.enforceAsciiDigits_ = enforceAsciiDigits;
+
+  // Also setting removal of RLM chracters when forcing ASCII digits since it's
+  // the right thing to do for Arabic standard patterns. One could add an
+  // optional argument here or to the {@code DateTimeFormat} constructor to
+  // enable an alternative behavior.
+  goog.i18n.DateTimeFormat.removeRlmInPatterns_ = enforceAsciiDigits;
 };
 
 
 /**
- * Handles mouse down event.
- * @param {!goog.events.BrowserEvent} e The browser event.
- * @protected
+ * @return {boolean} Whether enforcing ASCII digits for all locales. See
+ *     {@code #setEnforceAsciiDigits} for more details.
  */
-goog.ui.tree.BaseNode.prototype.onMouseDown = function(e) {
-  var el = e.target;
-  // expand icon
-  var type = el.getAttribute('type');
-  if (type == 'expand' && this.hasChildren()) {
-    if (this.isUserCollapsible_) {
-      this.toggle();
-    }
-    return;
-  }
-
-  this.select();
-  this.updateRow();
+goog.i18n.DateTimeFormat.isEnforceAsciiDigits = function() {
+  return goog.i18n.DateTimeFormat.enforceAsciiDigits_;
 };
 
 
 /**
- * Handles a click event.
- * @param {!goog.events.BrowserEvent} e The browser event.
- * @protected
- * @suppress {underscore|visibility}
+ * Localizes a string potentially containing numbers, replacing ASCII digits
+ * with native digits if specified so by the locale. Leaves other characters.
+ * @param {number|string} input the string to be localized, using ASCII digits.
+ * @param {!Object=} opt_dateTimeSymbols Optional symbols to use rather than
+ *     the global symbols.
+ * @return {string} localized string, potentially using native digits.
  */
-goog.ui.tree.BaseNode.prototype.onClick_ = goog.events.Event.preventDefault;
-
-
-/**
- * Handles a double click event.
- * @param {!goog.events.BrowserEvent} e The browser event.
- * @protected
- * @suppress {underscore|visibility}
- */
-goog.ui.tree.BaseNode.prototype.onDoubleClick_ = function(e) {
-  var el = e.target;
-  // expand icon
-  var type = el.getAttribute('type');
-  if (type == 'expand' && this.hasChildren()) {
-    return;
+goog.i18n.DateTimeFormat.localizeNumbers = function(
+    input, opt_dateTimeSymbols) {
+  input = String(input);
+  var dateTimeSymbols = opt_dateTimeSymbols || goog.i18n.DateTimeSymbols;
+  if (dateTimeSymbols.ZERODIGIT === undefined ||
+      goog.i18n.DateTimeFormat.enforceAsciiDigits_) {
+    return input;
   }
 
-  if (this.isUserCollapsible_) {
-    this.toggle();
+  var parts = [];
+  for (var i = 0; i < input.length; i++) {
+    var c = input.charCodeAt(i);
+    parts.push(
+        (0x30 <= c && c <= 0x39) ?  // '0' <= c <= '9'
+            String.fromCharCode(dateTimeSymbols.ZERODIGIT + c - 0x30) :
+            input.charAt(i));
   }
+  return parts.join('');
 };
 
 
 /**
- * Handles a key down event.
- * @param {!goog.events.BrowserEvent} e The browser event.
- * @return {boolean} The handled value.
- * @protected
+ * Formats Era field according to pattern specified.
+ *
+ * @param {number} count Number of time pattern char repeats, it controls
+ *     how a field should be formatted.
+ * @param {!goog.date.DateLike} date It holds the date object to be formatted.
+ * @return {string} Formatted string that represent this field.
+ * @private
  */
-goog.ui.tree.BaseNode.prototype.onKeyDown = function(e) {
-  var handled = true;
-  switch (e.keyCode) {
-    case goog.events.KeyCodes.RIGHT:
-      if (e.altKey) {
-        break;
-      }
-      if (this.hasChildren()) {
-        if (!this.getExpanded()) {
-          this.setExpanded(true);
-        } else {
-          this.getFirstChild().select();
-        }
-      }
-      break;
+goog.i18n.DateTimeFormat.prototype.formatEra_ = function(count, date) {
+  var value = date.getFullYear() > 0 ? 1 : 0;
+  return count >= 4 ? this.dateTimeSymbols_.ERANAMES[value] :
+                      this.dateTimeSymbols_.ERAS[value];
+};
 
-    case goog.events.KeyCodes.LEFT:
-      if (e.altKey) {
-        break;
-      }
-      if (this.hasChildren() && this.getExpanded() && this.isUserCollapsible_) {
-        this.setExpanded(false);
-      } else {
-        var parent = this.getParent();
-        var tree = this.getTree();
-        // don't go to root if hidden
-        if (parent && (tree.getShowRootNode() || parent != tree)) {
-          parent.select();
-        }
-      }
-      break;
 
-    case goog.events.KeyCodes.DOWN:
-      var nextNode = this.getNextShownNode();
-      if (nextNode) {
-        nextNode.select();
-      }
-      break;
+/**
+ * Formats Year field according to pattern specified
+ *   Javascript Date object seems incapable handling 1BC and
+ *   year before. It can show you year 0 which does not exists.
+ *   following we just keep consistent with javascript's
+ *   toString method. But keep in mind those things should be
+ *   unsupported.
+ * @param {number} count Number of time pattern char repeats, it controls
+ *     how a field should be formatted.
+ * @param {!goog.date.DateLike} date It holds the date object to be formatted.
+ * @return {string} Formatted string that represent this field.
+ * @private
+ */
+goog.i18n.DateTimeFormat.prototype.formatYear_ = function(count, date) {
+  var value = date.getFullYear();
+  if (value < 0) {
+    value = -value;
+  }
+  if (count == 2) {
+    // See comment about special casing 'yy' at the start of the file, this
+    // matches ICU and CLDR behaviour. See also:
+    // http://icu-project.org/apiref/icu4j/com/ibm/icu/text/SimpleDateFormat.html
+    // http://www.unicode.org/reports/tr35/tr35-dates.html
+    value = value % 100;
+  }
+  return this.localizeNumbers_(goog.string.padNumber(value, count));
+};
 
-    case goog.events.KeyCodes.UP:
-      var previousNode = this.getPreviousShownNode();
-      if (previousNode) {
-        previousNode.select();
-      }
-      break;
 
+/**
+ * Formats Month field according to pattern specified
+ *
+ * @param {number} count Number of time pattern char repeats, it controls
+ *     how a field should be formatted.
+ * @param {!goog.date.DateLike} date It holds the date object to be formatted.
+ * @return {string} Formatted string that represent this field.
+ * @private
+ */
+goog.i18n.DateTimeFormat.prototype.formatMonth_ = function(count, date) {
+  var value = date.getMonth();
+  switch (count) {
+    case 5:
+      return this.dateTimeSymbols_.NARROWMONTHS[value];
+    case 4:
+      return this.dateTimeSymbols_.MONTHS[value];
+    case 3:
+      return this.dateTimeSymbols_.SHORTMONTHS[value];
     default:
-      handled = false;
-  }
-
-  if (handled) {
-    e.preventDefault();
-    var tree = this.getTree();
-    if (tree) {
-      // clear type ahead buffer as user navigates with arrow keys
-      tree.clearTypeAhead();
-    }
-  }
-
-  return handled;
-};
-
-
-
-/**
- * @return {goog.ui.tree.BaseNode} The last shown descendant.
- */
-goog.ui.tree.BaseNode.prototype.getLastShownDescendant = function() {
-  if (!this.getExpanded() || !this.hasChildren()) {
-    return this;
-  }
-  // we know there is at least 1 child
-  return this.getLastChild().getLastShownDescendant();
-};
-
-
-/**
- * @return {goog.ui.tree.BaseNode} The next node to show or null if there isn't
- *     a next node to show.
- */
-goog.ui.tree.BaseNode.prototype.getNextShownNode = function() {
-  if (this.hasChildren() && this.getExpanded()) {
-    return this.getFirstChild();
-  } else {
-    var parent = this;
-    var next;
-    while (parent != this.getTree()) {
-      next = parent.getNextSibling();
-      if (next != null) {
-        return next;
-      }
-      parent = parent.getParent();
-    }
-    return null;
+      return this.localizeNumbers_(goog.string.padNumber(value + 1, count));
   }
 };
 
 
 /**
- * @return {goog.ui.tree.BaseNode} The previous node to show.
+ * Validates is the goog.date.DateLike object to format has a time.
+ * DateLike means Date|goog.date.Date, and goog.date.DateTime inherits
+ * from goog.date.Date. But goog.date.Date does not have time related
+ * members (getHours, getMinutes, getSeconds).
+ * Formatting can be done, if there are no time placeholders in the pattern.
+ *
+ * @param {!goog.date.DateLike} date the object to validate.
+ * @private
  */
-goog.ui.tree.BaseNode.prototype.getPreviousShownNode = function() {
-  var ps = this.getPreviousSibling();
-  if (ps != null) {
-    return ps.getLastShownDescendant();
-  }
-  var parent = this.getParent();
-  var tree = this.getTree();
-  if (!tree.getShowRootNode() && parent == tree) {
-    return null;
-  }
-  // The root is the first node.
-  if (this == tree) {
-    return null;
-  }
-  return /** @type {goog.ui.tree.BaseNode} */ (parent);
+goog.i18n.DateTimeFormat.validateDateHasTime_ = function(date) {
+  if (date.getHours && date.getSeconds && date.getMinutes) return;
+  // if (date instanceof Date || date instanceof goog.date.DateTime)
+  throw Error(
+      'The date to format has no time (probably a goog.date.Date). ' +
+      'Use Date or goog.date.DateTime, or use a pattern without time fields.');
 };
 
 
 /**
- * @return {*} Data set by the client.
- * @deprecated Use {@link #getModel} instead.
+ * Formats (1..24) Hours field according to pattern specified
+ *
+ * @param {number} count Number of time pattern char repeats. This controls
+ *     how a field should be formatted.
+ * @param {!goog.date.DateLike} date It holds the date object to be formatted.
+ * @return {string} Formatted string that represent this field.
+ * @private
  */
-goog.ui.tree.BaseNode.prototype.getClientData =
-    goog.ui.tree.BaseNode.prototype.getModel;
-
-
-/**
- * Sets client data to associate with the node.
- * @param {*} data The client data to associate with the node.
- * @deprecated Use {@link #setModel} instead.
- */
-goog.ui.tree.BaseNode.prototype.setClientData =
-    goog.ui.tree.BaseNode.prototype.setModel;
-
-
-/**
- * @return {Object} The configuration for the tree.
- */
-goog.ui.tree.BaseNode.prototype.getConfig = function() {
-  return this.config_;
+goog.i18n.DateTimeFormat.prototype.format24Hours_ = function(count, date) {
+  goog.i18n.DateTimeFormat.validateDateHasTime_(date);
+  var hours = goog.i18n.DateTimeFormat.getHours_(date) || 24;
+  return this.localizeNumbers_(goog.string.padNumber(hours, count));
 };
 
 
 /**
- * Internal method that is used to set the tree control on the node.
- * @param {goog.ui.tree.TreeControl} tree The tree control.
+ * Formats Fractional seconds field according to pattern
+ * specified
+ *
+ * @param {number} count Number of time pattern char repeats, it controls
+ *     how a field should be formatted.
+ * @param {!goog.date.DateLike} date It holds the date object to be formatted.
+ *
+ * @return {string} Formatted string that represent this field.
+ * @private
  */
-goog.ui.tree.BaseNode.prototype.setTreeInternal = function(tree) {
-  if (this.tree != tree) {
-    this.tree = tree;
-    // Add new node to the type ahead node map.
-    tree.setNode(this);
-    this.forEachChild(function(child) { child.setTreeInternal(tree); });
+goog.i18n.DateTimeFormat.prototype.formatFractionalSeconds_ = function(
+    count, date) {
+  // Fractional seconds left-justify, append 0 for precision beyond 3
+  var value = date.getTime() % 1000 / 1000;
+  return this.localizeNumbers_(
+      value.toFixed(Math.min(3, count)).substr(2) +
+      (count > 3 ? goog.string.padNumber(0, count - 3) : ''));
+};
+
+
+/**
+ * Formats Day of week field according to pattern specified
+ *
+ * @param {number} count Number of time pattern char repeats, it controls
+ *     how a field should be formatted.
+ * @param {!goog.date.DateLike} date It holds the date object to be formatted.
+ * @return {string} Formatted string that represent this field.
+ * @private
+ */
+goog.i18n.DateTimeFormat.prototype.formatDayOfWeek_ = function(count, date) {
+  var value = date.getDay();
+  return count >= 4 ? this.dateTimeSymbols_.WEEKDAYS[value] :
+                      this.dateTimeSymbols_.SHORTWEEKDAYS[value];
+};
+
+
+/**
+ * Formats Am/Pm field according to pattern specified
+ *
+ * @param {number} count Number of time pattern char repeats, it controls
+ *     how a field should be formatted.
+ * @param {!goog.date.DateLike} date It holds the date object to be formatted.
+ * @return {string} Formatted string that represent this field.
+ * @private
+ */
+goog.i18n.DateTimeFormat.prototype.formatAmPm_ = function(count, date) {
+  goog.i18n.DateTimeFormat.validateDateHasTime_(date);
+  var hours = goog.i18n.DateTimeFormat.getHours_(date);
+  return this.dateTimeSymbols_.AMPMS[hours >= 12 && hours < 24 ? 1 : 0];
+};
+
+
+/**
+ * Formats (1..12) Hours field according to pattern specified
+ *
+ * @param {number} count Number of time pattern char repeats, it controls
+ *     how a field should be formatted.
+ * @param {!goog.date.DateLike} date It holds the date object to be formatted.
+ * @return {string} formatted string that represent this field.
+ * @private
+ */
+goog.i18n.DateTimeFormat.prototype.format1To12Hours_ = function(count, date) {
+  goog.i18n.DateTimeFormat.validateDateHasTime_(date);
+  var hours = goog.i18n.DateTimeFormat.getHours_(date) % 12 || 12;
+  return this.localizeNumbers_(goog.string.padNumber(hours, count));
+};
+
+
+/**
+ * Formats (0..11) Hours field according to pattern specified
+ *
+ * @param {number} count Number of time pattern char repeats, it controls
+ *     how a field should be formatted.
+ * @param {!goog.date.DateLike} date It holds the date object to be formatted.
+ * @return {string} formatted string that represent this field.
+ * @private
+ */
+goog.i18n.DateTimeFormat.prototype.format0To11Hours_ = function(count, date) {
+  goog.i18n.DateTimeFormat.validateDateHasTime_(date);
+  var hours = goog.i18n.DateTimeFormat.getHours_(date) % 12;
+  return this.localizeNumbers_(goog.string.padNumber(hours, count));
+};
+
+
+/**
+ * Formats (0..23) Hours field according to pattern specified
+ *
+ * @param {number} count Number of time pattern char repeats, it controls
+ *     how a field should be formatted.
+ * @param {!goog.date.DateLike} date It holds the date object to be formatted.
+ * @return {string} formatted string that represent this field.
+ * @private
+ */
+goog.i18n.DateTimeFormat.prototype.format0To23Hours_ = function(count, date) {
+  goog.i18n.DateTimeFormat.validateDateHasTime_(date);
+  var hours = goog.i18n.DateTimeFormat.getHours_(date);
+  return this.localizeNumbers_(goog.string.padNumber(hours, count));
+};
+
+
+/**
+ * Formats Standalone weekday field according to pattern specified
+ *
+ * @param {number} count Number of time pattern char repeats, it controls
+ *     how a field should be formatted.
+ * @param {!goog.date.DateLike} date It holds the date object to be formatted.
+ * @return {string} formatted string that represent this field.
+ * @private
+ */
+goog.i18n.DateTimeFormat.prototype.formatStandaloneDay_ = function(
+    count, date) {
+  var value = date.getDay();
+  switch (count) {
+    case 5:
+      return this.dateTimeSymbols_.STANDALONENARROWWEEKDAYS[value];
+    case 4:
+      return this.dateTimeSymbols_.STANDALONEWEEKDAYS[value];
+    case 3:
+      return this.dateTimeSymbols_.STANDALONESHORTWEEKDAYS[value];
+    default:
+      return this.localizeNumbers_(goog.string.padNumber(value, 1));
   }
 };
 
 
 /**
- * A default configuration for the tree.
+ * Formats Standalone Month field according to pattern specified
+ *
+ * @param {number} count Number of time pattern char repeats, it controls
+ *     how a field should be formatted.
+ * @param {!goog.date.DateLike} date It holds the date object to be formatted.
+ * @return {string} formatted string that represent this field.
+ * @private
  */
-goog.ui.tree.BaseNode.defaultConfig = {
-  indentWidth: 19,
-  cssRoot: goog.getCssName('goog-tree-root') + ' ' +
-      goog.getCssName('goog-tree-item'),
-  cssHideRoot: goog.getCssName('goog-tree-hide-root'),
-  cssItem: goog.getCssName('goog-tree-item'),
-  cssChildren: goog.getCssName('goog-tree-children'),
-  cssChildrenNoLines: goog.getCssName('goog-tree-children-nolines'),
-  cssTreeRow: goog.getCssName('goog-tree-row'),
-  cssItemLabel: goog.getCssName('goog-tree-item-label'),
-  cssTreeIcon: goog.getCssName('goog-tree-icon'),
-  cssExpandTreeIcon: goog.getCssName('goog-tree-expand-icon'),
-  cssExpandTreeIconPlus: goog.getCssName('goog-tree-expand-icon-plus'),
-  cssExpandTreeIconMinus: goog.getCssName('goog-tree-expand-icon-minus'),
-  cssExpandTreeIconTPlus: goog.getCssName('goog-tree-expand-icon-tplus'),
-  cssExpandTreeIconTMinus: goog.getCssName('goog-tree-expand-icon-tminus'),
-  cssExpandTreeIconLPlus: goog.getCssName('goog-tree-expand-icon-lplus'),
-  cssExpandTreeIconLMinus: goog.getCssName('goog-tree-expand-icon-lminus'),
-  cssExpandTreeIconT: goog.getCssName('goog-tree-expand-icon-t'),
-  cssExpandTreeIconL: goog.getCssName('goog-tree-expand-icon-l'),
-  cssExpandTreeIconBlank: goog.getCssName('goog-tree-expand-icon-blank'),
-  cssExpandedFolderIcon: goog.getCssName('goog-tree-expanded-folder-icon'),
-  cssCollapsedFolderIcon: goog.getCssName('goog-tree-collapsed-folder-icon'),
-  cssFileIcon: goog.getCssName('goog-tree-file-icon'),
-  cssExpandedRootIcon: goog.getCssName('goog-tree-expanded-folder-icon'),
-  cssCollapsedRootIcon: goog.getCssName('goog-tree-collapsed-folder-icon'),
-  cssSelectedRow: goog.getCssName('selected')
+goog.i18n.DateTimeFormat.prototype.formatStandaloneMonth_ = function(
+    count, date) {
+  var value = date.getMonth();
+  switch (count) {
+    case 5:
+      return this.dateTimeSymbols_.STANDALONENARROWMONTHS[value];
+    case 4:
+      return this.dateTimeSymbols_.STANDALONEMONTHS[value];
+    case 3:
+      return this.dateTimeSymbols_.STANDALONESHORTMONTHS[value];
+    default:
+      return this.localizeNumbers_(goog.string.padNumber(value + 1, count));
+  }
+};
+
+
+/**
+ * Formats Quarter field according to pattern specified
+ *
+ * @param {number} count Number of time pattern char repeats, it controls
+ *     how a field should be formatted.
+ * @param {!goog.date.DateLike} date It holds the date object to be formatted.
+ * @return {string} Formatted string that represent this field.
+ * @private
+ */
+goog.i18n.DateTimeFormat.prototype.formatQuarter_ = function(count, date) {
+  var value = Math.floor(date.getMonth() / 3);
+  return count < 4 ? this.dateTimeSymbols_.SHORTQUARTERS[value] :
+                     this.dateTimeSymbols_.QUARTERS[value];
+};
+
+
+/**
+ * Formats Date field according to pattern specified
+ *
+ * @param {number} count Number of time pattern char repeats, it controls
+ *     how a field should be formatted.
+ * @param {!goog.date.DateLike} date It holds the date object to be formatted.
+ * @return {string} Formatted string that represent this field.
+ * @private
+ */
+goog.i18n.DateTimeFormat.prototype.formatDate_ = function(count, date) {
+  return this.localizeNumbers_(goog.string.padNumber(date.getDate(), count));
+};
+
+
+/**
+ * Formats Minutes field according to pattern specified
+ *
+ * @param {number} count Number of time pattern char repeats, it controls
+ *     how a field should be formatted.
+ * @param {!goog.date.DateLike} date It holds the date object to be formatted.
+ * @return {string} Formatted string that represent this field.
+ * @private
+ */
+goog.i18n.DateTimeFormat.prototype.formatMinutes_ = function(count, date) {
+  goog.i18n.DateTimeFormat.validateDateHasTime_(date);
+  return this.localizeNumbers_(
+      goog.string.padNumber(
+          /** @type {!goog.date.DateTime} */ (date).getMinutes(), count));
+};
+
+
+/**
+ * Formats Seconds field according to pattern specified
+ *
+ * @param {number} count Number of time pattern char repeats, it controls
+ *     how a field should be formatted.
+ * @param {!goog.date.DateLike} date It holds the date object to be formatted.
+ * @return {string} Formatted string that represent this field.
+ * @private
+ */
+goog.i18n.DateTimeFormat.prototype.formatSeconds_ = function(count, date) {
+  goog.i18n.DateTimeFormat.validateDateHasTime_(date);
+  return this.localizeNumbers_(
+      goog.string.padNumber(
+          /** @type {!goog.date.DateTime} */ (date).getSeconds(), count));
+};
+
+
+/**
+ * Formats the week of year field according to pattern specified
+ *
+ * @param {number} count Number of time pattern char repeats, it controls
+ *     how a field should be formatted.
+ * @param {!goog.date.DateLike} date It holds the date object to be formatted.
+ * @return {string} Formatted string that represent this field.
+ * @private
+ */
+goog.i18n.DateTimeFormat.prototype.formatWeekOfYear_ = function(count, date) {
+
+
+  var weekNum = goog.date.getWeekNumber(
+      date.getFullYear(), date.getMonth(), date.getDate(),
+      this.dateTimeSymbols_.FIRSTWEEKCUTOFFDAY,
+      this.dateTimeSymbols_.FIRSTDAYOFWEEK);
+
+  return this.localizeNumbers_(goog.string.padNumber(weekNum, count));
+};
+
+
+/**
+ * Formats TimeZone field following RFC
+ *
+ * @param {number} count Number of time pattern char repeats, it controls
+ *     how a field should be formatted.
+ * @param {!goog.date.DateLike} date It holds the date object to be formatted.
+ * @param {goog.i18n.TimeZone=} opt_timeZone This holds current time zone info.
+ * @return {string} Formatted string that represent this field.
+ * @private
+ */
+goog.i18n.DateTimeFormat.prototype.formatTimeZoneRFC_ = function(
+    count, date, opt_timeZone) {
+  opt_timeZone = opt_timeZone ||
+      goog.i18n.TimeZone.createTimeZone(date.getTimezoneOffset());
+
+  // RFC 822 formats should be kept in ASCII, but localized GMT formats may need
+  // to use native digits.
+  return count < 4 ? opt_timeZone.getRFCTimeZoneString(date) :
+                     this.localizeNumbers_(opt_timeZone.getGMTString(date));
+};
+
+
+/**
+ * Generate GMT timeZone string for given date
+ * @param {number} count Number of time pattern char repeats, it controls
+ *     how a field should be formatted.
+ * @param {!goog.date.DateLike} date Whose value being evaluated.
+ * @param {goog.i18n.TimeZone=} opt_timeZone This holds current time zone info.
+ * @return {string} GMT timeZone string.
+ * @private
+ */
+goog.i18n.DateTimeFormat.prototype.formatTimeZone_ = function(
+    count, date, opt_timeZone) {
+  opt_timeZone = opt_timeZone ||
+      goog.i18n.TimeZone.createTimeZone(date.getTimezoneOffset());
+  return count < 4 ? opt_timeZone.getShortName(date) :
+                     opt_timeZone.getLongName(date);
+};
+
+
+/**
+ * Generate GMT timeZone string for given date
+ * @param {!goog.date.DateLike} date Whose value being evaluated.
+ * @param {goog.i18n.TimeZone=} opt_timeZone This holds current time zone info.
+ * @return {string} GMT timeZone string.
+ * @private
+ */
+goog.i18n.DateTimeFormat.prototype.formatTimeZoneId_ = function(
+    date, opt_timeZone) {
+  opt_timeZone = opt_timeZone ||
+      goog.i18n.TimeZone.createTimeZone(date.getTimezoneOffset());
+  return opt_timeZone.getTimeZoneId();
+};
+
+
+/**
+ * Generate localized, location dependent time zone id
+ * @param {number} count Number of time pattern char repeats, it controls
+ *     how a field should be formatted.
+ * @param {!goog.date.DateLike} date Whose value being evaluated.
+ * @param {goog.i18n.TimeZone=} opt_timeZone This holds current time zone info.
+ * @return {string} GMT timeZone string.
+ * @private
+ */
+goog.i18n.DateTimeFormat.prototype.formatTimeZoneLocationId_ = function(
+    count, date, opt_timeZone) {
+  opt_timeZone = opt_timeZone ||
+      goog.i18n.TimeZone.createTimeZone(date.getTimezoneOffset());
+  return count <= 2 ? opt_timeZone.getTimeZoneId() :
+                      opt_timeZone.getGenericLocation(date);
+};
+
+
+/**
+ * Formatting one date field.
+ * @param {string} patternStr The pattern string for the field being formatted.
+ * @param {!goog.date.DateLike} date represents the real date to be formatted.
+ * @param {!goog.date.DateLike} dateForDate used to resolve date fields
+ *     for formatting.
+ * @param {!goog.date.DateLike} dateForTime used to resolve time fields
+ *     for formatting.
+ * @param {goog.i18n.TimeZone=} opt_timeZone This holds current time zone info.
+ * @return {string} string representation for the given field.
+ * @private
+ */
+goog.i18n.DateTimeFormat.prototype.formatField_ = function(
+    patternStr, date, dateForDate, dateForTime, opt_timeZone) {
+  var count = patternStr.length;
+  switch (patternStr.charAt(0)) {
+    case 'G':
+      return this.formatEra_(count, dateForDate);
+    case 'y':
+      return this.formatYear_(count, dateForDate);
+    case 'M':
+      return this.formatMonth_(count, dateForDate);
+    case 'k':
+      return this.format24Hours_(count, dateForTime);
+    case 'S':
+      return this.formatFractionalSeconds_(count, dateForTime);
+    case 'E':
+      return this.formatDayOfWeek_(count, dateForDate);
+    case 'a':
+      return this.formatAmPm_(count, dateForTime);
+    case 'h':
+      return this.format1To12Hours_(count, dateForTime);
+    case 'K':
+      return this.format0To11Hours_(count, dateForTime);
+    case 'H':
+      return this.format0To23Hours_(count, dateForTime);
+    case 'c':
+      return this.formatStandaloneDay_(count, dateForDate);
+    case 'L':
+      return this.formatStandaloneMonth_(count, dateForDate);
+    case 'Q':
+      return this.formatQuarter_(count, dateForDate);
+    case 'd':
+      return this.formatDate_(count, dateForDate);
+    case 'm':
+      return this.formatMinutes_(count, dateForTime);
+    case 's':
+      return this.formatSeconds_(count, dateForTime);
+    case 'v':
+      return this.formatTimeZoneId_(date, opt_timeZone);
+    case 'V':
+      return this.formatTimeZoneLocationId_(count, date, opt_timeZone);
+    case 'w':
+      return this.formatWeekOfYear_(count, dateForTime);
+    case 'z':
+      return this.formatTimeZone_(count, date, opt_timeZone);
+    case 'Z':
+      return this.formatTimeZoneRFC_(count, date, opt_timeZone);
+    default:
+      return '';
+  }
 };

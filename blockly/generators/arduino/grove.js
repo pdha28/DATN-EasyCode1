@@ -980,4 +980,22 @@ Blockly.Arduino.addSetup('setup3_mhz14a','mhz14a_sensor.setDebug(false);');
 var code =  '//------MHZ14A------\nfloat  CO2 = mhz14a_sensor.readConcentrationPPM(0x01);\n//------MHZ14A------';
 return  code  ;
 }
+Blockly.Arduino.SetDateDS3231 = function(){
+  var date_Time= this.getFieldValue('DATE')
+    Blockly.Arduino.addInclude('Lib DS3231', '#include <DS3231.h>');
+    Blockly.Arduino.addSetup('DS3231_setup','rtc.begin();');
+    Blockly.Arduino.addSetup('Date_setup', 'rtc.setDate(' + date_Time + ');');
+    var code = '';
+    return code;
+
+}
+Blockly.Arduino.SetTimeDS3231 = function(){
+  var time_Time= this.getFieldValue('TIME')
+    Blockly.Arduino.addInclude('Lib DS3231', '#include <DS3231.h>');
+    Blockly.Arduino.addSetup('DS3231_setup','rtc.begin();');
+    Blockly.Arduino.addSetup('Time_setup', 'rtc.setTime(' + time_Time + ');');
+    var code = '';
+    return code;
+
+}
 

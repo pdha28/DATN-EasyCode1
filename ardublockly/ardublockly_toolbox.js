@@ -45,6 +45,12 @@ var Airsense_toolbox =
          '<field name="Port tx"> 27 </field>' +
          '<field name="Baud speed"> 9600 </field>' +
          '</block>' +
+         '<block type="SetDateDS3231">'+
+            '<field name="Date"></field>'+
+        '</block>'+
+        '<block type="SetTimeDS3231">'+
+            '<field name="Time"></field>'+
+        '</block>'+
 
 
 
