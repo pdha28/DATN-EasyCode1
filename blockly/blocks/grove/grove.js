@@ -848,7 +848,7 @@ Blockly.Blocks['AirsenseReadDataMHZ14A'] =  {
 Blockly.Blocks['SetDateDS3231'] = {
   init: function() {
     this.appendDummyInput()
-        .appendField(Blockly.Msg.GetDateTimeDS3231)
+        .appendField(Blockly.Msg.SetDateDS3231)
         .appendField("Nhập ngày, tháng, năm : ")
         .appendField(new Blockly.FieldTextInput(" "), 'DATE');
     this.setPreviousStatement(true, null);
@@ -861,7 +861,7 @@ Blockly.Blocks['SetDateDS3231'] = {
 Blockly.Blocks['SetTimeDS3231'] = {
   init: function() {
     this.appendDummyInput()
-        .appendField(Blockly.Msg.GetDateTimeDS3231)
+        .appendField(Blockly.Msg.SetTimeDS3231)
         .appendField("Nhập thời gian : ")
         .appendField(new Blockly.FieldTextInput(" "), 'TIME');
     this.setPreviousStatement(true, null);
