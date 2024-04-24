@@ -40,3 +40,4 @@ created by the awesome electron community.
 
 #### License [CC0 1.0 (Public Domain)](LICENSE.md)
 "# Easy_code" 
+"# DATN-EasyCode1" 

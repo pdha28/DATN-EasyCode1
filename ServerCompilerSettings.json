@@ -1,0 +1,9 @@
+{
+    "arduino_exec_path": "D:\\kidscode\\kidscode_souce_code_12_6\\kidscode_souce_code\\arduino\\arduino.exe",
+    "upycraft_exec_path": "D:\\kidscode\\kidscode_souce_code_12_6\\kidscode_souce_code\\arduino\\arduino.exe",
+    "arduino_board": "Uno",
+    "arduino_serial_port": "COM9",
+    "sketch_name ": "KidscodeSketch",
+    "sketch_directory": "./",
+    "ide_load": "upload"
+}
