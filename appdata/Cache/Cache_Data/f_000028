@@ -1,4 +1,4 @@
-// Copyright 2007 The Closure Library Authors. All Rights Reserved.
+// Copyright 2008 The Closure Library Authors. All Rights Reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,1360 +13,938 @@
 // limitations under the License.
 
 /**
- * @fileoverview Base class for containers that host {@link goog.ui.Control}s,
- * such as menus and toolbars.  Provides default keyboard and mouse event
- * handling and child management, based on a generalized version of
- * {@link goog.ui.Menu}.
+ * @fileoverview Base class for control renderers.
+ * TODO(attila):  If the renderer framework works well, pull it into Component.
  *
  * @author attila@google.com (Attila Bodis)
- * @see ../demos/container.html
  */
-// TODO(attila):  Fix code/logic duplication between this and goog.ui.Control.
-// TODO(attila):  Maybe pull common stuff all the way up into Component...?
 
-goog.provide('goog.ui.Container');
-goog.provide('goog.ui.Container.EventType');
-goog.provide('goog.ui.Container.Orientation');
+goog.provide('goog.ui.ControlRenderer');
 
 goog.require('goog.a11y.aria');
+goog.require('goog.a11y.aria.Role');
 goog.require('goog.a11y.aria.State');
+goog.require('goog.array');
 goog.require('goog.asserts');
 goog.require('goog.dom');
-goog.require('goog.events.EventType');
-goog.require('goog.events.KeyCodes');
-goog.require('goog.events.KeyHandler');
+goog.require('goog.dom.TagName');
+goog.require('goog.dom.classlist');
 goog.require('goog.object');
+goog.require('goog.string');
 goog.require('goog.style');
 goog.require('goog.ui.Component');
-goog.require('goog.ui.ContainerRenderer');
-goog.require('goog.ui.Control');
+goog.require('goog.userAgent');
 
 
 
 /**
- * Base class for containers.  Extends {@link goog.ui.Component} by adding
- * the following:
- *  <ul>
- *    <li>a {@link goog.events.KeyHandler}, to simplify keyboard handling,
- *    <li>a pluggable <em>renderer</em> framework, to simplify the creation of
- *        containers without the need to subclass this class,
- *    <li>methods to manage child controls hosted in the container,
- *    <li>default mouse and keyboard event handling methods.
- *  </ul>
- * @param {?goog.ui.Container.Orientation=} opt_orientation Container
- *     orientation; defaults to {@code VERTICAL}.
- * @param {goog.ui.ContainerRenderer=} opt_renderer Renderer used to render or
- *     decorate the container; defaults to {@link goog.ui.ContainerRenderer}.
- * @param {goog.dom.DomHelper=} opt_domHelper DOM helper, used for document
- *     interaction.
- * @extends {goog.ui.Component}
+ * Default renderer for {@link goog.ui.Control}s.  Can be used as-is, but
+ * subclasses of Control will probably want to use renderers specifically
+ * tailored for them by extending this class.  Controls that use renderers
+ * delegate one or more of the following API methods to the renderer:
+ * <ul>
+ *    <li>{@code createDom} - renders the DOM for the component
+ *    <li>{@code canDecorate} - determines whether an element can be decorated
+ *        by the component
+ *    <li>{@code decorate} - decorates an existing element with the component
+ *    <li>{@code setState} - updates the appearance of the component based on
+ *        its state
+ *    <li>{@code getContent} - returns the component's content
+ *    <li>{@code setContent} - sets the component's content
+ * </ul>
+ * Controls are stateful; renderers, on the other hand, should be stateless and
+ * reusable.
  * @constructor
  */
-goog.ui.Container = function(opt_orientation, opt_renderer, opt_domHelper) {
-  goog.ui.Component.call(this, opt_domHelper);
-  this.renderer_ = opt_renderer || goog.ui.ContainerRenderer.getInstance();
-  this.orientation_ = opt_orientation || this.renderer_.getDefaultOrientation();
-};
-goog.inherits(goog.ui.Container, goog.ui.Component);
-goog.tagUnsealableClass(goog.ui.Container);
+goog.ui.ControlRenderer = function() {};
+goog.addSingletonGetter(goog.ui.ControlRenderer);
+goog.tagUnsealableClass(goog.ui.ControlRenderer);
 
 
 /**
- * Container-specific events.
- * @enum {string}
+ * Constructs a new renderer and sets the CSS class that the renderer will use
+ * as the base CSS class to apply to all elements rendered by that renderer.
+ * An example to use this function using a color palette:
+ *
+ * <pre>
+ * var myCustomRenderer = goog.ui.ControlRenderer.getCustomRenderer(
+ *     goog.ui.PaletteRenderer, 'my-special-palette');
+ * var newColorPalette = new goog.ui.ColorPalette(
+ *     colors, myCustomRenderer, opt_domHelper);
+ * </pre>
+ *
+ * Your CSS can look like this now:
+ * <pre>
+ * .my-special-palette { }
+ * .my-special-palette-table { }
+ * .my-special-palette-cell { }
+ * etc.
+ * </pre>
+ *
+ * <em>instead</em> of
+ * <pre>
+ * .CSS_MY_SPECIAL_PALETTE .goog-palette { }
+ * .CSS_MY_SPECIAL_PALETTE .goog-palette-table { }
+ * .CSS_MY_SPECIAL_PALETTE .goog-palette-cell { }
+ * etc.
+ * </pre>
+ *
+ * You would want to use this functionality when you want an instance of a
+ * component to have specific styles different than the other components of the
+ * same type in your application.  This avoids using descendant selectors to
+ * apply the specific styles to this component.
+ *
+ * @param {Function} ctor The constructor of the renderer you are trying to
+ *     create.
+ * @param {string} cssClassName The name of the CSS class for this renderer.
+ * @return {goog.ui.ControlRenderer} An instance of the desired renderer with
+ *     its getCssClass() method overridden to return the supplied custom CSS
+ *     class name.
  */
-goog.ui.Container.EventType = {
+goog.ui.ControlRenderer.getCustomRenderer = function(ctor, cssClassName) {
+  var renderer = new ctor();
+
   /**
-   * Dispatched after a goog.ui.Container becomes visible. Non-cancellable.
-   * NOTE(user): This event really shouldn't exist, because the
-   * goog.ui.Component.EventType.SHOW event should behave like this one. But the
-   * SHOW event for containers has been behaving as other components'
-   * BEFORE_SHOW event for a long time, and too much code relies on that old
-   * behavior to fix it now.
+   * Returns the CSS class to be applied to the root element of components
+   * rendered using this renderer.
+   * @return {string} Renderer-specific CSS class.
    */
-  AFTER_SHOW: 'aftershow',
+  renderer.getCssClass = function() { return cssClassName; };
 
-  /**
-   * Dispatched after a goog.ui.Container becomes invisible. Non-cancellable.
-   */
-  AFTER_HIDE: 'afterhide'
+  return renderer;
 };
 
 
 /**
- * Container orientation constants.
- * @enum {string}
+ * Default CSS class to be applied to the root element of components rendered
+ * by this renderer.
+ * @type {string}
  */
-goog.ui.Container.Orientation = {
-  HORIZONTAL: 'horizontal',
-  VERTICAL: 'vertical'
+goog.ui.ControlRenderer.CSS_CLASS = goog.getCssName('goog-control');
+
+
+/**
+ * Array of arrays of CSS classes that we want composite classes added and
+ * removed for in IE6 and lower as a workaround for lack of multi-class CSS
+ * selector support.
+ *
+ * Subclasses that have accompanying CSS requiring this workaround should define
+ * their own static IE6_CLASS_COMBINATIONS constant and override
+ * getIe6ClassCombinations to return it.
+ *
+ * For example, if your stylesheet uses the selector .button.collapse-left
+ * (and is compiled to .button_collapse-left for the IE6 version of the
+ * stylesheet,) you should include ['button', 'collapse-left'] in this array
+ * and the class button_collapse-left will be applied to the root element
+ * whenever both button and collapse-left are applied individually.
+ *
+ * Members of each class name combination will be joined with underscores in the
+ * order that they're defined in the array. You should alphabetize them (for
+ * compatibility with the CSS compiler) unless you are doing something special.
+ * @type {Array<Array<string>>}
+ */
+goog.ui.ControlRenderer.IE6_CLASS_COMBINATIONS = [];
+
+
+/**
+ * Map of component states to corresponding ARIA attributes.  Since the mapping
+ * of component states to ARIA attributes is neither component- nor
+ * renderer-specific, this is a static property of the renderer class, and is
+ * initialized on first use.
+ * @type {Object<goog.ui.Component.State, goog.a11y.aria.State>}
+ * @private
+ */
+goog.ui.ControlRenderer.ariaAttributeMap_;
+
+
+/**
+ * Map of certain ARIA states to ARIA roles that support them. Used for checked
+ * and selected Component states because they are used on Components with ARIA
+ * roles that do not support the corresponding ARIA state.
+ * @private {!Object<goog.a11y.aria.Role, goog.a11y.aria.State>}
+ * @const
+ */
+goog.ui.ControlRenderer.TOGGLE_ARIA_STATE_MAP_ = goog.object.create(
+    goog.a11y.aria.Role.BUTTON, goog.a11y.aria.State.PRESSED,
+    goog.a11y.aria.Role.CHECKBOX, goog.a11y.aria.State.CHECKED,
+    goog.a11y.aria.Role.MENU_ITEM, goog.a11y.aria.State.SELECTED,
+    goog.a11y.aria.Role.MENU_ITEM_CHECKBOX, goog.a11y.aria.State.CHECKED,
+    goog.a11y.aria.Role.MENU_ITEM_RADIO, goog.a11y.aria.State.CHECKED,
+    goog.a11y.aria.Role.RADIO, goog.a11y.aria.State.CHECKED,
+    goog.a11y.aria.Role.TAB, goog.a11y.aria.State.SELECTED,
+    goog.a11y.aria.Role.TREEITEM, goog.a11y.aria.State.SELECTED);
+
+
+/**
+ * Returns the ARIA role to be applied to the control.
+ * See http://wiki/Main/ARIA for more info.
+ * @return {goog.a11y.aria.Role|undefined} ARIA role.
+ */
+goog.ui.ControlRenderer.prototype.getAriaRole = function() {
+  // By default, the ARIA role is unspecified.
+  return undefined;
 };
 
 
 /**
- * Allows an alternative element to be set to receive key events, otherwise
- * defers to the renderer's element choice.
- * @type {Element|undefined}
- * @private
+ * Returns the control's contents wrapped in a DIV, with the renderer's own
+ * CSS class and additional state-specific classes applied to it.
+ * @param {goog.ui.Control} control Control to render.
+ * @return {Element} Root element for the control.
  */
-goog.ui.Container.prototype.keyEventTarget_ = null;
+goog.ui.ControlRenderer.prototype.createDom = function(control) {
+  // Create and return DIV wrapping contents.
+  var element = control.getDomHelper().createDom(
+      goog.dom.TagName.DIV, this.getClassNames(control).join(' '),
+      control.getContent());
 
-
-/**
- * Keyboard event handler.
- * @type {goog.events.KeyHandler?}
- * @private
- */
-goog.ui.Container.prototype.keyHandler_ = null;
-
-
-/**
- * Renderer for the container.  Defaults to {@link goog.ui.ContainerRenderer}.
- * @type {goog.ui.ContainerRenderer?}
- * @private
- */
-goog.ui.Container.prototype.renderer_ = null;
-
-
-/**
- * Container orientation; determines layout and default keyboard navigation.
- * @type {?goog.ui.Container.Orientation}
- * @private
- */
-goog.ui.Container.prototype.orientation_ = null;
-
-
-/**
- * Whether the container is set to be visible.  Defaults to true.
- * @type {boolean}
- * @private
- */
-goog.ui.Container.prototype.visible_ = true;
-
-
-/**
- * Whether the container is enabled and reacting to keyboard and mouse events.
- * Defaults to true.
- * @type {boolean}
- * @private
- */
-goog.ui.Container.prototype.enabled_ = true;
-
-
-/**
- * Whether the container supports keyboard focus.  Defaults to true.  Focusable
- * containers have a {@code tabIndex} and can be navigated to via the keyboard.
- * @type {boolean}
- * @private
- */
-goog.ui.Container.prototype.focusable_ = true;
-
-
-/**
- * The 0-based index of the currently highlighted control in the container
- * (-1 if none).
- * @type {number}
- * @private
- */
-goog.ui.Container.prototype.highlightedIndex_ = -1;
-
-
-/**
- * The currently open (expanded) control in the container (null if none).
- * @type {goog.ui.Control?}
- * @private
- */
-goog.ui.Container.prototype.openItem_ = null;
-
-
-/**
- * Whether the mouse button is held down.  Defaults to false.  This flag is set
- * when the user mouses down over the container, and remains set until they
- * release the mouse button.
- * @type {boolean}
- * @private
- */
-goog.ui.Container.prototype.mouseButtonPressed_ = false;
-
-
-/**
- * Whether focus of child components should be allowed.  Only effective if
- * focusable_ is set to false.
- * @type {boolean}
- * @private
- */
-goog.ui.Container.prototype.allowFocusableChildren_ = false;
-
-
-/**
- * Whether highlighting a child component should also open it.
- * @type {boolean}
- * @private
- */
-goog.ui.Container.prototype.openFollowsHighlight_ = true;
-
-
-/**
- * Map of DOM IDs to child controls.  Each key is the DOM ID of a child
- * control's root element; each value is a reference to the child control
- * itself.  Used for looking up the child control corresponding to a DOM
- * node in O(1) time.
- * @type {Object}
- * @private
- */
-goog.ui.Container.prototype.childElementIdMap_ = null;
-
-
-// Event handler and renderer management.
-
-
-/**
- * Returns the DOM element on which the container is listening for keyboard
- * events (null if none).
- * @return {Element} Element on which the container is listening for key
- *     events.
- */
-goog.ui.Container.prototype.getKeyEventTarget = function() {
-  // Delegate to renderer, unless we've set an explicit target.
-  return this.keyEventTarget_ || this.renderer_.getKeyEventTarget(this);
+  return element;
 };
 
 
 /**
- * Attaches an element on which to listen for key events.
- * @param {Element|undefined} element The element to attach, or null/undefined
- *     to attach to the default element.
+ * Takes the control's root element and returns the parent element of the
+ * control's contents.  Since by default controls are rendered as a single
+ * DIV, the default implementation returns the element itself.  Subclasses
+ * with more complex DOM structures must override this method as needed.
+ * @param {Element} element Root element of the control whose content element
+ *     is to be returned.
+ * @return {Element} The control's content element.
  */
-goog.ui.Container.prototype.setKeyEventTarget = function(element) {
-  if (this.focusable_) {
-    var oldTarget = this.getKeyEventTarget();
-    var inDocument = this.isInDocument();
+goog.ui.ControlRenderer.prototype.getContentElement = function(element) {
+  return element;
+};
 
-    this.keyEventTarget_ = element;
-    var newTarget = this.getKeyEventTarget();
 
-    if (inDocument) {
-      // Unlisten for events on the old key target.  Requires us to reset
-      // key target state temporarily.
-      this.keyEventTarget_ = oldTarget;
-      this.enableFocusHandling_(false);
-      this.keyEventTarget_ = element;
+/**
+ * Updates the control's DOM by adding or removing the specified class name
+ * to/from its root element. May add additional combined classes as needed in
+ * IE6 and lower. Because of this, subclasses should use this method when
+ * modifying class names on the control's root element.
+ * @param {goog.ui.Control|Element} control Control instance (or root element)
+ *     to be updated.
+ * @param {string} className CSS class name to add or remove.
+ * @param {boolean} enable Whether to add or remove the class name.
+ */
+goog.ui.ControlRenderer.prototype.enableClassName = function(
+    control, className, enable) {
+  var element = /** @type {Element} */ (
+      control.getElement ? control.getElement() : control);
+  if (element) {
+    var classNames = [className];
 
-      // Listen for events on the new key target.
-      this.getKeyHandler().attach(newTarget);
-      this.enableFocusHandling_(true);
+    // For IE6, we need to enable any combined classes involving this class
+    // as well.
+    // TODO(user): Remove this as IE6 is no longer in use.
+    if (goog.userAgent.IE && !goog.userAgent.isVersionOrHigher('7')) {
+      classNames = this.getAppliedCombinedClassNames_(
+          goog.dom.classlist.get(element), className);
+      classNames.push(className);
     }
+
+    goog.dom.classlist.enableAll(element, classNames, enable);
+  }
+};
+
+
+/**
+ * Updates the control's DOM by adding or removing the specified extra class
+ * name to/from its element.
+ * @param {goog.ui.Control} control Control to be updated.
+ * @param {string} className CSS class name to add or remove.
+ * @param {boolean} enable Whether to add or remove the class name.
+ */
+goog.ui.ControlRenderer.prototype.enableExtraClassName = function(
+    control, className, enable) {
+  // The base class implementation is trivial; subclasses should override as
+  // needed.
+  this.enableClassName(control, className, enable);
+};
+
+
+/**
+ * Returns true if this renderer can decorate the element, false otherwise.
+ * The default implementation always returns true.
+ * @param {Element} element Element to decorate.
+ * @return {boolean} Whether the renderer can decorate the element.
+ */
+goog.ui.ControlRenderer.prototype.canDecorate = function(element) {
+  return true;
+};
+
+
+/**
+ * Default implementation of {@code decorate} for {@link goog.ui.Control}s.
+ * Initializes the control's ID, content, and state based on the ID of the
+ * element, its child nodes, and its CSS classes, respectively.  Returns the
+ * element.
+ * @param {goog.ui.Control} control Control instance to decorate the element.
+ * @param {Element} element Element to decorate.
+ * @return {Element} Decorated element.
+ */
+goog.ui.ControlRenderer.prototype.decorate = function(control, element) {
+  // Set the control's ID to the decorated element's DOM ID, if any.
+  if (element.id) {
+    control.setId(element.id);
+  }
+
+  // Set the control's content to the decorated element's content.
+  var contentElem = this.getContentElement(element);
+  if (contentElem && contentElem.firstChild) {
+    control.setContentInternal(
+        contentElem.firstChild.nextSibling ?
+            goog.array.clone(contentElem.childNodes) :
+            contentElem.firstChild);
   } else {
-    throw Error(
-        'Can\'t set key event target for container ' +
-        'that doesn\'t support keyboard focus!');
-  }
-};
-
-
-/**
- * Returns the keyboard event handler for this container, lazily created the
- * first time this method is called.  The keyboard event handler listens for
- * keyboard events on the container's key event target, as determined by its
- * renderer.
- * @return {!goog.events.KeyHandler} Keyboard event handler for this container.
- */
-goog.ui.Container.prototype.getKeyHandler = function() {
-  return this.keyHandler_ ||
-      (this.keyHandler_ = new goog.events.KeyHandler(this.getKeyEventTarget()));
-};
-
-
-/**
- * Returns the renderer used by this container to render itself or to decorate
- * an existing element.
- * @return {goog.ui.ContainerRenderer} Renderer used by the container.
- */
-goog.ui.Container.prototype.getRenderer = function() {
-  return this.renderer_;
-};
-
-
-/**
- * Registers the given renderer with the container.  Changing renderers after
- * the container has already been rendered or decorated is an error.
- * @param {goog.ui.ContainerRenderer} renderer Renderer used by the container.
- */
-goog.ui.Container.prototype.setRenderer = function(renderer) {
-  if (this.getElement()) {
-    // Too late.
-    throw Error(goog.ui.Component.Error.ALREADY_RENDERED);
+    control.setContentInternal(null);
   }
 
-  this.renderer_ = renderer;
-};
-
-
-// Standard goog.ui.Component implementation.
-
-
-/**
- * Creates the container's DOM.
- * @override
- */
-goog.ui.Container.prototype.createDom = function() {
-  // Delegate to renderer.
-  this.setElementInternal(this.renderer_.createDom(this));
-};
-
-
-/**
- * Returns the DOM element into which child components are to be rendered,
- * or null if the container itself hasn't been rendered yet.  Overrides
- * {@link goog.ui.Component#getContentElement} by delegating to the renderer.
- * @return {Element} Element to contain child elements (null if none).
- * @override
- */
-goog.ui.Container.prototype.getContentElement = function() {
-  // Delegate to renderer.
-  return this.renderer_.getContentElement(this.getElement());
-};
-
-
-/**
- * Returns true if the given element can be decorated by this container.
- * Overrides {@link goog.ui.Component#canDecorate}.
- * @param {Element} element Element to decorate.
- * @return {boolean} True iff the element can be decorated.
- * @override
- */
-goog.ui.Container.prototype.canDecorate = function(element) {
-  // Delegate to renderer.
-  return this.renderer_.canDecorate(element);
-};
-
-
-/**
- * Decorates the given element with this container. Overrides {@link
- * goog.ui.Component#decorateInternal}.  Considered protected.
- * @param {Element} element Element to decorate.
- * @override
- */
-goog.ui.Container.prototype.decorateInternal = function(element) {
-  // Delegate to renderer.
-  this.setElementInternal(this.renderer_.decorate(this, element));
-  // Check whether the decorated element is explicitly styled to be invisible.
-  if (element.style.display == 'none') {
-    this.visible_ = false;
-  }
-};
-
-
-/**
- * Configures the container after its DOM has been rendered, and sets up event
- * handling.  Overrides {@link goog.ui.Component#enterDocument}.
- * @override
- */
-goog.ui.Container.prototype.enterDocument = function() {
-  goog.ui.Container.superClass_.enterDocument.call(this);
-
-  this.forEachChild(function(child) {
-    if (child.isInDocument()) {
-      this.registerChildId_(child);
+  // Initialize the control's state based on the decorated element's CSS class.
+  // This implementation is optimized to minimize object allocations, string
+  // comparisons, and DOM access.
+  var state = 0x00;
+  var rendererClassName = this.getCssClass();
+  var structuralClassName = this.getStructuralCssClass();
+  var hasRendererClassName = false;
+  var hasStructuralClassName = false;
+  var hasCombinedClassName = false;
+  var classNames = goog.array.toArray(goog.dom.classlist.get(element));
+  goog.array.forEach(classNames, function(className) {
+    if (!hasRendererClassName && className == rendererClassName) {
+      hasRendererClassName = true;
+      if (structuralClassName == rendererClassName) {
+        hasStructuralClassName = true;
+      }
+    } else if (!hasStructuralClassName && className == structuralClassName) {
+      hasStructuralClassName = true;
+    } else {
+      state |= this.getStateFromClass(className);
+    }
+    if (this.getStateFromClass(className) == goog.ui.Component.State.DISABLED) {
+      goog.asserts.assertElement(contentElem);
+      if (goog.dom.isFocusableTabIndex(contentElem)) {
+        goog.dom.setFocusableTabIndex(contentElem, false);
+      }
     }
   }, this);
+  control.setStateInternal(state);
 
-  var elem = this.getElement();
-
-  // Call the renderer's initializeDom method to initialize the container's DOM.
-  this.renderer_.initializeDom(this);
-
-  // Initialize visibility (opt_force = true, so we don't dispatch events).
-  this.setVisible(this.visible_, true);
-
-  // Handle events dispatched by child controls.
-  this.getHandler()
-      .listen(this, goog.ui.Component.EventType.ENTER, this.handleEnterItem)
-      .listen(
-          this, goog.ui.Component.EventType.HIGHLIGHT, this.handleHighlightItem)
-      .listen(
-          this, goog.ui.Component.EventType.UNHIGHLIGHT,
-          this.handleUnHighlightItem)
-      .listen(this, goog.ui.Component.EventType.OPEN, this.handleOpenItem)
-      .listen(this, goog.ui.Component.EventType.CLOSE, this.handleCloseItem)
-      .
-
-      // Handle mouse events.
-      listen(elem, goog.events.EventType.MOUSEDOWN, this.handleMouseDown)
-      .listen(
-          goog.dom.getOwnerDocument(elem), goog.events.EventType.MOUSEUP,
-          this.handleDocumentMouseUp)
-      .
-
-      // Handle mouse events on behalf of controls in the container.
-      listen(
-          elem,
-          [
-            goog.events.EventType.MOUSEDOWN, goog.events.EventType.MOUSEUP,
-            goog.events.EventType.MOUSEOVER, goog.events.EventType.MOUSEOUT,
-            goog.events.EventType.CONTEXTMENU
-          ],
-          this.handleChildMouseEvents);
-
-  // If the container is focusable, set up keyboard event handling.
-  if (this.isFocusable()) {
-    this.enableFocusHandling_(true);
-  }
-};
-
-
-/**
- * Sets up listening for events applicable to focusable containers.
- * @param {boolean} enable Whether to enable or disable focus handling.
- * @private
- */
-goog.ui.Container.prototype.enableFocusHandling_ = function(enable) {
-  var handler = this.getHandler();
-  var keyTarget = this.getKeyEventTarget();
-  if (enable) {
-    handler.listen(keyTarget, goog.events.EventType.FOCUS, this.handleFocus)
-        .listen(keyTarget, goog.events.EventType.BLUR, this.handleBlur)
-        .listen(
-            this.getKeyHandler(), goog.events.KeyHandler.EventType.KEY,
-            this.handleKeyEvent);
-  } else {
-    handler.unlisten(keyTarget, goog.events.EventType.FOCUS, this.handleFocus)
-        .unlisten(keyTarget, goog.events.EventType.BLUR, this.handleBlur)
-        .unlisten(
-            this.getKeyHandler(), goog.events.KeyHandler.EventType.KEY,
-            this.handleKeyEvent);
-  }
-};
-
-
-/**
- * Cleans up the container before its DOM is removed from the document, and
- * removes event handlers.  Overrides {@link goog.ui.Component#exitDocument}.
- * @override
- */
-goog.ui.Container.prototype.exitDocument = function() {
-  // {@link #setHighlightedIndex} has to be called before
-  // {@link goog.ui.Component#exitDocument}, otherwise it has no effect.
-  this.setHighlightedIndex(-1);
-
-  if (this.openItem_) {
-    this.openItem_.setOpen(false);
-  }
-
-  this.mouseButtonPressed_ = false;
-
-  goog.ui.Container.superClass_.exitDocument.call(this);
-};
-
-
-/** @override */
-goog.ui.Container.prototype.disposeInternal = function() {
-  goog.ui.Container.superClass_.disposeInternal.call(this);
-
-  if (this.keyHandler_) {
-    this.keyHandler_.dispose();
-    this.keyHandler_ = null;
-  }
-
-  this.keyEventTarget_ = null;
-  this.childElementIdMap_ = null;
-  this.openItem_ = null;
-  this.renderer_ = null;
-};
-
-
-// Default event handlers.
-
-
-/**
- * Handles ENTER events raised by child controls when they are navigated to.
- * @param {goog.events.Event} e ENTER event to handle.
- * @return {boolean} Whether to prevent handleMouseOver from handling
- *    the event.
- */
-goog.ui.Container.prototype.handleEnterItem = function(e) {
-  // Allow the Control to highlight itself.
-  return true;
-};
-
-
-/**
- * Handles HIGHLIGHT events dispatched by items in the container when
- * they are highlighted.
- * @param {goog.events.Event} e Highlight event to handle.
- */
-goog.ui.Container.prototype.handleHighlightItem = function(e) {
-  var index = this.indexOfChild(/** @type {goog.ui.Control} */ (e.target));
-  if (index > -1 && index != this.highlightedIndex_) {
-    var item = this.getHighlighted();
-    if (item) {
-      // Un-highlight previously highlighted item.
-      item.setHighlighted(false);
+  // Make sure the element has the renderer's CSS classes applied, as well as
+  // any extra class names set on the control.
+  if (!hasRendererClassName) {
+    classNames.push(rendererClassName);
+    if (structuralClassName == rendererClassName) {
+      hasStructuralClassName = true;
     }
+  }
+  if (!hasStructuralClassName) {
+    classNames.push(structuralClassName);
+  }
+  var extraClassNames = control.getExtraClassNames();
+  if (extraClassNames) {
+    classNames.push.apply(classNames, extraClassNames);
+  }
 
-    this.highlightedIndex_ = index;
-    item = this.getHighlighted();
-
-    if (this.isMouseButtonPressed()) {
-      // Activate item when mouse button is pressed, to allow MacOS-style
-      // dragging to choose menu items.  Although this should only truly
-      // happen if the highlight is due to mouse movements, there is little
-      // harm in doing it for keyboard or programmatic highlights.
-      item.setActive(true);
-    }
-
-    // Update open item if open item needs follow highlight.
-    if (this.openFollowsHighlight_ && this.openItem_ &&
-        item != this.openItem_) {
-      if (item.isSupportedState(goog.ui.Component.State.OPENED)) {
-        item.setOpen(true);
-      } else {
-        this.openItem_.setOpen(false);
-      }
+  // For IE6, rewrite all classes on the decorated element if any combined
+  // classes apply.
+  if (goog.userAgent.IE && !goog.userAgent.isVersionOrHigher('7')) {
+    var combinedClasses = this.getAppliedCombinedClassNames_(classNames);
+    if (combinedClasses.length > 0) {
+      classNames.push.apply(classNames, combinedClasses);
+      hasCombinedClassName = true;
     }
   }
 
-  var element = this.getElement();
-  goog.asserts.assert(
-      element, 'The DOM element for the container cannot be null.');
-  if (e.target.getElement() != null) {
+  // Only write to the DOM if new class names had to be added to the element.
+  if (!hasRendererClassName || !hasStructuralClassName || extraClassNames ||
+      hasCombinedClassName) {
+    goog.dom.classlist.set(element, classNames.join(' '));
+  }
+
+  return element;
+};
+
+
+/**
+ * Initializes the control's DOM by configuring properties that can only be set
+ * after the DOM has entered the document.  This implementation sets up BiDi
+ * and keyboard focus.  Called from {@link goog.ui.Control#enterDocument}.
+ * @param {goog.ui.Control} control Control whose DOM is to be initialized
+ *     as it enters the document.
+ */
+goog.ui.ControlRenderer.prototype.initializeDom = function(control) {
+  // Initialize render direction (BiDi).  We optimize the left-to-right render
+  // direction by assuming that elements are left-to-right by default, and only
+  // updating their styling if they are explicitly set to right-to-left.
+  if (control.isRightToLeft()) {
+    this.setRightToLeft(control.getElement(), true);
+  }
+
+  // Initialize keyboard focusability (tab index).  We assume that components
+  // aren't focusable by default (i.e have no tab index), and only touch the
+  // DOM if the component is focusable, enabled, and visible, and therefore
+  // needs a tab index.
+  if (control.isEnabled()) {
+    this.setFocusable(control, control.isVisible());
+  }
+};
+
+
+/**
+ * Sets the element's ARIA role.
+ * @param {Element} element Element to update.
+ * @param {?goog.a11y.aria.Role=} opt_preferredRole The preferred ARIA role.
+ */
+goog.ui.ControlRenderer.prototype.setAriaRole = function(
+    element, opt_preferredRole) {
+  var ariaRole = opt_preferredRole || this.getAriaRole();
+  if (ariaRole) {
+    goog.asserts.assert(
+        element, 'The element passed as a first parameter cannot be null.');
+    var currentRole = goog.a11y.aria.getRole(element);
+    if (ariaRole == currentRole) {
+      return;
+    }
+    goog.a11y.aria.setRole(element, ariaRole);
+  }
+};
+
+
+/**
+ * Sets the element's ARIA attributes, including distinguishing between
+ * universally supported ARIA properties and ARIA states that are only
+ * supported by certain ARIA roles. Only attributes which are initialized to be
+ * true will be set.
+ * @param {!goog.ui.Control} control Control whose ARIA state will be updated.
+ * @param {!Element} element Element whose ARIA state is to be updated.
+ */
+goog.ui.ControlRenderer.prototype.setAriaStates = function(control, element) {
+  goog.asserts.assert(control);
+  goog.asserts.assert(element);
+
+  var ariaLabel = control.getAriaLabel();
+  if (goog.isDefAndNotNull(ariaLabel)) {
+    this.setAriaLabel(element, ariaLabel);
+  }
+
+  if (!control.isVisible()) {
     goog.a11y.aria.setState(
-        element, goog.a11y.aria.State.ACTIVEDESCENDANT,
-        e.target.getElement().id);
+        element, goog.a11y.aria.State.HIDDEN, !control.isVisible());
+  }
+  if (!control.isEnabled()) {
+    this.updateAriaState(
+        element, goog.ui.Component.State.DISABLED, !control.isEnabled());
+  }
+  if (control.isSupportedState(goog.ui.Component.State.SELECTED)) {
+    this.updateAriaState(
+        element, goog.ui.Component.State.SELECTED, control.isSelected());
+  }
+  if (control.isSupportedState(goog.ui.Component.State.CHECKED)) {
+    this.updateAriaState(
+        element, goog.ui.Component.State.CHECKED, control.isChecked());
+  }
+  if (control.isSupportedState(goog.ui.Component.State.OPENED)) {
+    this.updateAriaState(
+        element, goog.ui.Component.State.OPENED, control.isOpen());
   }
 };
 
 
 /**
- * Handles UNHIGHLIGHT events dispatched by items in the container when
- * they are unhighlighted.
- * @param {goog.events.Event} e Unhighlight event to handle.
+ * Sets the element's ARIA label. This should be overriden by subclasses that
+ * don't apply the role directly on control.element_.
+ * @param {!Element} element Element whose ARIA label is to be updated.
+ * @param {string} ariaLabel Label to add to the element.
  */
-goog.ui.Container.prototype.handleUnHighlightItem = function(e) {
-  if (e.target == this.getHighlighted()) {
-    this.highlightedIndex_ = -1;
+goog.ui.ControlRenderer.prototype.setAriaLabel = function(element, ariaLabel) {
+  goog.a11y.aria.setLabel(element, ariaLabel);
+};
+
+
+/**
+ * Allows or disallows text selection within the control's DOM.
+ * @param {Element} element The control's root element.
+ * @param {boolean} allow Whether the element should allow text selection.
+ */
+goog.ui.ControlRenderer.prototype.setAllowTextSelection = function(
+    element, allow) {
+  // On all browsers other than IE and Opera, it isn't necessary to recursively
+  // apply unselectable styling to the element's children.
+  goog.style.setUnselectable(
+      element, !allow, !goog.userAgent.IE && !goog.userAgent.OPERA);
+};
+
+
+/**
+ * Applies special styling to/from the control's element if it is rendered
+ * right-to-left, and removes it if it is rendered left-to-right.
+ * @param {Element} element The control's root element.
+ * @param {boolean} rightToLeft Whether the component is rendered
+ *     right-to-left.
+ */
+goog.ui.ControlRenderer.prototype.setRightToLeft = function(
+    element, rightToLeft) {
+  this.enableClassName(
+      element, goog.getCssName(this.getStructuralCssClass(), 'rtl'),
+      rightToLeft);
+};
+
+
+/**
+ * Returns true if the control's key event target supports keyboard focus
+ * (based on its {@code tabIndex} attribute), false otherwise.
+ * @param {goog.ui.Control} control Control whose key event target is to be
+ *     checked.
+ * @return {boolean} Whether the control's key event target is focusable.
+ */
+goog.ui.ControlRenderer.prototype.isFocusable = function(control) {
+  var keyTarget;
+  if (control.isSupportedState(goog.ui.Component.State.FOCUSED) &&
+      (keyTarget = control.getKeyEventTarget())) {
+    return goog.dom.isFocusableTabIndex(keyTarget);
   }
-  var element = this.getElement();
+  return false;
+};
+
+
+/**
+ * Updates the control's key event target to make it focusable or non-focusable
+ * via its {@code tabIndex} attribute.  Does nothing if the control doesn't
+ * support the {@code FOCUSED} state, or if it has no key event target.
+ * @param {goog.ui.Control} control Control whose key event target is to be
+ *     updated.
+ * @param {boolean} focusable Whether to enable keyboard focus support on the
+ *     control's key event target.
+ */
+goog.ui.ControlRenderer.prototype.setFocusable = function(control, focusable) {
+  var keyTarget;
+  if (control.isSupportedState(goog.ui.Component.State.FOCUSED) &&
+      (keyTarget = control.getKeyEventTarget())) {
+    if (!focusable && control.isFocused()) {
+      // Blur before hiding.  Note that IE calls onblur handlers asynchronously.
+      try {
+        keyTarget.blur();
+      } catch (e) {
+        // TODO(user|user):  Find out why this fails on IE.
+      }
+      // The blur event dispatched by the key event target element when blur()
+      // was called on it should have been handled by the control's handleBlur()
+      // method, so at this point the control should no longer be focused.
+      // However, blur events are unreliable on IE and FF3, so if at this point
+      // the control is still focused, we trigger its handleBlur() method
+      // programmatically.
+      if (control.isFocused()) {
+        control.handleBlur(null);
+      }
+    }
+    // Don't overwrite existing tab index values unless needed.
+    if (goog.dom.isFocusableTabIndex(keyTarget) != focusable) {
+      goog.dom.setFocusableTabIndex(keyTarget, focusable);
+    }
+  }
+};
+
+
+/**
+ * Shows or hides the element.
+ * @param {Element} element Element to update.
+ * @param {boolean} visible Whether to show the element.
+ */
+goog.ui.ControlRenderer.prototype.setVisible = function(element, visible) {
+  // The base class implementation is trivial; subclasses should override as
+  // needed.  It should be possible to do animated reveals, for example.
+  goog.style.setElementShown(element, visible);
+  if (element) {
+    goog.a11y.aria.setState(element, goog.a11y.aria.State.HIDDEN, !visible);
+  }
+};
+
+
+/**
+ * Updates the appearance of the control in response to a state change.
+ * @param {goog.ui.Control} control Control instance to update.
+ * @param {goog.ui.Component.State} state State to enable or disable.
+ * @param {boolean} enable Whether the control is entering or exiting the state.
+ */
+goog.ui.ControlRenderer.prototype.setState = function(control, state, enable) {
+  var element = control.getElement();
+  if (element) {
+    var className = this.getClassForState(state);
+    if (className) {
+      this.enableClassName(control, className, enable);
+    }
+    this.updateAriaState(element, state, enable);
+  }
+};
+
+
+/**
+ * Updates the element's ARIA (accessibility) attributes , including
+ * distinguishing between universally supported ARIA properties and ARIA states
+ * that are only supported by certain ARIA roles.
+ * @param {Element} element Element whose ARIA state is to be updated.
+ * @param {goog.ui.Component.State} state Component state being enabled or
+ *     disabled.
+ * @param {boolean} enable Whether the state is being enabled or disabled.
+ * @protected
+ */
+goog.ui.ControlRenderer.prototype.updateAriaState = function(
+    element, state, enable) {
+  // Ensure the ARIA attribute map exists.
+  if (!goog.ui.ControlRenderer.ariaAttributeMap_) {
+    goog.ui.ControlRenderer.ariaAttributeMap_ = goog.object.create(
+        goog.ui.Component.State.DISABLED, goog.a11y.aria.State.DISABLED,
+        goog.ui.Component.State.SELECTED, goog.a11y.aria.State.SELECTED,
+        goog.ui.Component.State.CHECKED, goog.a11y.aria.State.CHECKED,
+        goog.ui.Component.State.OPENED, goog.a11y.aria.State.EXPANDED);
+  }
   goog.asserts.assert(
-      element, 'The DOM element for the container cannot be null.');
-  // Setting certain ARIA attributes to empty strings is problematic.
-  // Just remove the attribute instead.
-  goog.a11y.aria.removeState(element, goog.a11y.aria.State.ACTIVEDESCENDANT);
-};
-
-
-/**
- * Handles OPEN events dispatched by items in the container when they are
- * opened.
- * @param {goog.events.Event} e Open event to handle.
- */
-goog.ui.Container.prototype.handleOpenItem = function(e) {
-  var item = /** @type {goog.ui.Control} */ (e.target);
-  if (item && item != this.openItem_ && item.getParent() == this) {
-    if (this.openItem_) {
-      this.openItem_.setOpen(false);
-    }
-    this.openItem_ = item;
+      element, 'The element passed as a first parameter cannot be null.');
+  var ariaAttr = goog.ui.ControlRenderer.getAriaStateForAriaRole_(
+      element, goog.ui.ControlRenderer.ariaAttributeMap_[state]);
+  if (ariaAttr) {
+    goog.a11y.aria.setState(element, ariaAttr, enable);
   }
 };
 
 
 /**
- * Handles CLOSE events dispatched by items in the container when they are
- * closed.
- * @param {goog.events.Event} e Close event to handle.
- */
-goog.ui.Container.prototype.handleCloseItem = function(e) {
-  if (e.target == this.openItem_) {
-    this.openItem_ = null;
-  }
-
-  var element = this.getElement();
-  var targetEl = e.target.getElement();
-  // Set the active descendant to the menu item when its submenu is closed and
-  // it is still highlighted. This can sometimes be called when the menuitem is
-  // unhighlighted because the focus moved elsewhere, do nothing at that point.
-  if (element && e.target.isHighlighted() && targetEl) {
-    goog.a11y.aria.setActiveDescendant(element, targetEl);
-  }
-};
-
-
-/**
- * Handles mousedown events over the container.  The default implementation
- * sets the "mouse button pressed" flag and, if the container is focusable,
- * grabs keyboard focus.
- * @param {goog.events.BrowserEvent} e Mousedown event to handle.
- */
-goog.ui.Container.prototype.handleMouseDown = function(e) {
-  if (this.enabled_) {
-    this.setMouseButtonPressed(true);
-  }
-
-  var keyTarget = this.getKeyEventTarget();
-  if (keyTarget && goog.dom.isFocusableTabIndex(keyTarget)) {
-    // The container is configured to receive keyboard focus.
-    keyTarget.focus();
-  } else {
-    // The control isn't configured to receive keyboard focus; prevent it
-    // from stealing focus or destroying the selection.
-    e.preventDefault();
-  }
-};
-
-
-/**
- * Handles mouseup events over the document.  The default implementation
- * clears the "mouse button pressed" flag.
- * @param {goog.events.BrowserEvent} e Mouseup event to handle.
- */
-goog.ui.Container.prototype.handleDocumentMouseUp = function(e) {
-  this.setMouseButtonPressed(false);
-};
-
-
-/**
- * Handles mouse events originating from nodes belonging to the controls hosted
- * in the container.  Locates the child control based on the DOM node that
- * dispatched the event, and forwards the event to the control for handling.
- * @param {goog.events.BrowserEvent} e Mouse event to handle.
- */
-goog.ui.Container.prototype.handleChildMouseEvents = function(e) {
-  var control = this.getOwnerControl(/** @type {Node} */ (e.target));
-  if (control) {
-    // Child control identified; forward the event.
-    switch (e.type) {
-      case goog.events.EventType.MOUSEDOWN:
-        control.handleMouseDown(e);
-        break;
-      case goog.events.EventType.MOUSEUP:
-        control.handleMouseUp(e);
-        break;
-      case goog.events.EventType.MOUSEOVER:
-        control.handleMouseOver(e);
-        break;
-      case goog.events.EventType.MOUSEOUT:
-        control.handleMouseOut(e);
-        break;
-      case goog.events.EventType.CONTEXTMENU:
-        control.handleContextMenu(e);
-        break;
-    }
-  }
-};
-
-
-/**
- * Returns the child control that owns the given DOM node, or null if no such
- * control is found.
- * @param {Node} node DOM node whose owner is to be returned.
- * @return {goog.ui.Control?} Control hosted in the container to which the node
- *     belongs (if found).
- * @protected
- */
-goog.ui.Container.prototype.getOwnerControl = function(node) {
-  // Ensure that this container actually has child controls before
-  // looking up the owner.
-  if (this.childElementIdMap_) {
-    var elem = this.getElement();
-    // See http://b/2964418 . IE9 appears to evaluate '!=' incorrectly, so
-    // using '!==' instead.
-    // TODO(user): Possibly revert this change if/when IE9 fixes the issue.
-    while (node && node !== elem) {
-      var id = node.id;
-      if (id in this.childElementIdMap_) {
-        return this.childElementIdMap_[id];
-      }
-      node = node.parentNode;
-    }
-  }
-  return null;
-};
-
-
-/**
- * Handles focus events raised when the container's key event target receives
- * keyboard focus.
- * @param {goog.events.BrowserEvent} e Focus event to handle.
- */
-goog.ui.Container.prototype.handleFocus = function(e) {
-  // No-op in the base class.
-};
-
-
-/**
- * Handles blur events raised when the container's key event target loses
- * keyboard focus.  The default implementation clears the highlight index.
- * @param {goog.events.BrowserEvent} e Blur event to handle.
- */
-goog.ui.Container.prototype.handleBlur = function(e) {
-  this.setHighlightedIndex(-1);
-  this.setMouseButtonPressed(false);
-  // If the container loses focus, and one of its children is open, close it.
-  if (this.openItem_) {
-    this.openItem_.setOpen(false);
-  }
-};
-
-
-/**
- * Attempts to handle a keyboard event, if the control is enabled, by calling
- * {@link handleKeyEventInternal}.  Considered protected; should only be used
- * within this package and by subclasses.
- * @param {goog.events.KeyEvent} e Key event to handle.
- * @return {boolean} Whether the key event was handled.
- */
-goog.ui.Container.prototype.handleKeyEvent = function(e) {
-  if (this.isEnabled() && this.isVisible() &&
-      (this.getChildCount() != 0 || this.keyEventTarget_) &&
-      this.handleKeyEventInternal(e)) {
-    e.preventDefault();
-    e.stopPropagation();
-    return true;
-  }
-  return false;
-};
-
-
-/**
- * Attempts to handle a keyboard event; returns true if the event was handled,
- * false otherwise.  If the container is enabled, and a child is highlighted,
- * calls the child control's {@code handleKeyEvent} method to give the control
- * a chance to handle the event first.
- * @param {goog.events.KeyEvent} e Key event to handle.
- * @return {boolean} Whether the event was handled by the container (or one of
- *     its children).
- */
-goog.ui.Container.prototype.handleKeyEventInternal = function(e) {
-  // Give the highlighted control the chance to handle the key event.
-  var highlighted = this.getHighlighted();
-  if (highlighted && typeof highlighted.handleKeyEvent == 'function' &&
-      highlighted.handleKeyEvent(e)) {
-    return true;
-  }
-
-  // Give the open control the chance to handle the key event.
-  if (this.openItem_ && this.openItem_ != highlighted &&
-      typeof this.openItem_.handleKeyEvent == 'function' &&
-      this.openItem_.handleKeyEvent(e)) {
-    return true;
-  }
-
-  // Do not handle the key event if any modifier key is pressed.
-  if (e.shiftKey || e.ctrlKey || e.metaKey || e.altKey) {
-    return false;
-  }
-
-  // Either nothing is highlighted, or the highlighted control didn't handle
-  // the key event, so attempt to handle it here.
-  switch (e.keyCode) {
-    case goog.events.KeyCodes.ESC:
-      if (this.isFocusable()) {
-        this.getKeyEventTarget().blur();
-      } else {
-        return false;
-      }
-      break;
-
-    case goog.events.KeyCodes.HOME:
-      this.highlightFirst();
-      break;
-
-    case goog.events.KeyCodes.END:
-      this.highlightLast();
-      break;
-
-    case goog.events.KeyCodes.UP:
-      if (this.orientation_ == goog.ui.Container.Orientation.VERTICAL) {
-        this.highlightPrevious();
-      } else {
-        return false;
-      }
-      break;
-
-    case goog.events.KeyCodes.LEFT:
-      if (this.orientation_ == goog.ui.Container.Orientation.HORIZONTAL) {
-        if (this.isRightToLeft()) {
-          this.highlightNext();
-        } else {
-          this.highlightPrevious();
-        }
-      } else {
-        return false;
-      }
-      break;
-
-    case goog.events.KeyCodes.DOWN:
-      if (this.orientation_ == goog.ui.Container.Orientation.VERTICAL) {
-        this.highlightNext();
-      } else {
-        return false;
-      }
-      break;
-
-    case goog.events.KeyCodes.RIGHT:
-      if (this.orientation_ == goog.ui.Container.Orientation.HORIZONTAL) {
-        if (this.isRightToLeft()) {
-          this.highlightPrevious();
-        } else {
-          this.highlightNext();
-        }
-      } else {
-        return false;
-      }
-      break;
-
-    default:
-      return false;
-  }
-
-  return true;
-};
-
-
-// Child component management.
-
-
-/**
- * Creates a DOM ID for the child control and registers it to an internal
- * hash table to be able to find it fast by id.
- * @param {goog.ui.Component} child The child control. Its root element has
- *     to be created yet.
+ * Returns the appropriate ARIA attribute based on ARIA role if the ARIA
+ * attribute is an ARIA state.
+ * @param {!Element} element The element from which to get the ARIA role for
+ * matching ARIA state.
+ * @param {goog.a11y.aria.State} attr The ARIA attribute to check to see if it
+ * can be applied to the given ARIA role.
+ * @return {goog.a11y.aria.State} An ARIA attribute that can be applied to the
+ * given ARIA role.
  * @private
  */
-goog.ui.Container.prototype.registerChildId_ = function(child) {
-  // Map the DOM ID of the control's root element to the control itself.
-  var childElem = child.getElement();
-
-  // If the control's root element doesn't have a DOM ID assign one.
-  var id = childElem.id || (childElem.id = child.getId());
-
-  // Lazily create the child element ID map on first use.
-  if (!this.childElementIdMap_) {
-    this.childElementIdMap_ = {};
+goog.ui.ControlRenderer.getAriaStateForAriaRole_ = function(element, attr) {
+  var role = goog.a11y.aria.getRole(element);
+  if (!role) {
+    return attr;
   }
-  this.childElementIdMap_[id] = child;
+  role = /** @type {goog.a11y.aria.Role} */ (role);
+  var matchAttr = goog.ui.ControlRenderer.TOGGLE_ARIA_STATE_MAP_[role] || attr;
+  return goog.ui.ControlRenderer.isAriaState_(attr) ? matchAttr : attr;
 };
 
 
 /**
- * Adds the specified control as the last child of this container.  See
- * {@link goog.ui.Container#addChildAt} for detailed semantics.
- * @param {goog.ui.Component} child The new child control.
- * @param {boolean=} opt_render Whether the new child should be rendered
- *     immediately after being added (defaults to false).
- * @override
- */
-goog.ui.Container.prototype.addChild = function(child, opt_render) {
-  goog.asserts.assertInstanceof(
-      child, goog.ui.Control, 'The child of a container must be a control');
-  goog.ui.Container.superClass_.addChild.call(this, child, opt_render);
-};
-
-
-/**
- * Overrides {@link goog.ui.Container#getChild} to make it clear that it
- * only returns {@link goog.ui.Control}s.
- * @param {string} id Child component ID.
- * @return {goog.ui.Control} The child with the given ID; null if none.
- * @override
- */
-goog.ui.Container.prototype.getChild;
-
-
-/**
- * Overrides {@link goog.ui.Container#getChildAt} to make it clear that it
- * only returns {@link goog.ui.Control}s.
- * @param {number} index 0-based index.
- * @return {goog.ui.Control} The child with the given ID; null if none.
- * @override
- */
-goog.ui.Container.prototype.getChildAt;
-
-
-/**
- * Adds the control as a child of this container at the given 0-based index.
- * Overrides {@link goog.ui.Component#addChildAt} by also updating the
- * container's highlight index.  Since {@link goog.ui.Component#addChild} uses
- * {@link #addChildAt} internally, we only need to override this method.
- * @param {goog.ui.Component} control New child.
- * @param {number} index Index at which the new child is to be added.
- * @param {boolean=} opt_render Whether the new child should be rendered
- *     immediately after being added (defaults to false).
- * @override
- */
-goog.ui.Container.prototype.addChildAt = function(control, index, opt_render) {
-  goog.asserts.assertInstanceof(control, goog.ui.Control);
-
-  // Make sure the child control dispatches HIGHLIGHT, UNHIGHLIGHT, OPEN, and
-  // CLOSE events, and that it doesn't steal keyboard focus.
-  control.setDispatchTransitionEvents(goog.ui.Component.State.HOVER, true);
-  control.setDispatchTransitionEvents(goog.ui.Component.State.OPENED, true);
-  if (this.isFocusable() || !this.isFocusableChildrenAllowed()) {
-    control.setSupportedState(goog.ui.Component.State.FOCUSED, false);
-  }
-
-  // Disable mouse event handling by child controls.
-  control.setHandleMouseEvents(false);
-
-  var srcIndex =
-      (control.getParent() == this) ? this.indexOfChild(control) : -1;
-
-  // Let the superclass implementation do the work.
-  goog.ui.Container.superClass_.addChildAt.call(
-      this, control, index, opt_render);
-
-  if (control.isInDocument() && this.isInDocument()) {
-    this.registerChildId_(control);
-  }
-
-  this.updateHighlightedIndex_(srcIndex, index);
-};
-
-
-/**
- * Updates the highlighted index when children are added or moved.
- * @param {number} fromIndex Index of the child before it was moved, or -1 if
- *     the child was added.
- * @param {number} toIndex Index of the child after it was moved or added.
+ * Determines if the given ARIA attribute is an ARIA property or ARIA state.
+ * @param {goog.a11y.aria.State} attr The ARIA attribute to classify.
+ * @return {boolean} If the ARIA attribute is an ARIA state.
  * @private
  */
-goog.ui.Container.prototype.updateHighlightedIndex_ = function(
-    fromIndex, toIndex) {
-  if (fromIndex == -1) {
-    fromIndex = this.getChildCount();
-  }
-  if (fromIndex == this.highlightedIndex_) {
-    // The highlighted element itself was moved.
-    this.highlightedIndex_ = Math.min(this.getChildCount() - 1, toIndex);
-  } else if (
-      fromIndex > this.highlightedIndex_ && toIndex <= this.highlightedIndex_) {
-    // The control was added or moved behind the highlighted index.
-    this.highlightedIndex_++;
-  } else if (
-      fromIndex < this.highlightedIndex_ && toIndex > this.highlightedIndex_) {
-    // The control was moved from before to behind the highlighted index.
-    this.highlightedIndex_--;
-  }
+goog.ui.ControlRenderer.isAriaState_ = function(attr) {
+  return attr == goog.a11y.aria.State.CHECKED ||
+      attr == goog.a11y.aria.State.SELECTED;
 };
 
 
 /**
- * Removes a child control.  Overrides {@link goog.ui.Component#removeChild} by
- * updating the highlight index.  Since {@link goog.ui.Component#removeChildAt}
- * uses {@link #removeChild} internally, we only need to override this method.
- * @param {string|goog.ui.Component} control The ID of the child to remove, or
- *     the control itself.
- * @param {boolean=} opt_unrender Whether to call {@code exitDocument} on the
- *     removed control, and detach its DOM from the document (defaults to
- *     false).
- * @return {goog.ui.Control} The removed control, if any.
- * @override
+ * Takes a control's root element, and sets its content to the given text
+ * caption or DOM structure.  The default implementation replaces the children
+ * of the given element.  Renderers that create more complex DOM structures
+ * must override this method accordingly.
+ * @param {Element} element The control's root element.
+ * @param {goog.ui.ControlContent} content Text caption or DOM structure to be
+ *     set as the control's content. The DOM nodes will not be cloned, they
+ *     will only moved under the content element of the control.
  */
-goog.ui.Container.prototype.removeChild = function(control, opt_unrender) {
-  control = goog.isString(control) ? this.getChild(control) : control;
-  goog.asserts.assertInstanceof(control, goog.ui.Control);
-
-  if (control) {
-    var index = this.indexOfChild(control);
-    if (index != -1) {
-      if (index == this.highlightedIndex_) {
-        control.setHighlighted(false);
-        this.highlightedIndex_ = -1;
-      } else if (index < this.highlightedIndex_) {
-        this.highlightedIndex_--;
-      }
-    }
-
-    // Remove the mapping from the child element ID map.
-    var childElem = control.getElement();
-    if (childElem && childElem.id && this.childElementIdMap_) {
-      goog.object.remove(this.childElementIdMap_, childElem.id);
-    }
-  }
-
-  control = /** @type {!goog.ui.Control} */ (
-      goog.ui.Container.superClass_.removeChild.call(
-          this, control, opt_unrender));
-
-  // Re-enable mouse event handling (in case the control is reused elsewhere).
-  control.setHandleMouseEvents(true);
-
-  return control;
-};
-
-
-// Container state management.
-
-
-/**
- * Returns the container's orientation.
- * @return {?goog.ui.Container.Orientation} Container orientation.
- */
-goog.ui.Container.prototype.getOrientation = function() {
-  return this.orientation_;
-};
-
-
-/**
- * Sets the container's orientation.
- * @param {goog.ui.Container.Orientation} orientation Container orientation.
- */
-// TODO(attila): Do we need to support containers with dynamic orientation?
-goog.ui.Container.prototype.setOrientation = function(orientation) {
-  if (this.getElement()) {
-    // Too late.
-    throw Error(goog.ui.Component.Error.ALREADY_RENDERED);
-  }
-
-  this.orientation_ = orientation;
-};
-
-
-/**
- * Returns true if the container's visibility is set to visible, false if
- * it is set to hidden.  A container that is set to hidden is guaranteed
- * to be hidden from the user, but the reverse isn't necessarily true.
- * A container may be set to visible but can otherwise be obscured by another
- * element, rendered off-screen, or hidden using direct CSS manipulation.
- * @return {boolean} Whether the container is set to be visible.
- */
-goog.ui.Container.prototype.isVisible = function() {
-  return this.visible_;
-};
-
-
-/**
- * Shows or hides the container.  Does nothing if the container already has
- * the requested visibility.  Otherwise, dispatches a SHOW or HIDE event as
- * appropriate, giving listeners a chance to prevent the visibility change.
- * @param {boolean} visible Whether to show or hide the container.
- * @param {boolean=} opt_force If true, doesn't check whether the container
- *     already has the requested visibility, and doesn't dispatch any events.
- * @return {boolean} Whether the visibility was changed.
- */
-goog.ui.Container.prototype.setVisible = function(visible, opt_force) {
-  if (opt_force || (this.visible_ != visible &&
-                    this.dispatchEvent(
-                        visible ? goog.ui.Component.EventType.SHOW :
-                                  goog.ui.Component.EventType.HIDE))) {
-    this.visible_ = visible;
-
-    var elem = this.getElement();
-    if (elem) {
-      goog.style.setElementShown(elem, visible);
-      if (this.isFocusable()) {
-        // Enable keyboard access only for enabled & visible containers.
-        this.renderer_.enableTabIndex(
-            this.getKeyEventTarget(), this.enabled_ && this.visible_);
-      }
-      if (!opt_force) {
-        this.dispatchEvent(
-            this.visible_ ? goog.ui.Container.EventType.AFTER_SHOW :
-                            goog.ui.Container.EventType.AFTER_HIDE);
-      }
-    }
-
-    return true;
-  }
-
-  return false;
-};
-
-
-/**
- * Returns true if the container is enabled, false otherwise.
- * @return {boolean} Whether the container is enabled.
- */
-goog.ui.Container.prototype.isEnabled = function() {
-  return this.enabled_;
-};
-
-
-/**
- * Enables/disables the container based on the {@code enable} argument.
- * Dispatches an {@code ENABLED} or {@code DISABLED} event prior to changing
- * the container's state, which may be caught and canceled to prevent the
- * container from changing state.  Also enables/disables child controls.
- * @param {boolean} enable Whether to enable or disable the container.
- */
-goog.ui.Container.prototype.setEnabled = function(enable) {
-  if (this.enabled_ != enable &&
-      this.dispatchEvent(
-          enable ? goog.ui.Component.EventType.ENABLE :
-                   goog.ui.Component.EventType.DISABLE)) {
-    if (enable) {
-      // Flag the container as enabled first, then update children.  This is
-      // because controls can't be enabled if their parent is disabled.
-      this.enabled_ = true;
-      this.forEachChild(function(child) {
-        // Enable child control unless it is flagged.
-        if (child.wasDisabled) {
-          delete child.wasDisabled;
+goog.ui.ControlRenderer.prototype.setContent = function(element, content) {
+  var contentElem = this.getContentElement(element);
+  if (contentElem) {
+    goog.dom.removeChildren(contentElem);
+    if (content) {
+      if (goog.isString(content)) {
+        goog.dom.setTextContent(contentElem, content);
+      } else {
+        var childHandler = function(child) {
+          if (child) {
+            var doc = goog.dom.getOwnerDocument(contentElem);
+            contentElem.appendChild(
+                goog.isString(child) ? doc.createTextNode(child) : child);
+          }
+        };
+        if (goog.isArray(content)) {
+          // Array of nodes.
+          goog.array.forEach(content, childHandler);
+        } else if (goog.isArrayLike(content) && !('nodeType' in content)) {
+          // NodeList. The second condition filters out TextNode which also has
+          // length attribute but is not array like. The nodes have to be cloned
+          // because childHandler removes them from the list during iteration.
+          goog.array.forEach(
+              goog.array.clone(/** @type {!NodeList} */ (content)),
+              childHandler);
         } else {
-          child.setEnabled(true);
+          // Node or string.
+          childHandler(content);
         }
-      });
-    } else {
-      // Disable children first, then flag the container as disabled.  This is
-      // because controls can't be disabled if their parent is already disabled.
-      this.forEachChild(function(child) {
-        // Disable child control, or flag it if it's already disabled.
-        if (child.isEnabled()) {
-          child.setEnabled(false);
-        } else {
-          child.wasDisabled = true;
-        }
-      });
-      this.enabled_ = false;
-      this.setMouseButtonPressed(false);
-    }
-
-    if (this.isFocusable()) {
-      // Enable keyboard access only for enabled & visible components.
-      this.renderer_.enableTabIndex(
-          this.getKeyEventTarget(), enable && this.visible_);
+      }
     }
   }
 };
 
 
 /**
- * Returns true if the container is focusable, false otherwise.  The default
- * is true.  Focusable containers always have a tab index and allocate a key
- * handler to handle keyboard events while focused.
- * @return {boolean} Whether the component is focusable.
+ * Returns the element within the component's DOM that should receive keyboard
+ * focus (null if none).  The default implementation returns the control's root
+ * element.
+ * @param {goog.ui.Control} control Control whose key event target is to be
+ *     returned.
+ * @return {Element} The key event target.
  */
-goog.ui.Container.prototype.isFocusable = function() {
-  return this.focusable_;
+goog.ui.ControlRenderer.prototype.getKeyEventTarget = function(control) {
+  return control.getElement();
+};
+
+
+// CSS class name management.
+
+
+/**
+ * Returns the CSS class name to be applied to the root element of all
+ * components rendered or decorated using this renderer.  The class name
+ * is expected to uniquely identify the renderer class, i.e. no two
+ * renderer classes are expected to share the same CSS class name.
+ * @return {string} Renderer-specific CSS class name.
+ */
+goog.ui.ControlRenderer.prototype.getCssClass = function() {
+  return goog.ui.ControlRenderer.CSS_CLASS;
 };
 
 
 /**
- * Sets whether the container is focusable.  The default is true.  Focusable
- * containers always have a tab index and allocate a key handler to handle
- * keyboard events while focused.
- * @param {boolean} focusable Whether the component is to be focusable.
+ * Returns an array of combinations of classes to apply combined class names for
+ * in IE6 and below. See {@link IE6_CLASS_COMBINATIONS} for more detail. This
+ * method doesn't reference {@link IE6_CLASS_COMBINATIONS} so that it can be
+ * compiled out, but subclasses should return their IE6_CLASS_COMBINATIONS
+ * static constant instead.
+ * @return {Array<Array<string>>} Array of class name combinations.
  */
-goog.ui.Container.prototype.setFocusable = function(focusable) {
-  if (focusable != this.focusable_ && this.isInDocument()) {
-    this.enableFocusHandling_(focusable);
-  }
-  this.focusable_ = focusable;
-  if (this.enabled_ && this.visible_) {
-    this.renderer_.enableTabIndex(this.getKeyEventTarget(), focusable);
-  }
+goog.ui.ControlRenderer.prototype.getIe6ClassCombinations = function() {
+  return [];
 };
 
 
 /**
- * Returns true if the container allows children to be focusable, false
- * otherwise.  Only effective if the container is not focusable.
- * @return {boolean} Whether children should be focusable.
+ * Returns the name of a DOM structure-specific CSS class to be applied to the
+ * root element of all components rendered or decorated using this renderer.
+ * Unlike the class name returned by {@link #getCssClass}, the structural class
+ * name may be shared among different renderers that generate similar DOM
+ * structures.  The structural class name also serves as the basis of derived
+ * class names used to identify and style structural elements of the control's
+ * DOM, as well as the basis for state-specific class names.  The default
+ * implementation returns the same class name as {@link #getCssClass}, but
+ * subclasses are expected to override this method as needed.
+ * @return {string} DOM structure-specific CSS class name (same as the renderer-
+ *     specific CSS class name by default).
  */
-goog.ui.Container.prototype.isFocusableChildrenAllowed = function() {
-  return this.allowFocusableChildren_;
+goog.ui.ControlRenderer.prototype.getStructuralCssClass = function() {
+  return this.getCssClass();
 };
 
 
 /**
- * Sets whether the container allows children to be focusable, false
- * otherwise.  Only effective if the container is not focusable.
- * @param {boolean} focusable Whether the children should be focusable.
- */
-goog.ui.Container.prototype.setFocusableChildrenAllowed = function(focusable) {
-  this.allowFocusableChildren_ = focusable;
-};
-
-
-/**
- * @return {boolean} Whether highlighting a child component should also open it.
- */
-goog.ui.Container.prototype.isOpenFollowsHighlight = function() {
-  return this.openFollowsHighlight_;
-};
-
-
-/**
- * Sets whether highlighting a child component should also open it.
- * @param {boolean} follow Whether highlighting a child component also opens it.
- */
-goog.ui.Container.prototype.setOpenFollowsHighlight = function(follow) {
-  this.openFollowsHighlight_ = follow;
-};
-
-
-// Highlight management.
-
-
-/**
- * Returns the index of the currently highlighted item (-1 if none).
- * @return {number} Index of the currently highlighted item.
- */
-goog.ui.Container.prototype.getHighlightedIndex = function() {
-  return this.highlightedIndex_;
-};
-
-
-/**
- * Highlights the item at the given 0-based index (if any).  If another item
- * was previously highlighted, it is un-highlighted.
- * @param {number} index Index of item to highlight (-1 removes the current
- *     highlight).
- */
-goog.ui.Container.prototype.setHighlightedIndex = function(index) {
-  var child = this.getChildAt(index);
-  if (child) {
-    child.setHighlighted(true);
-  } else if (this.highlightedIndex_ > -1) {
-    this.getHighlighted().setHighlighted(false);
-  }
-};
-
-
-/**
- * Highlights the given item if it exists and is a child of the container;
- * otherwise un-highlights the currently highlighted item.
- * @param {goog.ui.Control} item Item to highlight.
- */
-goog.ui.Container.prototype.setHighlighted = function(item) {
-  this.setHighlightedIndex(this.indexOfChild(item));
-};
-
-
-/**
- * Returns the currently highlighted item (if any).
- * @return {goog.ui.Control?} Highlighted item (null if none).
- */
-goog.ui.Container.prototype.getHighlighted = function() {
-  return this.getChildAt(this.highlightedIndex_);
-};
-
-
-/**
- * Highlights the first highlightable item in the container
- */
-goog.ui.Container.prototype.highlightFirst = function() {
-  this.highlightHelper(function(index, max) {
-    return (index + 1) % max;
-  }, this.getChildCount() - 1);
-};
-
-
-/**
- * Highlights the last highlightable item in the container.
- */
-goog.ui.Container.prototype.highlightLast = function() {
-  this.highlightHelper(function(index, max) {
-    index--;
-    return index < 0 ? max - 1 : index;
-  }, 0);
-};
-
-
-/**
- * Highlights the next highlightable item (or the first if nothing is currently
- * highlighted).
- */
-goog.ui.Container.prototype.highlightNext = function() {
-  this.highlightHelper(function(index, max) {
-    return (index + 1) % max;
-  }, this.highlightedIndex_);
-};
-
-
-/**
- * Highlights the previous highlightable item (or the last if nothing is
- * currently highlighted).
- */
-goog.ui.Container.prototype.highlightPrevious = function() {
-  this.highlightHelper(function(index, max) {
-    index--;
-    return index < 0 ? max - 1 : index;
-  }, this.highlightedIndex_);
-};
-
-
-/**
- * Helper function that manages the details of moving the highlight among
- * child controls in response to keyboard events.
- * @param {function(this: goog.ui.Container, number, number) : number} fn
- *     Function that accepts the current and maximum indices, and returns the
- *     next index to check.
- * @param {number} startIndex Start index.
- * @return {boolean} Whether the highlight has changed.
+ * Returns all CSS class names applicable to the given control, based on its
+ * state.  The return value is an array of strings containing
+ * <ol>
+ *   <li>the renderer-specific CSS class returned by {@link #getCssClass},
+ *       followed by
+ *   <li>the structural CSS class returned by {@link getStructuralCssClass} (if
+ *       different from the renderer-specific CSS class), followed by
+ *   <li>any state-specific classes returned by {@link #getClassNamesForState},
+ *       followed by
+ *   <li>any extra classes returned by the control's {@code getExtraClassNames}
+ *       method and
+ *   <li>for IE6 and lower, additional combined classes from
+ *       {@link getAppliedCombinedClassNames_}.
+ * </ol>
+ * Since all controls have at least one renderer-specific CSS class name, this
+ * method is guaranteed to return an array of at least one element.
+ * @param {goog.ui.Control} control Control whose CSS classes are to be
+ *     returned.
+ * @return {!Array<string>} Array of CSS class names applicable to the control.
  * @protected
  */
-goog.ui.Container.prototype.highlightHelper = function(fn, startIndex) {
-  // If the start index is -1 (meaning there's nothing currently highlighted),
-  // try starting from the currently open item, if any.
-  var curIndex =
-      startIndex < 0 ? this.indexOfChild(this.openItem_) : startIndex;
-  var numItems = this.getChildCount();
+goog.ui.ControlRenderer.prototype.getClassNames = function(control) {
+  var cssClass = this.getCssClass();
 
-  curIndex = fn.call(this, curIndex, numItems);
-  var visited = 0;
-  while (visited <= numItems) {
-    var control = this.getChildAt(curIndex);
-    if (control && this.canHighlightItem(control)) {
-      this.setHighlightedIndexFromKeyEvent(curIndex);
-      return true;
+  // Start with the renderer-specific class name.
+  var classNames = [cssClass];
+
+  // Add structural class name, if different.
+  var structuralCssClass = this.getStructuralCssClass();
+  if (structuralCssClass != cssClass) {
+    classNames.push(structuralCssClass);
+  }
+
+  // Add state-specific class names, if any.
+  var classNamesForState = this.getClassNamesForState(control.getState());
+  classNames.push.apply(classNames, classNamesForState);
+
+  // Add extra class names, if any.
+  var extraClassNames = control.getExtraClassNames();
+  if (extraClassNames) {
+    classNames.push.apply(classNames, extraClassNames);
+  }
+
+  // Add composite classes for IE6 support
+  if (goog.userAgent.IE && !goog.userAgent.isVersionOrHigher('7')) {
+    classNames.push.apply(
+        classNames, this.getAppliedCombinedClassNames_(classNames));
+  }
+
+  return classNames;
+};
+
+
+/**
+ * Returns an array of all the combined class names that should be applied based
+ * on the given list of classes. Checks the result of
+ * {@link getIe6ClassCombinations} for any combinations that have all
+ * members contained in classes. If a combination matches, the members are
+ * joined with an underscore (in order), and added to the return array.
+ *
+ * If opt_includedClass is provided, return only the combined classes that have
+ * all members contained in classes AND include opt_includedClass as well.
+ * opt_includedClass is added to classes as well.
+ * @param {goog.array.ArrayLike<string>} classes Array-like thing of classes to
+ *     return matching combined classes for.
+ * @param {?string=} opt_includedClass If provided, get only the combined
+ *     classes that include this one.
+ * @return {!Array<string>} Array of combined class names that should be
+ *     applied.
+ * @private
+ */
+goog.ui.ControlRenderer.prototype.getAppliedCombinedClassNames_ = function(
+    classes, opt_includedClass) {
+  var toAdd = [];
+  if (opt_includedClass) {
+    classes = goog.array.concat(classes, [opt_includedClass]);
+  }
+  goog.array.forEach(this.getIe6ClassCombinations(), function(combo) {
+    if (goog.array.every(combo, goog.partial(goog.array.contains, classes)) &&
+        (!opt_includedClass || goog.array.contains(combo, opt_includedClass))) {
+      toAdd.push(combo.join('_'));
     }
-    visited++;
-    curIndex = fn.call(this, curIndex, numItems);
+  });
+  return toAdd;
+};
+
+
+/**
+ * Takes a bit mask of {@link goog.ui.Component.State}s, and returns an array
+ * of the appropriate class names representing the given state, suitable to be
+ * applied to the root element of a component rendered using this renderer, or
+ * null if no state-specific classes need to be applied.  This default
+ * implementation uses the renderer's {@link getClassForState} method to
+ * generate each state-specific class.
+ * @param {number} state Bit mask of component states.
+ * @return {!Array<string>} Array of CSS class names representing the given
+ *     state.
+ * @protected
+ */
+goog.ui.ControlRenderer.prototype.getClassNamesForState = function(state) {
+  var classNames = [];
+  while (state) {
+    // For each enabled state, push the corresponding CSS class name onto
+    // the classNames array.
+    var mask = state & -state;  // Least significant bit
+    classNames.push(
+        this.getClassForState(
+            /** @type {goog.ui.Component.State} */ (mask)));
+    state &= ~mask;
   }
-  return false;
+  return classNames;
 };
 
 
 /**
- * Returns whether the given item can be highlighted.
- * @param {goog.ui.Control} item The item to check.
- * @return {boolean} Whether the item can be highlighted.
+ * Takes a single {@link goog.ui.Component.State}, and returns the
+ * corresponding CSS class name (null if none).
+ * @param {goog.ui.Component.State} state Component state.
+ * @return {string|undefined} CSS class representing the given state (undefined
+ *     if none).
  * @protected
  */
-goog.ui.Container.prototype.canHighlightItem = function(item) {
-  return item.isVisible() && item.isEnabled() &&
-      item.isSupportedState(goog.ui.Component.State.HOVER);
+goog.ui.ControlRenderer.prototype.getClassForState = function(state) {
+  if (!this.classByState_) {
+    this.createClassByStateMap_();
+  }
+  return this.classByState_[state];
 };
 
 
 /**
- * Helper method that sets the highlighted index to the given index in response
- * to a keyboard event.  The base class implementation simply calls the
- * {@link #setHighlightedIndex} method, but subclasses can override this
- * behavior as needed.
- * @param {number} index Index of item to highlight.
+ * Takes a single CSS class name which may represent a component state, and
+ * returns the corresponding component state (0x00 if none).
+ * @param {string} className CSS class name, possibly representing a component
+ *     state.
+ * @return {goog.ui.Component.State} state Component state corresponding
+ *     to the given CSS class (0x00 if none).
  * @protected
  */
-goog.ui.Container.prototype.setHighlightedIndexFromKeyEvent = function(index) {
-  this.setHighlightedIndex(index);
+goog.ui.ControlRenderer.prototype.getStateFromClass = function(className) {
+  if (!this.stateByClass_) {
+    this.createStateByClassMap_();
+  }
+  var state = parseInt(this.stateByClass_[className], 10);
+  return /** @type {goog.ui.Component.State} */ (isNaN(state) ? 0x00 : state);
 };
 
 
 /**
- * Returns the currently open (expanded) control in the container (null if
- * none).
- * @return {goog.ui.Control?} The currently open control.
+ * Creates the lookup table of states to classes, used during state changes.
+ * @private
  */
-goog.ui.Container.prototype.getOpenItem = function() {
-  return this.openItem_;
+goog.ui.ControlRenderer.prototype.createClassByStateMap_ = function() {
+  var baseClass = this.getStructuralCssClass();
+
+  // This ensures space-separated css classnames are not allowed, which some
+  // ControlRenderers had been doing.  See http://b/13694665.
+  var isValidClassName =
+      !goog.string.contains(goog.string.normalizeWhitespace(baseClass), ' ');
+  goog.asserts.assert(
+      isValidClassName,
+      'ControlRenderer has an invalid css class: \'' + baseClass + '\'');
+
+  /**
+   * Map of component states to state-specific structural class names,
+   * used when changing the DOM in response to a state change.  Precomputed
+   * and cached on first use to minimize object allocations and string
+   * concatenation.
+   * @type {Object}
+   * @private
+   */
+  this.classByState_ = goog.object.create(
+      goog.ui.Component.State.DISABLED, goog.getCssName(baseClass, 'disabled'),
+      goog.ui.Component.State.HOVER, goog.getCssName(baseClass, 'hover'),
+      goog.ui.Component.State.ACTIVE, goog.getCssName(baseClass, 'active'),
+      goog.ui.Component.State.SELECTED, goog.getCssName(baseClass, 'selected'),
+      goog.ui.Component.State.CHECKED, goog.getCssName(baseClass, 'checked'),
+      goog.ui.Component.State.FOCUSED, goog.getCssName(baseClass, 'focused'),
+      goog.ui.Component.State.OPENED, goog.getCssName(baseClass, 'open'));
 };
 
 
 /**
- * Returns true if the mouse button is pressed, false otherwise.
- * @return {boolean} Whether the mouse button is pressed.
+ * Creates the lookup table of classes to states, used during decoration.
+ * @private
  */
-goog.ui.Container.prototype.isMouseButtonPressed = function() {
-  return this.mouseButtonPressed_;
-};
+goog.ui.ControlRenderer.prototype.createStateByClassMap_ = function() {
+  // We need the classByState_ map so we can transpose it.
+  if (!this.classByState_) {
+    this.createClassByStateMap_();
+  }
 
-
-/**
- * Sets or clears the "mouse button pressed" flag.
- * @param {boolean} pressed Whether the mouse button is presed.
- */
-goog.ui.Container.prototype.setMouseButtonPressed = function(pressed) {
-  this.mouseButtonPressed_ = pressed;
+  /**
+   * Map of state-specific structural class names to component states,
+   * used during element decoration.  Precomputed and cached on first use
+   * to minimize object allocations and string concatenation.
+   * @type {Object}
+   * @private
+   */
+  this.stateByClass_ = goog.object.transpose(this.classByState_);
 };

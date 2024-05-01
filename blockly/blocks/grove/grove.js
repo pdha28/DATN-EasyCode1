@@ -293,6 +293,8 @@ Blockly.Blocks['kcbot_dht11_humi'] = {
     return Blockly.Types.NUMBER;
   },
 };
+
+
 Blockly.Blocks['kcbot_Irrecive'] = {
   init: function() {
     this.appendDummyInput()
@@ -697,19 +699,49 @@ var Digital_pin_esp32 = [
   ['39', '39']
 ];
 
+var Priority_task_RTOS = [
+  ['1', '1'],
+  ['2', '2'],
+  ['3', '3'],
+  ['4', '4'],
+  ['5', '5'],
+  ['6', '6'],
+  ['7', '7'],
+  ['8', '8'],
+  ['9', '9'],
+  ['10', '10'],
+  ['11', '11'],
+  ['12', '12'],
+  ['13', '13'],
+  ['14', '14'],
+  ['15', '15'],
+  ['16', '16'],
+  ['17', '17'],
+  ['18', '18'],
+  ['19', '19'],
+  ['20', '20'],
+  ['21', '21'],
+  ['22', '22'],
+  ['23', '23'],
+  ['24', '24'],
+  ['25', '25']
+];
+
+
 Blockly.Blocks['AirsenseReadDataBME280'] = {
   init: function() {
   this.appendDummyInput()
       .appendField(Blockly.Msg.AirsenseReadDataBME280)
+      .appendField(new Blockly.FieldDropdown([["Nhiệt độ","Nhiệt độ"],["Độ ẩm","Độ ẩm"],["Áp suất","Áp suất"]]), "Type data BME280")
       .appendField("SDA")
       .appendField(new Blockly.FieldDropdown(Digital_pin_esp32), "I2C_port_SDA")
       .appendField("SCL")
       .appendField(new Blockly.FieldDropdown(Digital_pin_esp32), "I2C_port_SCL")
   this.setColour('#00abd6');
   this.setInputsInline(false);
-  //this.setOutput(true, "Number");
-  this.setNextStatement(true, null);
-  this.setPreviousStatement(true, null);
+  this.setOutput(true, "Number");
+  //this.setNextStatement(true, null);
+  //this.setPreviousStatement(true, null);
   this.setTooltip("");
   this.setHelpUrl("");
   },
@@ -724,19 +756,20 @@ Blockly.Blocks['AirsenseReadDataBME280'] = {
   Blockly.Blocks['freeRTOS'] = {
     init: function() {
     this.appendDummyInput()
-        .appendField(Blockly.Msg.freeRTOS)
-        
+        .appendField(Blockly.Msg.freeRTOS)      
         .appendField(new Blockly.FieldTextInput(nameTask), "Name task")
-        //.appendValueInput(new Blockly.FieldTextInput(firsPriority),"Priority task")
+    this.appendDummyInput()
         .appendField("Bộ nhớ task")
         .appendField(new Blockly.FieldDropdown([["128","128"], ["256","256"], ["512","512"],["1024","1024"]]),"Memory task")
         .appendField("Độ ưu tiên")
-        .appendField(new Blockly.FieldDropdown([["1","1"], ["2","2"], ["3","3"], ["4","4"], ["5","5"], ["6","6"], ["7","7"], ["8","8"], ["9","9"], ["10","10"]]), "Priority task")
-        
+        .appendField(new Blockly.FieldDropdown(Priority_task_RTOS), "Priority task")
+    this.appendValueInput("Text")
+        .setCheck(null)
+        .appendField("Hàm")
     this.setColour('#00abd6');
-    this.setInputsInline(false);
-    this.setNextStatement(true, null);
+    this.setInputsInline(true);
     this.setPreviousStatement(true, null);
+    this.setNextStatement(true, null);
 
 
     this.setTooltip("");
@@ -752,6 +785,7 @@ Blockly.Blocks['AirsenseReadDataPMS7003'] = {
   init: function() {
     this.appendDummyInput()
         .appendField(Blockly.Msg.AirsenseReadDataPMS7003)
+        .appendField(new Blockly.FieldDropdown([["PM1","PM1"],["PM2.5","PM2.5"],["PM10","PM10"]]), "Type data PMS7003")
         .appendField("Tốc độ truyền dữ liệu")
         .appendField(new Blockly.FieldDropdown([["9600","9600"],["115200","1152200"]]),"Baud speed")
         .appendField("Cổng UART")
@@ -764,9 +798,8 @@ Blockly.Blocks['AirsenseReadDataPMS7003'] = {
 
 
     this.setColour('#00abd6');
-    this.setInputsInline(false);
-    this.setNextStatement(true, null);
-    this.setPreviousStatement(true, null);
+    this.setInputsInline(true);
+    this.setOutput(true, "Number");
     this.setTooltip("");
     this.setHelpUrl("");
     },
@@ -834,8 +867,7 @@ Blockly.Blocks['AirsenseReadDataMHZ14A'] =  {
     
         this.setColour('#00abd6');
         this.setInputsInline(false);
-        this.setNextStatement(true, null);
-        this.setPreviousStatement(true, null);
+        this.setOutput(true , "Number");
         this.setTooltip("");
         this.setHelpUrl("");
 

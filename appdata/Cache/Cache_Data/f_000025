@@ -1,1301 +1,1390 @@
-// Copyright 2007 The Closure Library Authors. All Rights Reserved.
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//      http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS-IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-
 /**
- * @fileoverview Abstract class for all UI components. This defines the standard
- * design pattern that all UI components should follow.
+ * @license
+ * Visual Blocks Editor
  *
- * @author attila@google.com (Attila Bodis)
- * @see ../demos/samplecomponent.html
- * @see http://code.google.com/p/closure-library/wiki/IntroToComponents
+ * Copyright 2011 Google Inc.
+ * https://developers.google.com/blockly/
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *   http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
  */
 
-goog.provide('goog.ui.Component');
-goog.provide('goog.ui.Component.Error');
-goog.provide('goog.ui.Component.EventType');
-goog.provide('goog.ui.Component.State');
+/**
+ * @fileoverview The class representing one block.
+ * @author fraser@google.com (Neil Fraser)
+ */
+'use strict';
 
+goog.provide('Blockly.Block');
+
+goog.require('Blockly.Blocks');
+goog.require('Blockly.Comment');
+goog.require('Blockly.Connection');
+goog.require('Blockly.Input');
+goog.require('Blockly.Mutator');
+goog.require('Blockly.Warning');
+goog.require('Blockly.Workspace');
+goog.require('Blockly.Xml');
 goog.require('goog.array');
 goog.require('goog.asserts');
-goog.require('goog.dom');
-goog.require('goog.dom.NodeType');
-goog.require('goog.dom.TagName');
-goog.require('goog.events.EventHandler');
-goog.require('goog.events.EventTarget');
-goog.require('goog.object');
-goog.require('goog.style');
-goog.require('goog.ui.IdGenerator');
-
+goog.require('goog.math.Coordinate');
+goog.require('goog.string');
 
 
 /**
- * Default implementation of UI component.
- *
- * @param {goog.dom.DomHelper=} opt_domHelper Optional DOM helper.
+ * Class for one block.
+ * Not normally called directly, workspace.newBlock() is preferred.
+ * @param {!Blockly.Workspace} workspace The block's workspace.
+ * @param {?string} prototypeName Name of the language object containing
+ *     type-specific functions for this block.
+ * @param {=string} opt_id Optional ID.  Use this ID if provided, otherwise
+ *     create a new id.
  * @constructor
- * @extends {goog.events.EventTarget}
  */
-goog.ui.Component = function(opt_domHelper) {
-  goog.events.EventTarget.call(this);
-  /**
-   * DomHelper used to interact with the document, allowing components to be
-   * created in a different window.
-   * @protected {!goog.dom.DomHelper}
-   * @suppress {underscore|visibility}
-   */
-  this.dom_ = opt_domHelper || goog.dom.getDomHelper();
+Blockly.Block = function(workspace, prototypeName, opt_id) {
+  /** @type {string} */
+  this.id = (opt_id && !workspace.getBlockById(opt_id)) ?
+      opt_id : Blockly.genUid();
+  workspace.blockDB_[this.id] = this;
+  /** @type {Blockly.Connection} */
+  this.outputConnection = null;
+  /** @type {Blockly.Connection} */
+  this.nextConnection = null;
+  /** @type {Blockly.Connection} */
+  this.previousConnection = null;
+  /** @type {!Array.<!Blockly.Input>} */
+  this.inputList = [];
+  /** @type {boolean|undefined} */
+  this.inputsInline = undefined;
+  /** @type {boolean} */
+  this.disabled = false;
+  /** @type {string|!Function} */
+  this.tooltip = '';
+  /** @type {boolean} */
+  this.contextMenu = true;
 
   /**
-   * Whether the component is rendered right-to-left.  Right-to-left is set
-   * lazily when {@link #isRightToLeft} is called the first time, unless it has
-   * been set by calling {@link #setRightToLeft} explicitly.
-   * @private {?boolean}
+   * @type {Blockly.Block}
+   * @private
    */
-  this.rightToLeft_ = goog.ui.Component.defaultRightToLeft_;
+  this.parentBlock_ = null;
 
   /**
-   * Unique ID of the component, lazily initialized in {@link
-   * goog.ui.Component#getId} if needed.  This property is strictly private and
-   * must not be accessed directly outside of this class!
-   * @private {?string}
+   * @type {!Array.<!Blockly.Block>}
+   * @private
    */
-  this.id_ = null;
+  this.childBlocks_ = [];
 
   /**
-   * Whether the component is in the document.
-   * @private {boolean}
+   * @type {boolean}
+   * @private
    */
-  this.inDocument_ = false;
-
-  // TODO(attila): Stop referring to this private field in subclasses.
-  /**
-   * The DOM element for the component.
-   * @private {Element}
-   */
-  this.element_ = null;
+  this.deletable_ = true;
 
   /**
-   * Event handler.
-   * TODO(user): rename it to handler_ after all component subclasses in
-   * inside Google have been cleaned up.
-   * Code search: http://go/component_code_search
-   * @private {goog.events.EventHandler|undefined}
+   * @type {boolean}
+   * @private
    */
-  this.googUiComponentHandler_ = void 0;
+  this.movable_ = true;
 
   /**
-   * Arbitrary data object associated with the component.  Such as meta-data.
-   * @private {*}
+   * @type {boolean}
+   * @private
    */
-  this.model_ = null;
+  this.editable_ = true;
 
   /**
-   * Parent component to which events will be propagated.  This property is
-   * strictly private and must not be accessed directly outside of this class!
-   * @private {goog.ui.Component?}
+   * @type {boolean}
+   * @private
    */
-  this.parent_ = null;
+  this.isShadow_ = false;
 
   /**
-   * Array of child components.  Lazily initialized on first use.  Must be kept
-   * in sync with {@code childIndex_}.  This property is strictly private and
-   * must not be accessed directly outside of this class!
-   * @private {Array<goog.ui.Component>?}
+   * @type {boolean}
+   * @private
    */
-  this.children_ = null;
+  this.collapsed_ = false;
+
+  /** @type {string|Blockly.Comment} */
+  this.comment = null;
 
   /**
-   * Map of child component IDs to child components.  Used for constant-time
-   * random access to child components by ID.  Lazily initialized on first use.
-   * Must be kept in sync with {@code children_}.  This property is strictly
-   * private and must not be accessed directly outside of this class!
-   *
-   * We use a plain Object, not a {@link goog.structs.Map}, for simplicity.
-   * This means components can't have children with IDs such as 'constructor' or
-   * 'valueOf', but this shouldn't really be an issue in practice, and if it is,
-   * we can always fix it later without changing the API.
-   *
-   * @private {Object}
+   * @type {!goog.math.Coordinate}
+   * @private
    */
-  this.childIndex_ = null;
+  this.xy_ = new goog.math.Coordinate(0, 0);
 
-  /**
-   * Flag used to keep track of whether a component decorated an already
-   * existing element or whether it created the DOM itself.
-   *
-   * If an element is decorated, dispose will leave the node in the document.
-   * It is up to the app to remove the node.
-   *
-   * If an element was rendered, dispose will remove the node automatically.
-   *
-   * @private {boolean}
-   */
-  this.wasDecorated_ = false;
+  /** @type {!Blockly.Workspace} */
+  this.workspace = workspace;
+  /** @type {boolean} */
+  this.isInFlyout = workspace.isFlyout;
+  /** @type {boolean} */
+  this.RTL = workspace.RTL;
+
+  // Copy the type-specific functions and data from the prototype.
+  if (prototypeName) {
+    /** @type {string} */
+    this.type = prototypeName;
+    var prototype = Blockly.Blocks[prototypeName];
+    goog.asserts.assertObject(prototype,
+        'Error: "%s" is an unknown language block.', prototypeName);
+    goog.mixin(this, prototype);
+  }
+
+  workspace.addTopBlock(this);
+
+  // Call an initialization function, if it exists.
+  if (goog.isFunction(this.init)) {
+    this.init();
+  }
+  // Record initial inline state.
+  /** @type {boolean|undefined} */
+  this.inputsInlineDefault = this.inputsInline;
+  if (Blockly.Events.isEnabled()) {
+    Blockly.Events.fire(new Blockly.Events.Create(this));
+  }
+  // Bind an onchange function, if it exists.
+  if (goog.isFunction(this.onchange)) {
+    this.onchangeWrapper_ = this.onchange.bind(this);
+    this.workspace.addChangeListener(this.onchangeWrapper_);
+  }
 };
-goog.inherits(goog.ui.Component, goog.events.EventTarget);
-
 
 /**
- * @define {boolean} Whether to support calling decorate with an element that is
- *     not yet in the document. If true, we check if the element is in the
- *     document, and avoid calling enterDocument if it isn't. If false, we
- *     maintain legacy behavior (always call enterDocument from decorate).
+ * Obtain a newly created block.
+ * @param {!Blockly.Workspace} workspace The block's workspace.
+ * @param {?string} prototypeName Name of the language object containing
+ *     type-specific functions for this block.
+ * @return {!Blockly.Block} The created block.
+ * @deprecated December 2015
  */
-goog.define('goog.ui.Component.ALLOW_DETACHED_DECORATION', false);
-
+Blockly.Block.obtain = function(workspace, prototypeName) {
+  console.warn('Deprecated call to Blockly.Block.obtain, ' +
+               'use workspace.newBlock instead.');
+  return workspace.newBlock(prototypeName);
+};
 
 /**
- * Generator for unique IDs.
- * @type {goog.ui.IdGenerator}
+ * Optional text data that round-trips beween blocks and XML.
+ * Has no effect. May be used by 3rd parties for meta information.
+ * @type {?string}
+ */
+Blockly.Block.prototype.data = null;
+
+/**
+ * Colour of the block in '#RRGGBB' format.
+ * @type {string}
  * @private
  */
-goog.ui.Component.prototype.idGenerator_ = goog.ui.IdGenerator.getInstance();
+Blockly.Block.prototype.colour_ = '#000000';
 
-
-// TODO(gboyer): See if we can remove this and just check goog.i18n.bidi.IS_RTL.
 /**
- * @define {number} Defines the default BIDI directionality.
- *     0: Unknown.
- *     1: Left-to-right.
- *     -1: Right-to-left.
+ * Dispose of this block.
+ * @param {boolean} healStack If true, then try to heal any gap by connecting
+ *     the next statement with the previous statement.  Otherwise, dispose of
+ *     all children of this block.
  */
-goog.define('goog.ui.Component.DEFAULT_BIDI_DIR', 0);
+Blockly.Block.prototype.dispose = function(healStack) {
+  // Terminate onchange event calls.
+  if (this.onchangeWrapper_) {
+    this.workspace.removeChangeListener(this.onchangeWrapper_);
+  }
+  this.unplug(healStack);
+  if (Blockly.Events.isEnabled()) {
+    Blockly.Events.fire(new Blockly.Events.Delete(this));
+  }
+  Blockly.Events.disable();
 
+  // This block is now at the top of the workspace.
+  // Remove this block from the workspace's list of top-most blocks.
+  if (this.workspace) {
+    this.workspace.removeTopBlock(this);
+    // Remove from block database.
+    delete this.workspace.blockDB_[this.id];
+    this.workspace = null;
+  }
+
+  // Just deleting this block from the DOM would result in a memory leak as
+  // well as corruption of the connection database.  Therefore we must
+  // methodically step through the blocks and carefully disassemble them.
+
+  // First, dispose of all my children.
+  for (var i = this.childBlocks_.length - 1; i >= 0; i--) {
+    this.childBlocks_[i].dispose(false);
+  }
+  // Then dispose of myself.
+  // Dispose of all inputs and their fields.
+  for (var i = 0, input; input = this.inputList[i]; i++) {
+    input.dispose();
+  }
+  this.inputList.length = 0;
+  // Dispose of any remaining connections (next/previous/output).
+  var connections = this.getConnections_(true);
+  for (var i = 0; i < connections.length; i++) {
+    var connection = connections[i];
+    if (connection.isConnected()) {
+      connection.disconnect();
+    }
+    connections[i].dispose();
+  }
+  Blockly.Events.enable();
+};
 
 /**
- * The default right to left value.
- * @type {?boolean}
+ * Unplug this block from its superior block.  If this block is a statement,
+ * optionally reconnect the block underneath with the block on top.
+ * @param {boolean} opt_healStack Disconnect child statement and reconnect
+ *   stack.  Defaults to false.
+ */
+Blockly.Block.prototype.unplug = function(opt_healStack) {
+  if (this.outputConnection) {
+    if (this.outputConnection.isConnected()) {
+      // Disconnect from any superior block.
+      this.outputConnection.disconnect();
+    }
+  } else if (this.previousConnection) {
+    var previousTarget = null;
+    if (this.previousConnection.isConnected()) {
+      // Remember the connection that any next statements need to connect to.
+      previousTarget = this.previousConnection.targetConnection;
+      // Detach this block from the parent's tree.
+      this.previousConnection.disconnect();
+    }
+    var nextBlock = this.getNextBlock();
+    if (opt_healStack && nextBlock) {
+      // Disconnect the next statement.
+      var nextTarget = this.nextConnection.targetConnection;
+      nextTarget.disconnect();
+      if (previousTarget && previousTarget.checkType_(nextTarget)) {
+        // Attach the next statement to the previous statement.
+        previousTarget.connect(nextTarget);
+      }
+    }
+  }
+};
+
+/**
+ * Returns all connections originating from this block.
+ * @return {!Array.<!Blockly.Connection>} Array of connections.
  * @private
  */
-goog.ui.Component.defaultRightToLeft_ =
-    (goog.ui.Component.DEFAULT_BIDI_DIR == 1) ?
-    false :
-    (goog.ui.Component.DEFAULT_BIDI_DIR == -1) ? true : null;
-
-
-/**
- * Common events fired by components so that event propagation is useful.  Not
- * all components are expected to dispatch or listen for all event types.
- * Events dispatched before a state transition should be cancelable to prevent
- * the corresponding state change.
- * @enum {string}
- */
-goog.ui.Component.EventType = {
-  /** Dispatched before the component becomes visible. */
-  BEFORE_SHOW: 'beforeshow',
-
-  /**
-   * Dispatched after the component becomes visible.
-   * NOTE(user): For goog.ui.Container, this actually fires before containers
-   * are shown.  Use goog.ui.Container.EventType.AFTER_SHOW if you want an event
-   * that fires after a goog.ui.Container is shown.
-   */
-  SHOW: 'show',
-
-  /** Dispatched before the component becomes hidden. */
-  HIDE: 'hide',
-
-  /** Dispatched before the component becomes disabled. */
-  DISABLE: 'disable',
-
-  /** Dispatched before the component becomes enabled. */
-  ENABLE: 'enable',
-
-  /** Dispatched before the component becomes highlighted. */
-  HIGHLIGHT: 'highlight',
-
-  /** Dispatched before the component becomes un-highlighted. */
-  UNHIGHLIGHT: 'unhighlight',
-
-  /** Dispatched before the component becomes activated. */
-  ACTIVATE: 'activate',
-
-  /** Dispatched before the component becomes deactivated. */
-  DEACTIVATE: 'deactivate',
-
-  /** Dispatched before the component becomes selected. */
-  SELECT: 'select',
-
-  /** Dispatched before the component becomes un-selected. */
-  UNSELECT: 'unselect',
-
-  /** Dispatched before a component becomes checked. */
-  CHECK: 'check',
-
-  /** Dispatched before a component becomes un-checked. */
-  UNCHECK: 'uncheck',
-
-  /** Dispatched before a component becomes focused. */
-  FOCUS: 'focus',
-
-  /** Dispatched before a component becomes blurred. */
-  BLUR: 'blur',
-
-  /** Dispatched before a component is opened (expanded). */
-  OPEN: 'open',
-
-  /** Dispatched before a component is closed (collapsed). */
-  CLOSE: 'close',
-
-  /** Dispatched after a component is moused over. */
-  ENTER: 'enter',
-
-  /** Dispatched after a component is moused out of. */
-  LEAVE: 'leave',
-
-  /** Dispatched after the user activates the component. */
-  ACTION: 'action',
-
-  /** Dispatched after the external-facing state of a component is changed. */
-  CHANGE: 'change'
-};
-
-
-/**
- * Errors thrown by the component.
- * @enum {string}
- */
-goog.ui.Component.Error = {
-  /**
-   * Error when a method is not supported.
-   */
-  NOT_SUPPORTED: 'Method not supported',
-
-  /**
-   * Error when the given element can not be decorated.
-   */
-  DECORATE_INVALID: 'Invalid element to decorate',
-
-  /**
-   * Error when the component is already rendered and another render attempt is
-   * made.
-   */
-  ALREADY_RENDERED: 'Component already rendered',
-
-  /**
-   * Error when an attempt is made to set the parent of a component in a way
-   * that would result in an inconsistent object graph.
-   */
-  PARENT_UNABLE_TO_BE_SET: 'Unable to set parent component',
-
-  /**
-   * Error when an attempt is made to add a child component at an out-of-bounds
-   * index.  We don't support sparse child arrays.
-   */
-  CHILD_INDEX_OUT_OF_BOUNDS: 'Child component index out of bounds',
-
-  /**
-   * Error when an attempt is made to remove a child component from a component
-   * other than its parent.
-   */
-  NOT_OUR_CHILD: 'Child is not in parent component',
-
-  /**
-   * Error when an operation requiring DOM interaction is made when the
-   * component is not in the document
-   */
-  NOT_IN_DOCUMENT: 'Operation not supported while component is not in document',
-
-  /**
-   * Error when an invalid component state is encountered.
-   */
-  STATE_INVALID: 'Invalid component state'
-};
-
-
-/**
- * Common component states.  Components may have distinct appearance depending
- * on what state(s) apply to them.  Not all components are expected to support
- * all states.
- * @enum {number}
- */
-goog.ui.Component.State = {
-  /**
-   * Union of all supported component states.
-   */
-  ALL: 0xFF,
-
-  /**
-   * Component is disabled.
-   * @see goog.ui.Component.EventType.DISABLE
-   * @see goog.ui.Component.EventType.ENABLE
-   */
-  DISABLED: 0x01,
-
-  /**
-   * Component is highlighted.
-   * @see goog.ui.Component.EventType.HIGHLIGHT
-   * @see goog.ui.Component.EventType.UNHIGHLIGHT
-   */
-  HOVER: 0x02,
-
-  /**
-   * Component is active (or "pressed").
-   * @see goog.ui.Component.EventType.ACTIVATE
-   * @see goog.ui.Component.EventType.DEACTIVATE
-   */
-  ACTIVE: 0x04,
-
-  /**
-   * Component is selected.
-   * @see goog.ui.Component.EventType.SELECT
-   * @see goog.ui.Component.EventType.UNSELECT
-   */
-  SELECTED: 0x08,
-
-  /**
-   * Component is checked.
-   * @see goog.ui.Component.EventType.CHECK
-   * @see goog.ui.Component.EventType.UNCHECK
-   */
-  CHECKED: 0x10,
-
-  /**
-   * Component has focus.
-   * @see goog.ui.Component.EventType.FOCUS
-   * @see goog.ui.Component.EventType.BLUR
-   */
-  FOCUSED: 0x20,
-
-  /**
-   * Component is opened (expanded).  Applies to tree nodes, menu buttons,
-   * submenus, zippys (zippies?), etc.
-   * @see goog.ui.Component.EventType.OPEN
-   * @see goog.ui.Component.EventType.CLOSE
-   */
-  OPENED: 0x40
-};
-
-
-/**
- * Static helper method; returns the type of event components are expected to
- * dispatch when transitioning to or from the given state.
- * @param {goog.ui.Component.State} state State to/from which the component
- *     is transitioning.
- * @param {boolean} isEntering Whether the component is entering or leaving the
- *     state.
- * @return {goog.ui.Component.EventType} Event type to dispatch.
- */
-goog.ui.Component.getStateTransitionEvent = function(state, isEntering) {
-  switch (state) {
-    case goog.ui.Component.State.DISABLED:
-      return isEntering ? goog.ui.Component.EventType.DISABLE :
-                          goog.ui.Component.EventType.ENABLE;
-    case goog.ui.Component.State.HOVER:
-      return isEntering ? goog.ui.Component.EventType.HIGHLIGHT :
-                          goog.ui.Component.EventType.UNHIGHLIGHT;
-    case goog.ui.Component.State.ACTIVE:
-      return isEntering ? goog.ui.Component.EventType.ACTIVATE :
-                          goog.ui.Component.EventType.DEACTIVATE;
-    case goog.ui.Component.State.SELECTED:
-      return isEntering ? goog.ui.Component.EventType.SELECT :
-                          goog.ui.Component.EventType.UNSELECT;
-    case goog.ui.Component.State.CHECKED:
-      return isEntering ? goog.ui.Component.EventType.CHECK :
-                          goog.ui.Component.EventType.UNCHECK;
-    case goog.ui.Component.State.FOCUSED:
-      return isEntering ? goog.ui.Component.EventType.FOCUS :
-                          goog.ui.Component.EventType.BLUR;
-    case goog.ui.Component.State.OPENED:
-      return isEntering ? goog.ui.Component.EventType.OPEN :
-                          goog.ui.Component.EventType.CLOSE;
-    default:
-      // Fall through.
+Blockly.Block.prototype.getConnections_ = function() {
+  var myConnections = [];
+  if (this.outputConnection) {
+    myConnections.push(this.outputConnection);
   }
-
-  // Invalid state.
-  throw Error(goog.ui.Component.Error.STATE_INVALID);
-};
-
-
-/**
- * Set the default right-to-left value. This causes all component's created from
- * this point foward to have the given value. This is useful for cases where
- * a given page is always in one directionality, avoiding unnecessary
- * right to left determinations.
- * @param {?boolean} rightToLeft Whether the components should be rendered
- *     right-to-left. Null iff components should determine their directionality.
- */
-goog.ui.Component.setDefaultRightToLeft = function(rightToLeft) {
-  goog.ui.Component.defaultRightToLeft_ = rightToLeft;
-};
-
-
-/**
- * Gets the unique ID for the instance of this component.  If the instance
- * doesn't already have an ID, generates one on the fly.
- * @return {string} Unique component ID.
- */
-goog.ui.Component.prototype.getId = function() {
-  return this.id_ || (this.id_ = this.idGenerator_.getNextUniqueId());
-};
-
-
-/**
- * Assigns an ID to this component instance.  It is the caller's responsibility
- * to guarantee that the ID is unique.  If the component is a child of a parent
- * component, then the parent component's child index is updated to reflect the
- * new ID; this may throw an error if the parent already has a child with an ID
- * that conflicts with the new ID.
- * @param {string} id Unique component ID.
- */
-goog.ui.Component.prototype.setId = function(id) {
-  if (this.parent_ && this.parent_.childIndex_) {
-    // Update the parent's child index.
-    goog.object.remove(this.parent_.childIndex_, this.id_);
-    goog.object.add(this.parent_.childIndex_, id, this);
+  if (this.previousConnection) {
+    myConnections.push(this.previousConnection);
   }
-
-  // Update the component ID.
-  this.id_ = id;
-};
-
-
-/**
- * Gets the component's element.
- * @return {Element} The element for the component.
- */
-goog.ui.Component.prototype.getElement = function() {
-  return this.element_;
-};
-
-
-/**
- * Gets the component's element. This differs from getElement in that
- * it assumes that the element exists (i.e. the component has been
- * rendered/decorated) and will cause an assertion error otherwise (if
- * assertion is enabled).
- * @return {!Element} The element for the component.
- */
-goog.ui.Component.prototype.getElementStrict = function() {
-  var el = this.element_;
-  goog.asserts.assert(
-      el, 'Can not call getElementStrict before rendering/decorating.');
-  return el;
-};
-
-
-/**
- * Sets the component's root element to the given element.  Considered
- * protected and final.
- *
- * This should generally only be called during createDom. Setting the element
- * does not actually change which element is rendered, only the element that is
- * associated with this UI component.
- *
- * This should only be used by subclasses and its associated renderers.
- *
- * @param {Element} element Root element for the component.
- */
-goog.ui.Component.prototype.setElementInternal = function(element) {
-  this.element_ = element;
-};
-
-
-/**
- * Returns an array of all the elements in this component's DOM with the
- * provided className.
- * @param {string} className The name of the class to look for.
- * @return {!goog.array.ArrayLike} The items found with the class name provided.
- */
-goog.ui.Component.prototype.getElementsByClass = function(className) {
-  return this.element_ ?
-      this.dom_.getElementsByClass(className, this.element_) :
-      [];
-};
-
-
-/**
- * Returns the first element in this component's DOM with the provided
- * className.
- * @param {string} className The name of the class to look for.
- * @return {Element} The first item with the class name provided.
- */
-goog.ui.Component.prototype.getElementByClass = function(className) {
-  return this.element_ ? this.dom_.getElementByClass(className, this.element_) :
-                         null;
-};
-
-
-/**
- * Similar to {@code getElementByClass} except that it expects the
- * element to be present in the dom thus returning a required value. Otherwise,
- * will assert.
- * @param {string} className The name of the class to look for.
- * @return {!Element} The first item with the class name provided.
- */
-goog.ui.Component.prototype.getRequiredElementByClass = function(className) {
-  var el = this.getElementByClass(className);
-  goog.asserts.assert(
-      el, 'Expected element in component with class: %s', className);
-  return el;
-};
-
-
-/**
- * Returns the event handler for this component, lazily created the first time
- * this method is called.
- * @return {!goog.events.EventHandler<T>} Event handler for this component.
- * @protected
- * @this {T}
- * @template T
- */
-goog.ui.Component.prototype.getHandler = function() {
-  // TODO(user): templated "this" values currently result in "this" being
-  // "unknown" in the body of the function.
-  var self = /** @type {goog.ui.Component} */ (this);
-  if (!self.googUiComponentHandler_) {
-    self.googUiComponentHandler_ = new goog.events.EventHandler(self);
+  if (this.nextConnection) {
+    myConnections.push(this.nextConnection);
   }
-  return self.googUiComponentHandler_;
-};
-
-
-/**
- * Sets the parent of this component to use for event bubbling.  Throws an error
- * if the component already has a parent or if an attempt is made to add a
- * component to itself as a child.  Callers must use {@code removeChild}
- * or {@code removeChildAt} to remove components from their containers before
- * calling this method.
- * @see goog.ui.Component#removeChild
- * @see goog.ui.Component#removeChildAt
- * @param {goog.ui.Component} parent The parent component.
- */
-goog.ui.Component.prototype.setParent = function(parent) {
-  if (this == parent) {
-    // Attempting to add a child to itself is an error.
-    throw Error(goog.ui.Component.Error.PARENT_UNABLE_TO_BE_SET);
+  for (var i = 0, input; input = this.inputList[i]; i++) {
+    if (input.connection) {
+      myConnections.push(input.connection);
+    }
   }
-
-  if (parent && this.parent_ && this.id_ && this.parent_.getChild(this.id_) &&
-      this.parent_ != parent) {
-    // This component is already the child of some parent, so it should be
-    // removed using removeChild/removeChildAt first.
-    throw Error(goog.ui.Component.Error.PARENT_UNABLE_TO_BE_SET);
-  }
-
-  this.parent_ = parent;
-  goog.ui.Component.superClass_.setParentEventTarget.call(this, parent);
+  return myConnections;
 };
 
-
 /**
- * Returns the component's parent, if any.
- * @return {goog.ui.Component?} The parent component.
- */
-goog.ui.Component.prototype.getParent = function() {
-  return this.parent_;
-};
-
-
-/**
- * Overrides {@link goog.events.EventTarget#setParentEventTarget} to throw an
- * error if the parent component is set, and the argument is not the parent.
- * @override
- */
-goog.ui.Component.prototype.setParentEventTarget = function(parent) {
-  if (this.parent_ && this.parent_ != parent) {
-    throw Error(goog.ui.Component.Error.NOT_SUPPORTED);
-  }
-  goog.ui.Component.superClass_.setParentEventTarget.call(this, parent);
-};
-
-
-/**
- * Returns the dom helper that is being used on this component.
- * @return {!goog.dom.DomHelper} The dom helper used on this component.
- */
-goog.ui.Component.prototype.getDomHelper = function() {
-  return this.dom_;
-};
-
-
-/**
- * Determines whether the component has been added to the document.
- * @return {boolean} TRUE if rendered. Otherwise, FALSE.
- */
-goog.ui.Component.prototype.isInDocument = function() {
-  return this.inDocument_;
-};
-
-
-/**
- * Creates the initial DOM representation for the component.  The default
- * implementation is to set this.element_ = div.
- */
-goog.ui.Component.prototype.createDom = function() {
-  this.element_ = this.dom_.createElement(goog.dom.TagName.DIV);
-};
-
-
-/**
- * Renders the component.  If a parent element is supplied, the component's
- * element will be appended to it.  If there is no optional parent element and
- * the element doesn't have a parentNode then it will be appended to the
- * document body.
- *
- * If this component has a parent component, and the parent component is
- * not in the document already, then this will not call {@code enterDocument}
- * on this component.
- *
- * Throws an Error if the component is already rendered.
- *
- * @param {Element=} opt_parentElement Optional parent element to render the
- *    component into.
- */
-goog.ui.Component.prototype.render = function(opt_parentElement) {
-  this.render_(opt_parentElement);
-};
-
-
-/**
- * Renders the component before another element. The other element should be in
- * the document already.
- *
- * Throws an Error if the component is already rendered.
- *
- * @param {Node} sibling Node to render the component before.
- */
-goog.ui.Component.prototype.renderBefore = function(sibling) {
-  this.render_(/** @type {Element} */ (sibling.parentNode), sibling);
-};
-
-
-/**
- * Renders the component.  If a parent element is supplied, the component's
- * element will be appended to it.  If there is no optional parent element and
- * the element doesn't have a parentNode then it will be appended to the
- * document body.
- *
- * If this component has a parent component, and the parent component is
- * not in the document already, then this will not call {@code enterDocument}
- * on this component.
- *
- * Throws an Error if the component is already rendered.
- *
- * @param {Element=} opt_parentElement Optional parent element to render the
- *    component into.
- * @param {Node=} opt_beforeNode Node before which the component is to
- *    be rendered.  If left out the node is appended to the parent element.
+ * Walks down a stack of blocks and finds the last next connection on the stack.
+ * @return {Blockly.Connection} The last next connection on the stack, or null.
  * @private
  */
-goog.ui.Component.prototype.render_ = function(
-    opt_parentElement, opt_beforeNode) {
-  if (this.inDocument_) {
-    throw Error(goog.ui.Component.Error.ALREADY_RENDERED);
+Blockly.Block.prototype.lastConnectionInStack_ = function() {
+  var nextConnection = this.nextConnection;
+  while (nextConnection) {
+    var nextBlock = nextConnection.targetBlock();
+    if (!nextBlock) {
+      // Found a next connection with nothing on the other side.
+      return nextConnection;
+    }
+    nextConnection = nextBlock.nextConnection;
   }
-
-  if (!this.element_) {
-    this.createDom();
-  }
-
-  if (opt_parentElement) {
-    opt_parentElement.insertBefore(this.element_, opt_beforeNode || null);
-  } else {
-    this.dom_.getDocument().body.appendChild(this.element_);
-  }
-
-  // If this component has a parent component that isn't in the document yet,
-  // we don't call enterDocument() here.  Instead, when the parent component
-  // enters the document, the enterDocument() call will propagate to its
-  // children, including this one.  If the component doesn't have a parent
-  // or if the parent is already in the document, we call enterDocument().
-  if (!this.parent_ || this.parent_.isInDocument()) {
-    this.enterDocument();
-  }
+  // Ran out of next connections.
+  return null;
 };
 
-
 /**
- * Decorates the element for the UI component. If the element is in the
- * document, the enterDocument method will be called.
- *
- * If goog.ui.Component.ALLOW_DETACHED_DECORATION is false, the caller must
- * pass an element that is in the document.
- *
- * @param {Element} element Element to decorate.
+ * Bump unconnected blocks out of alignment.  Two blocks which aren't actually
+ * connected should not coincidentally line up on screen.
+ * @private
  */
-goog.ui.Component.prototype.decorate = function(element) {
-  if (this.inDocument_) {
-    throw Error(goog.ui.Component.Error.ALREADY_RENDERED);
-  } else if (element && this.canDecorate(element)) {
-    this.wasDecorated_ = true;
-
-    // Set the DOM helper of the component to match the decorated element.
-    var doc = goog.dom.getOwnerDocument(element);
-    if (!this.dom_ || this.dom_.getDocument() != doc) {
-      this.dom_ = goog.dom.getDomHelper(element);
+Blockly.Block.prototype.bumpNeighbours_ = function() {
+  if (!this.workspace) {
+    return;  // Deleted block.
+  }
+  if (Blockly.dragMode_ != Blockly.DRAG_NONE) {
+    return;  // Don't bump blocks during a drag.
+  }
+  var rootBlock = this.getRootBlock();
+  if (rootBlock.isInFlyout) {
+    return;  // Don't move blocks around in a flyout.
+  }
+  // Loop though every connection on this block.
+  var myConnections = this.getConnections_(false);
+  for (var i = 0, connection; connection = myConnections[i]; i++) {
+    // Spider down from this block bumping all sub-blocks.
+    if (connection.isConnected() && connection.isSuperior()) {
+      connection.targetBlock().bumpNeighbours_();
     }
 
-    // Call specific component decorate logic.
-    this.decorateInternal(element);
-
-    // If supporting detached decoration, check that element is in doc.
-    if (!goog.ui.Component.ALLOW_DETACHED_DECORATION ||
-        goog.dom.contains(doc, element)) {
-      this.enterDocument();
-    }
-  } else {
-    throw Error(goog.ui.Component.Error.DECORATE_INVALID);
-  }
-};
-
-
-/**
- * Determines if a given element can be decorated by this type of component.
- * This method should be overridden by inheriting objects.
- * @param {Element} element Element to decorate.
- * @return {boolean} True if the element can be decorated, false otherwise.
- */
-goog.ui.Component.prototype.canDecorate = function(element) {
-  return true;
-};
-
-
-/**
- * @return {boolean} Whether the component was decorated.
- */
-goog.ui.Component.prototype.wasDecorated = function() {
-  return this.wasDecorated_;
-};
-
-
-/**
- * Actually decorates the element. Should be overridden by inheriting objects.
- * This method can assume there are checks to ensure the component has not
- * already been rendered have occurred and that enter document will be called
- * afterwards. This method is considered protected.
- * @param {Element} element Element to decorate.
- * @protected
- */
-goog.ui.Component.prototype.decorateInternal = function(element) {
-  this.element_ = element;
-};
-
-
-/**
- * Called when the component's element is known to be in the document. Anything
- * using document.getElementById etc. should be done at this stage.
- *
- * If the component contains child components, this call is propagated to its
- * children.
- */
-goog.ui.Component.prototype.enterDocument = function() {
-  this.inDocument_ = true;
-
-  // Propagate enterDocument to child components that have a DOM, if any.
-  // If a child was decorated before entering the document (permitted when
-  // goog.ui.Component.ALLOW_DETACHED_DECORATION is true), its enterDocument
-  // will be called here.
-  this.forEachChild(function(child) {
-    if (!child.isInDocument() && child.getElement()) {
-      child.enterDocument();
-    }
-  });
-};
-
-
-/**
- * Called by dispose to clean up the elements and listeners created by a
- * component, or by a parent component/application who has removed the
- * component from the document but wants to reuse it later.
- *
- * If the component contains child components, this call is propagated to its
- * children.
- *
- * It should be possible for the component to be rendered again once this method
- * has been called.
- */
-goog.ui.Component.prototype.exitDocument = function() {
-  // Propagate exitDocument to child components that have been rendered, if any.
-  this.forEachChild(function(child) {
-    if (child.isInDocument()) {
-      child.exitDocument();
-    }
-  });
-
-  if (this.googUiComponentHandler_) {
-    this.googUiComponentHandler_.removeAll();
-  }
-
-  this.inDocument_ = false;
-};
-
-
-/**
- * Disposes of the component.  Calls {@code exitDocument}, which is expected to
- * remove event handlers and clean up the component.  Propagates the call to
- * the component's children, if any. Removes the component's DOM from the
- * document unless it was decorated.
- * @override
- * @protected
- */
-goog.ui.Component.prototype.disposeInternal = function() {
-  if (this.inDocument_) {
-    this.exitDocument();
-  }
-
-  if (this.googUiComponentHandler_) {
-    this.googUiComponentHandler_.dispose();
-    delete this.googUiComponentHandler_;
-  }
-
-  // Disposes of the component's children, if any.
-  this.forEachChild(function(child) { child.dispose(); });
-
-  // Detach the component's element from the DOM, unless it was decorated.
-  if (!this.wasDecorated_ && this.element_) {
-    goog.dom.removeNode(this.element_);
-  }
-
-  this.children_ = null;
-  this.childIndex_ = null;
-  this.element_ = null;
-  this.model_ = null;
-  this.parent_ = null;
-
-  goog.ui.Component.superClass_.disposeInternal.call(this);
-};
-
-
-/**
- * Helper function for subclasses that gets a unique id for a given fragment,
- * this can be used by components to generate unique string ids for DOM
- * elements.
- * @param {string} idFragment A partial id.
- * @return {string} Unique element id.
- */
-goog.ui.Component.prototype.makeId = function(idFragment) {
-  return this.getId() + '.' + idFragment;
-};
-
-
-/**
- * Makes a collection of ids.  This is a convenience method for makeId.  The
- * object's values are the id fragments and the new values are the generated
- * ids.  The key will remain the same.
- * @param {Object} object The object that will be used to create the ids.
- * @return {!Object} An object of id keys to generated ids.
- */
-goog.ui.Component.prototype.makeIds = function(object) {
-  var ids = {};
-  for (var key in object) {
-    ids[key] = this.makeId(object[key]);
-  }
-  return ids;
-};
-
-
-/**
- * Returns the model associated with the UI component.
- * @return {*} The model.
- */
-goog.ui.Component.prototype.getModel = function() {
-  return this.model_;
-};
-
-
-/**
- * Sets the model associated with the UI component.
- * @param {*} obj The model.
- */
-goog.ui.Component.prototype.setModel = function(obj) {
-  this.model_ = obj;
-};
-
-
-/**
- * Helper function for returning the fragment portion of an id generated using
- * makeId().
- * @param {string} id Id generated with makeId().
- * @return {string} Fragment.
- */
-goog.ui.Component.prototype.getFragmentFromId = function(id) {
-  return id.substring(this.getId().length + 1);
-};
-
-
-/**
- * Helper function for returning an element in the document with a unique id
- * generated using makeId().
- * @param {string} idFragment The partial id.
- * @return {Element} The element with the unique id, or null if it cannot be
- *     found.
- */
-goog.ui.Component.prototype.getElementByFragment = function(idFragment) {
-  if (!this.inDocument_) {
-    throw Error(goog.ui.Component.Error.NOT_IN_DOCUMENT);
-  }
-  return this.dom_.getElement(this.makeId(idFragment));
-};
-
-
-/**
- * Adds the specified component as the last child of this component.  See
- * {@link goog.ui.Component#addChildAt} for detailed semantics.
- *
- * @see goog.ui.Component#addChildAt
- * @param {goog.ui.Component} child The new child component.
- * @param {boolean=} opt_render If true, the child component will be rendered
- *    into the parent.
- */
-goog.ui.Component.prototype.addChild = function(child, opt_render) {
-  // TODO(gboyer): addChildAt(child, this.getChildCount(), false) will
-  // reposition any already-rendered child to the end.  Instead, perhaps
-  // addChild(child, false) should never reposition the child; instead, clients
-  // that need the repositioning will use addChildAt explicitly.  Right now,
-  // clients can get around this by calling addChild before calling decorate.
-  this.addChildAt(child, this.getChildCount(), opt_render);
-};
-
-
-/**
- * Adds the specified component as a child of this component at the given
- * 0-based index.
- *
- * Both {@code addChild} and {@code addChildAt} assume the following contract
- * between parent and child components:
- *  <ul>
- *    <li>the child component's element must be a descendant of the parent
- *        component's element, and
- *    <li>the DOM state of the child component must be consistent with the DOM
- *        state of the parent component (see {@code isInDocument}) in the
- *        steady state -- the exception is to addChildAt(child, i, false) and
- *        then immediately decorate/render the child.
- *  </ul>
- *
- * In particular, {@code parent.addChild(child)} will throw an error if the
- * child component is already in the document, but the parent isn't.
- *
- * Clients of this API may call {@code addChild} and {@code addChildAt} with
- * {@code opt_render} set to true.  If {@code opt_render} is true, calling these
- * methods will automatically render the child component's element into the
- * parent component's element. If the parent does not yet have an element, then
- * {@code createDom} will automatically be invoked on the parent before
- * rendering the child.
- *
- * Invoking {@code parent.addChild(child, true)} will throw an error if the
- * child component is already in the document, regardless of the parent's DOM
- * state.
- *
- * If {@code opt_render} is true and the parent component is not already
- * in the document, {@code enterDocument} will not be called on this component
- * at this point.
- *
- * Finally, this method also throws an error if the new child already has a
- * different parent, or the given index is out of bounds.
- *
- * @see goog.ui.Component#addChild
- * @param {goog.ui.Component} child The new child component.
- * @param {number} index 0-based index at which the new child component is to be
- *    added; must be between 0 and the current child count (inclusive).
- * @param {boolean=} opt_render If true, the child component will be rendered
- *    into the parent.
- * @return {void} Nada.
- */
-goog.ui.Component.prototype.addChildAt = function(child, index, opt_render) {
-  goog.asserts.assert(!!child, 'Provided element must not be null.');
-
-  if (child.inDocument_ && (opt_render || !this.inDocument_)) {
-    // Adding a child that's already in the document is an error, except if the
-    // parent is also in the document and opt_render is false (e.g. decorate()).
-    throw Error(goog.ui.Component.Error.ALREADY_RENDERED);
-  }
-
-  if (index < 0 || index > this.getChildCount()) {
-    // Allowing sparse child arrays would lead to strange behavior, so we don't.
-    throw Error(goog.ui.Component.Error.CHILD_INDEX_OUT_OF_BOUNDS);
-  }
-
-  // Create the index and the child array on first use.
-  if (!this.childIndex_ || !this.children_) {
-    this.childIndex_ = {};
-    this.children_ = [];
-  }
-
-  // Moving child within component, remove old reference.
-  if (child.getParent() == this) {
-    goog.object.set(this.childIndex_, child.getId(), child);
-    goog.array.remove(this.children_, child);
-
-    // Add the child to this component.  goog.object.add() throws an error if
-    // a child with the same ID already exists.
-  } else {
-    goog.object.add(this.childIndex_, child.getId(), child);
-  }
-
-  // Set the parent of the child to this component.  This throws an error if
-  // the child is already contained by another component.
-  child.setParent(this);
-  goog.array.insertAt(this.children_, child, index);
-
-  if (child.inDocument_ && this.inDocument_ && child.getParent() == this) {
-    // Changing the position of an existing child, move the DOM node (if
-    // necessary).
-    var contentElement = this.getContentElement();
-    var insertBeforeElement = contentElement.childNodes[index] || null;
-    if (insertBeforeElement != child.getElement()) {
-      contentElement.insertBefore(child.getElement(), insertBeforeElement);
-    }
-  } else if (opt_render) {
-    // If this (parent) component doesn't have a DOM yet, call createDom now
-    // to make sure we render the child component's element into the correct
-    // parent element (otherwise render_ with a null first argument would
-    // render the child into the document body, which is almost certainly not
-    // what we want).
-    if (!this.element_) {
-      this.createDom();
-    }
-    // Render the child into the parent at the appropriate location.  Note that
-    // getChildAt(index + 1) returns undefined if inserting at the end.
-    // TODO(attila): We should have a renderer with a renderChildAt API.
-    var sibling = this.getChildAt(index + 1);
-    // render_() calls enterDocument() if the parent is already in the document.
-    child.render_(this.getContentElement(), sibling ? sibling.element_ : null);
-  } else if (
-      this.inDocument_ && !child.inDocument_ && child.element_ &&
-      child.element_.parentNode &&
-      // Under some circumstances, IE8 implicitly creates a Document Fragment
-      // for detached nodes, so ensure the parent is an Element as it should be.
-      child.element_.parentNode.nodeType == goog.dom.NodeType.ELEMENT) {
-    // We don't touch the DOM, but if the parent is in the document, and the
-    // child element is in the document but not marked as such, then we call
-    // enterDocument on the child.
-    // TODO(gboyer): It would be nice to move this condition entirely, but
-    // there's a large risk of breaking existing applications that manually
-    // append the child to the DOM and then call addChild.
-    child.enterDocument();
-  }
-};
-
-
-/**
- * Returns the DOM element into which child components are to be rendered,
- * or null if the component itself hasn't been rendered yet.  This default
- * implementation returns the component's root element.  Subclasses with
- * complex DOM structures must override this method.
- * @return {Element} Element to contain child elements (null if none).
- */
-goog.ui.Component.prototype.getContentElement = function() {
-  return this.element_;
-};
-
-
-/**
- * Returns true if the component is rendered right-to-left, false otherwise.
- * The first time this function is invoked, the right-to-left rendering property
- * is set if it has not been already.
- * @return {boolean} Whether the control is rendered right-to-left.
- */
-goog.ui.Component.prototype.isRightToLeft = function() {
-  if (this.rightToLeft_ == null) {
-    this.rightToLeft_ = goog.style.isRightToLeft(
-        this.inDocument_ ? this.element_ : this.dom_.getDocument().body);
-  }
-  return this.rightToLeft_;
-};
-
-
-/**
- * Set is right-to-left. This function should be used if the component needs
- * to know the rendering direction during dom creation (i.e. before
- * {@link #enterDocument} is called and is right-to-left is set).
- * @param {boolean} rightToLeft Whether the component is rendered
- *     right-to-left.
- */
-goog.ui.Component.prototype.setRightToLeft = function(rightToLeft) {
-  if (this.inDocument_) {
-    throw Error(goog.ui.Component.Error.ALREADY_RENDERED);
-  }
-  this.rightToLeft_ = rightToLeft;
-};
-
-
-/**
- * Returns true if the component has children.
- * @return {boolean} True if the component has children.
- */
-goog.ui.Component.prototype.hasChildren = function() {
-  return !!this.children_ && this.children_.length != 0;
-};
-
-
-/**
- * Returns the number of children of this component.
- * @return {number} The number of children.
- */
-goog.ui.Component.prototype.getChildCount = function() {
-  return this.children_ ? this.children_.length : 0;
-};
-
-
-/**
- * Returns an array containing the IDs of the children of this component, or an
- * empty array if the component has no children.
- * @return {!Array<string>} Child component IDs.
- */
-goog.ui.Component.prototype.getChildIds = function() {
-  var ids = [];
-
-  // We don't use goog.object.getKeys(this.childIndex_) because we want to
-  // return the IDs in the correct order as determined by this.children_.
-  this.forEachChild(function(child) {
-    // addChild()/addChildAt() guarantee that the child array isn't sparse.
-    ids.push(child.getId());
-  });
-
-  return ids;
-};
-
-
-/**
- * Returns the child with the given ID, or null if no such child exists.
- * @param {string} id Child component ID.
- * @return {goog.ui.Component?} The child with the given ID; null if none.
- */
-goog.ui.Component.prototype.getChild = function(id) {
-  // Use childIndex_ for O(1) access by ID.
-  return (this.childIndex_ && id) ?
-      /** @type {goog.ui.Component} */ (
-          goog.object.get(this.childIndex_, id)) ||
-          null :
-      null;
-};
-
-
-/**
- * Returns the child at the given index, or null if the index is out of bounds.
- * @param {number} index 0-based index.
- * @return {goog.ui.Component?} The child at the given index; null if none.
- */
-goog.ui.Component.prototype.getChildAt = function(index) {
-  // Use children_ for access by index.
-  return this.children_ ? this.children_[index] || null : null;
-};
-
-
-/**
- * Calls the given function on each of this component's children in order.  If
- * {@code opt_obj} is provided, it will be used as the 'this' object in the
- * function when called.  The function should take two arguments:  the child
- * component and its 0-based index.  The return value is ignored.
- * @param {function(this:T,?,number):?} f The function to call for every
- * child component; should take 2 arguments (the child and its index).
- * @param {T=} opt_obj Used as the 'this' object in f when called.
- * @template T
- */
-goog.ui.Component.prototype.forEachChild = function(f, opt_obj) {
-  if (this.children_) {
-    goog.array.forEach(this.children_, f, opt_obj);
-  }
-};
-
-
-/**
- * Returns the 0-based index of the given child component, or -1 if no such
- * child is found.
- * @param {goog.ui.Component?} child The child component.
- * @return {number} 0-based index of the child component; -1 if not found.
- */
-goog.ui.Component.prototype.indexOfChild = function(child) {
-  return (this.children_ && child) ? goog.array.indexOf(this.children_, child) :
-                                     -1;
-};
-
-
-/**
- * Removes the given child from this component, and returns it.  Throws an error
- * if the argument is invalid or if the specified child isn't found in the
- * parent component.  The argument can either be a string (interpreted as the
- * ID of the child component to remove) or the child component itself.
- *
- * If {@code opt_unrender} is true, calls {@link goog.ui.component#exitDocument}
- * on the removed child, and subsequently detaches the child's DOM from the
- * document.  Otherwise it is the caller's responsibility to clean up the child
- * component's DOM.
- *
- * @see goog.ui.Component#removeChildAt
- * @param {string|goog.ui.Component|null} child The ID of the child to remove,
- *    or the child component itself.
- * @param {boolean=} opt_unrender If true, calls {@code exitDocument} on the
- *    removed child component, and detaches its DOM from the document.
- * @return {goog.ui.Component} The removed component, if any.
- */
-goog.ui.Component.prototype.removeChild = function(child, opt_unrender) {
-  if (child) {
-    // Normalize child to be the object and id to be the ID string.  This also
-    // ensures that the child is really ours.
-    var id = goog.isString(child) ? child : child.getId();
-    child = this.getChild(id);
-
-    if (id && child) {
-      goog.object.remove(this.childIndex_, id);
-      goog.array.remove(this.children_, child);
-
-      if (opt_unrender) {
-        // Remove the child component's DOM from the document.  We have to call
-        // exitDocument first (see documentation).
-        child.exitDocument();
-        if (child.element_) {
-          goog.dom.removeNode(child.element_);
+    var neighbours = connection.neighbours_(Blockly.SNAP_RADIUS);
+    for (var j = 0, otherConnection; otherConnection = neighbours[j]; j++) {
+      // If both connections are connected, that's probably fine.  But if
+      // either one of them is unconnected, then there could be confusion.
+      if (!connection.isConnected() || !otherConnection.isConnected()) {
+        // Only bump blocks if they are from different tree structures.
+        if (otherConnection.getSourceBlock().getRootBlock() != rootBlock) {
+          // Always bump the inferior block.
+          if (connection.isSuperior()) {
+            otherConnection.bumpAwayFrom_(connection);
+          } else {
+            connection.bumpAwayFrom_(otherConnection);
+          }
         }
       }
-
-      // Child's parent must be set to null after exitDocument is called
-      // so that the child can unlisten to its parent if required.
-      child.setParent(null);
     }
   }
-
-  if (!child) {
-    throw Error(goog.ui.Component.Error.NOT_OUR_CHILD);
-  }
-
-  return /** @type {!goog.ui.Component} */ (child);
 };
 
-
 /**
- * Removes the child at the given index from this component, and returns it.
- * Throws an error if the argument is out of bounds, or if the specified child
- * isn't found in the parent.  See {@link goog.ui.Component#removeChild} for
- * detailed semantics.
- *
- * @see goog.ui.Component#removeChild
- * @param {number} index 0-based index of the child to remove.
- * @param {boolean=} opt_unrender If true, calls {@code exitDocument} on the
- *    removed child component, and detaches its DOM from the document.
- * @return {goog.ui.Component} The removed component, if any.
+ * Return the parent block or null if this block is at the top level.
+ * @return {Blockly.Block} The block that holds the current block.
  */
-goog.ui.Component.prototype.removeChildAt = function(index, opt_unrender) {
-  // removeChild(null) will throw error.
-  return this.removeChild(this.getChildAt(index), opt_unrender);
+Blockly.Block.prototype.getParent = function() {
+  // Look at the DOM to see if we are nested in another block.
+  return this.parentBlock_;
 };
 
+/**
+ * Return the input that connects to the specified block.
+ * @param {!Blockly.Block} block A block connected to an input on this block.
+ * @return {Blockly.Input} The input that connects to the specified block.
+ */
+Blockly.Block.prototype.getInputWithBlock = function(block) {
+  for (var i = 0, input; input = this.inputList[i]; i++) {
+    if (input.connection && input.connection.targetBlock() == block) {
+      return input;
+    }
+  }
+  return null;
+};
 
 /**
- * Removes every child component attached to this one and returns them.
- *
- * @see goog.ui.Component#removeChild
- * @param {boolean=} opt_unrender If true, calls {@link #exitDocument} on the
- *    removed child components, and detaches their DOM from the document.
- * @return {!Array<goog.ui.Component>} The removed components if any.
+ * Return the parent block that surrounds the current block, or null if this
+ * block has no surrounding block.  A parent block might just be the previous
+ * statement, whereas the surrounding block is an if statement, while loop, etc.
+ * @return {Blockly.Block} The block that surrounds the current block.
  */
-goog.ui.Component.prototype.removeChildren = function(opt_unrender) {
-  var removedChildren = [];
-  while (this.hasChildren()) {
-    removedChildren.push(this.removeChildAt(0, opt_unrender));
+Blockly.Block.prototype.getSurroundParent = function() {
+  var block = this;
+  do {
+    var prevBlock = block;
+    block = block.getParent();
+    if (!block) {
+      // Ran off the top.
+      return null;
+    }
+  } while (block.getNextBlock() == prevBlock);
+  // This block is an enclosing parent, not just a statement in a stack.
+  return block;
+};
+
+/**
+ * Return the next statement block directly connected to this block.
+ * @return {Blockly.Block} The next statement block or null.
+ */
+Blockly.Block.prototype.getNextBlock = function() {
+  return this.nextConnection && this.nextConnection.targetBlock();
+};
+
+/**
+ * Return the top-most block in this block's tree.
+ * This will return itself if this block is at the top level.
+ * @return {!Blockly.Block} The root block.
+ */
+Blockly.Block.prototype.getRootBlock = function() {
+  var rootBlock;
+  var block = this;
+  do {
+    rootBlock = block;
+    block = rootBlock.parentBlock_;
+  } while (block);
+  return rootBlock;
+};
+
+/**
+ * Find all the blocks that are directly nested inside this one.
+ * Includes value and block inputs, as well as any following statement.
+ * Excludes any connection on an output tab or any preceding statement.
+ * @return {!Array.<!Blockly.Block>} Array of blocks.
+ */
+Blockly.Block.prototype.getChildren = function() {
+  return this.childBlocks_;
+};
+
+/**
+ * Set parent of this block to be a new block or null.
+ * @param {Blockly.Block} newParent New parent block.
+ */
+Blockly.Block.prototype.setParent = function(newParent) {
+  if (newParent == this.parentBlock_) {
+    return;
   }
-  return removedChildren;
+  if (this.parentBlock_) {
+    // Remove this block from the old parent's child list.
+    var children = this.parentBlock_.childBlocks_;
+    for (var child, x = 0; child = children[x]; x++) {
+      if (child == this) {
+        children.splice(x, 1);
+        break;
+      }
+    }
+
+    // Disconnect from superior blocks.
+    if (this.previousConnection && this.previousConnection.isConnected()) {
+      throw 'Still connected to previous block.';
+    }
+    if (this.outputConnection && this.outputConnection.isConnected()) {
+      throw 'Still connected to parent block.';
+    }
+    this.parentBlock_ = null;
+    // This block hasn't actually moved on-screen, so there's no need to update
+    // its connection locations.
+  } else {
+    // Remove this block from the workspace's list of top-most blocks.
+    this.workspace.removeTopBlock(this);
+  }
+
+  this.parentBlock_ = newParent;
+  if (newParent) {
+    // Add this block to the new parent's child list.
+    newParent.childBlocks_.push(this);
+  } else {
+    this.workspace.addTopBlock(this);
+  }
+};
+
+/**
+ * Find all the blocks that are directly or indirectly nested inside this one.
+ * Includes this block in the list.
+ * Includes value and block inputs, as well as any following statements.
+ * Excludes any connection on an output tab or any preceding statements.
+ * @return {!Array.<!Blockly.Block>} Flattened array of blocks.
+ */
+Blockly.Block.prototype.getDescendants = function() {
+  var blocks = [this];
+  for (var child, x = 0; child = this.childBlocks_[x]; x++) {
+    blocks.push.apply(blocks, child.getDescendants());
+  }
+  return blocks;
+};
+
+/**
+ * Get whether this block is deletable or not.
+ * @return {boolean} True if deletable.
+ */
+Blockly.Block.prototype.isDeletable = function() {
+  return this.deletable_ && !this.isShadow_ &&
+      !(this.workspace && this.workspace.options.readOnly);
+};
+
+/**
+ * Set whether this block is deletable or not.
+ * @param {boolean} deletable True if deletable.
+ */
+Blockly.Block.prototype.setDeletable = function(deletable) {
+  this.deletable_ = deletable;
+};
+
+/**
+ * Get whether this block is movable or not.
+ * @return {boolean} True if movable.
+ */
+Blockly.Block.prototype.isMovable = function() {
+  return this.movable_ && !this.isShadow_ &&
+      !(this.workspace && this.workspace.options.readOnly);
+};
+
+/**
+ * Set whether this block is movable or not.
+ * @param {boolean} movable True if movable.
+ */
+Blockly.Block.prototype.setMovable = function(movable) {
+  this.movable_ = movable;
+};
+
+/**
+ * Get whether this block is a shadow block or not.
+ * @return {boolean} True if a shadow.
+ */
+Blockly.Block.prototype.isShadow = function() {
+  return this.isShadow_;
+};
+
+/**
+ * Set whether this block is a shadow block or not.
+ * @param {boolean} shadow True if a shadow.
+ */
+Blockly.Block.prototype.setShadow = function(shadow) {
+  this.isShadow_ = shadow;
+};
+
+/**
+ * Get whether this block is editable or not.
+ * @return {boolean} True if editable.
+ */
+Blockly.Block.prototype.isEditable = function() {
+  return this.editable_ && !(this.workspace && this.workspace.options.readOnly);
+};
+
+/**
+ * Set whether this block is editable or not.
+ * @param {boolean} editable True if editable.
+ */
+Blockly.Block.prototype.setEditable = function(editable) {
+  this.editable_ = editable;
+  for (var i = 0, input; input = this.inputList[i]; i++) {
+    for (var j = 0, field; field = input.fieldRow[j]; j++) {
+      field.updateEditable();
+    }
+  }
+};
+
+/**
+ * Set whether the connections are hidden (not tracked in a database) or not.
+ * Recursively walk down all child blocks (except collapsed blocks).
+ * @param {boolean} hidden True if connections are hidden.
+ */
+Blockly.Block.prototype.setConnectionsHidden = function(hidden) {
+  if (!hidden && this.isCollapsed()) {
+    if (this.outputConnection) {
+      this.outputConnection.setHidden(hidden);
+    }
+    if (this.previousConnection) {
+      this.previousConnection.setHidden(hidden);
+    }
+    if (this.nextConnection) {
+      this.nextConnection.setHidden(hidden);
+      var child = this.nextConnection.targetBlock();
+      if (child) {
+        child.setConnectionsHidden(hidden);
+      }
+    }
+  } else {
+    var myConnections = this.getConnections_(true);
+    for (var i = 0, connection; connection = myConnections[i]; i++) {
+      connection.setHidden(hidden);
+      if (connection.isSuperior()) {
+        var child = connection.targetBlock();
+        if (child) {
+          child.setConnectionsHidden(hidden);
+        }
+      }
+    }
+  }
+};
+
+/**
+ * Set the URL of this block's help page.
+ * @param {string|Function} url URL string for block help, or function that
+ *     returns a URL.  Null for no help.
+ */
+Blockly.Block.prototype.setHelpUrl = function(url) {
+  this.helpUrl = url;
+};
+
+/**
+ * Change the tooltip text for a block.
+ * @param {string|!Function} newTip Text for tooltip or a parent element to
+ *     link to for its tooltip.  May be a function that returns a string.
+ */
+Blockly.Block.prototype.setTooltip = function(newTip) {
+  this.tooltip = newTip;
+};
+
+/**
+ * Get the colour of a block.
+ * @return {string} #RRGGBB string.
+ */
+Blockly.Block.prototype.getColour = function() {
+  return this.colour_;
+};
+
+/**
+ * Change the colour of a block.
+ * @param {number|string} colour HSV hue value, or #RRGGBB string.
+ */
+Blockly.Block.prototype.setColour = function(colour) {
+  var hue = parseFloat(colour);
+  if (!isNaN(hue)) {
+    this.colour_ = Blockly.hueToRgb(hue);
+  } else if (goog.isString(colour) && colour.match(/^#[0-9a-fA-F]{6}$/)) {
+    this.colour_ = colour;
+  } else {
+    throw 'Invalid colour: ' + colour;
+  }
+};
+
+/**
+ * Returns the named field from a block.
+ * @param {string} name The name of the field.
+ * @return {Blockly.Field} Named field, or null if field does not exist.
+ */
+Blockly.Block.prototype.getField = function(name) {
+  for (var i = 0, input; input = this.inputList[i]; i++) {
+    for (var j = 0, field; field = input.fieldRow[j]; j++) {
+      if (field.name === name) {
+        return field;
+      }
+    }
+  }
+  return null;
+};
+
+/**
+ * Return all variables referenced by this block.
+ * @return {!Array.<string>} List of variable names.
+ */
+Blockly.Block.prototype.getVars = function() {
+  var vars = [];
+  for (var i = 0, input; input = this.inputList[i]; i++) {
+    for (var j = 0, field; field = input.fieldRow[j]; j++) {
+      if (field instanceof Blockly.FieldVariable) {
+        vars.push(field.getValue());
+      }
+    }
+  }
+  return vars;
+};
+
+/**
+ * Notification that a variable is renaming.
+ * If the name matches one of this block's variables, rename it.
+ * @param {string} oldName Previous name of variable.
+ * @param {string} newName Renamed variable.
+ */
+Blockly.Block.prototype.renameVar = function(oldName, newName) {
+  for (var i = 0, input; input = this.inputList[i]; i++) {
+    for (var j = 0, field; field = input.fieldRow[j]; j++) {
+      if (field instanceof Blockly.FieldVariable &&
+          Blockly.Names.equals(oldName, field.getValue())) {
+        field.setValue(newName);
+      }
+    }
+  }
+};
+
+/**
+ * Return all instances referenced by this block.
+ * @param {string=} opt_instanceType Optional type of the instances to collect,
+ *     if not defined it collects all instances.
+ * @return {!Array.<string>} List of instance names.
+ */
+Blockly.Block.prototype.getInstances = function(opt_instanceType) {
+  var vars = [];
+  for (var i = 0, input; input = this.inputList[i]; i++) {
+    for (var j = 0, field; field = input.fieldRow[j]; j++) {
+      if (field instanceof Blockly.FieldInstance) {
+        var validInstance = opt_instanceType ?
+            field.getInstanceTypeValue(opt_instanceType) :
+            field.getValue();
+        if (validInstance) {
+          vars.push(validInstance);
+        }
+      }
+    }
+  }
+  return vars;
+};
+
+/**
+ * Notification that a instance is renaming.
+ * If the name and type matches one of this block's instances, rename it.
+ * @param {string} oldName Previous name of the instance.
+ * @param {string} newName Renamed instance.
+ * @param {string} instanceType Type of the instances to rename.
+ */
+Blockly.Block.prototype.renameInstance = function(
+    oldName, newName, instanceType) {
+  for (var i = 0, input; input = this.inputList[i]; i++) {
+    for (var j = 0, field; field = input.fieldRow[j]; j++) {
+      if (field instanceof Blockly.FieldInstance) {
+        var validInstance = field.getInstanceTypeValue(instanceType);
+        if (validInstance && Blockly.Names.equals(oldName, validInstance)) {
+          field.setValue(newName);
+        }
+      }
+    }
+  }
+};
+
+/**
+ * Returns the language-neutral value from the field of a block.
+ * @param {string} name The name of the field.
+ * @return {?string} Value from the field or null if field does not exist.
+ */
+Blockly.Block.prototype.getFieldValue = function(name) {
+  var field = this.getField(name);
+  if (field) {
+    return field.getValue();
+  }
+  return null;
+};
+
+/**
+ * Returns the language-neutral value from the field of a block.
+ * @param {string} name The name of the field.
+ * @return {?string} Value from the field or null if field does not exist.
+ * @deprecated December 2013
+ */
+Blockly.Block.prototype.getTitleValue = function(name) {
+  console.warn('Deprecated call to getTitleValue, use getFieldValue instead.');
+  return this.getFieldValue(name);
+};
+
+/**
+ * Change the field value for a block (e.g. 'CHOOSE' or 'REMOVE').
+ * @param {string} newValue Value to be the new field.
+ * @param {string} name The name of the field.
+ */
+Blockly.Block.prototype.setFieldValue = function(newValue, name) {
+  var field = this.getField(name);
+  goog.asserts.assertObject(field, 'Field "%s" not found.', name);
+  field.setValue(newValue);
+};
+
+/**
+ * Change the field value for a block (e.g. 'CHOOSE' or 'REMOVE').
+ * @param {string} newValue Value to be the new field.
+ * @param {string} name The name of the field.
+ * @deprecated December 2013
+ */
+Blockly.Block.prototype.setTitleValue = function(newValue, name) {
+  console.warn('Deprecated call to setTitleValue, use setFieldValue instead.');
+  this.setFieldValue(newValue, name);
+};
+
+/**
+ * Set whether this block can chain onto the bottom of another block.
+ * @param {boolean} newBoolean True if there can be a previous statement.
+ * @param {string|Array.<string>|null|undefined} opt_check Statement type or
+ *     list of statement types.  Null/undefined if any type could be connected.
+ */
+Blockly.Block.prototype.setPreviousStatement = function(newBoolean, opt_check) {
+  if (newBoolean) {
+    if (opt_check === undefined) {
+      opt_check = null;
+    }
+    if (!this.previousConnection) {
+      goog.asserts.assert(!this.outputConnection,
+          'Remove output connection prior to adding previous connection.');
+      this.previousConnection =
+          this.makeConnection_(Blockly.PREVIOUS_STATEMENT);
+    }
+    this.previousConnection.setCheck(opt_check);
+  } else {
+    if (this.previousConnection) {
+      goog.asserts.assert(!this.previousConnection.isConnected(),
+          'Must disconnect previous statement before removing connection.');
+      this.previousConnection.dispose();
+      this.previousConnection = null;
+    }
+  }
+};
+
+/**
+ * Set whether another block can chain onto the bottom of this block.
+ * @param {boolean} newBoolean True if there can be a next statement.
+ * @param {string|Array.<string>|null|undefined} opt_check Statement type or
+ *     list of statement types.  Null/undefined if any type could be connected.
+ */
+Blockly.Block.prototype.setNextStatement = function(newBoolean, opt_check) {
+  if (newBoolean) {
+    if (opt_check === undefined) {
+      opt_check = null;
+    }
+    if (!this.nextConnection) {
+      this.nextConnection = this.makeConnection_(Blockly.NEXT_STATEMENT);
+    }
+    this.nextConnection.setCheck(opt_check);
+  } else {
+    if (this.nextConnection) {
+      goog.asserts.assert(!this.nextConnection.isConnected(),
+          'Must disconnect next statement before removing connection.');
+      this.nextConnection.dispose();
+      this.nextConnection = null;
+    }
+  }
+};
+
+/**
+ * Set whether this block returns a value.
+ * @param {boolean} newBoolean True if there is an output.
+ * @param {string|Array.<string>|null|undefined} opt_check Returned type or list
+ *     of returned types.  Null or undefined if any type could be returned
+ *     (e.g. variable get).
+ */
+Blockly.Block.prototype.setOutput = function(newBoolean, opt_check) {
+  if (newBoolean) {
+    if (opt_check === undefined) {
+      opt_check = null;
+    }
+    if (!this.outputConnection) {
+      goog.asserts.assert(!this.previousConnection,
+          'Remove previous connection prior to adding output connection.');
+      this.outputConnection = this.makeConnection_(Blockly.OUTPUT_VALUE);
+    }
+    this.outputConnection.setCheck(opt_check);
+  } else {
+    if (this.outputConnection) {
+      goog.asserts.assert(!this.outputConnection.isConnected(),
+          'Must disconnect output value before removing connection.');
+      this.outputConnection.dispose();
+      this.outputConnection = null;
+    }
+  }
+};
+
+/**
+ * Set whether value inputs are arranged horizontally or vertically.
+ * @param {boolean} newBoolean True if inputs are horizontal.
+ */
+Blockly.Block.prototype.setInputsInline = function(newBoolean) {
+  if (this.inputsInline != newBoolean) {
+    Blockly.Events.fire(new Blockly.Events.Change(
+        this, 'inline', null, this.inputsInline, newBoolean));
+    this.inputsInline = newBoolean;
+  }
+};
+
+/**
+ * Get whether value inputs are arranged horizontally or vertically.
+ * @return {boolean} True if inputs are horizontal.
+ */
+Blockly.Block.prototype.getInputsInline = function() {
+  if (this.inputsInline != undefined) {
+    // Set explicitly.
+    return this.inputsInline;
+  }
+  // Not defined explicitly.  Figure out what would look best.
+  for (var i = 1; i < this.inputList.length; i++) {
+    if (this.inputList[i - 1].type == Blockly.DUMMY_INPUT &&
+        this.inputList[i].type == Blockly.DUMMY_INPUT) {
+      // Two dummy inputs in a row.  Don't inline them.
+      return false;
+    }
+  }
+  for (var i = 1; i < this.inputList.length; i++) {
+    if (this.inputList[i - 1].type == Blockly.INPUT_VALUE &&
+        this.inputList[i].type == Blockly.DUMMY_INPUT) {
+      // Dummy input after a value input.  Inline them.
+      return true;
+    }
+  }
+  return false;
+};
+
+/**
+ * Set whether the block is disabled or not.
+ * @param {boolean} disabled True if disabled.
+ */
+Blockly.Block.prototype.setDisabled = function(disabled) {
+  if (this.disabled != disabled) {
+    Blockly.Events.fire(new Blockly.Events.Change(
+        this, 'disabled', null, this.disabled, disabled));
+    this.disabled = disabled;
+  }
+};
+
+/**
+ * Get whether the block is disabled or not due to parents.
+ * The block's own disabled property is not considered.
+ * @return {boolean} True if disabled.
+ */
+Blockly.Block.prototype.getInheritedDisabled = function() {
+  var block = this;
+  while (true) {
+    block = block.getSurroundParent();
+    if (!block) {
+      // Ran off the top.
+      return false;
+    } else if (block.disabled) {
+      return true;
+    }
+  }
+};
+
+/**
+ * Get whether the block is collapsed or not.
+ * @return {boolean} True if collapsed.
+ */
+Blockly.Block.prototype.isCollapsed = function() {
+  return this.collapsed_;
+};
+
+/**
+ * Set whether the block is collapsed or not.
+ * @param {boolean} collapsed True if collapsed.
+ */
+Blockly.Block.prototype.setCollapsed = function(collapsed) {
+  if (this.collapsed_ != collapsed) {
+    Blockly.Events.fire(new Blockly.Events.Change(
+        this, 'collapsed', null, this.collapsed_, collapsed));
+    this.collapsed_ = collapsed;
+  }
+};
+
+/**
+ * Create a human-readable text representation of this block and any children.
+ * @param {number=} opt_maxLength Truncate the string to this length.
+ * @return {string} Text of block.
+ */
+Blockly.Block.prototype.toString = function(opt_maxLength) {
+  var text = [];
+  if (this.collapsed_) {
+    text.push(this.getInput('_TEMP_COLLAPSED_INPUT').fieldRow[0].text_);
+  } else {
+    for (var i = 0, input; input = this.inputList[i]; i++) {
+      for (var j = 0, field; field = input.fieldRow[j]; j++) {
+        text.push(field.getText());
+      }
+      if (input.connection) {
+        var child = input.connection.targetBlock();
+        if (child) {
+          text.push(child.toString());
+        } else {
+          text.push('?');
+        }
+      }
+    }
+  }
+  text = goog.string.trim(text.join(' ')) || '???';
+  if (opt_maxLength) {
+    // TODO: Improve truncation so that text from this block is given priority.
+    // E.g. "1+2+3+4+5+6+7+8+9=0" should be "...6+7+8+9=0", not "1+2+3+4+5...".
+    // E.g. "1+2+3+4+5=6+7+8+9+0" should be "...4+5=6+7...".
+    text = goog.string.truncate(text, opt_maxLength);
+  }
+  return text;
+};
+
+/**
+ * Shortcut for appending a value input row.
+ * @param {string} name Language-neutral identifier which may used to find this
+ *     input again.  Should be unique to this block.
+ * @return {!Blockly.Input} The input object created.
+ */
+Blockly.Block.prototype.appendValueInput = function(name) {
+  return this.appendInput_(Blockly.INPUT_VALUE, name);
+};
+
+/**
+ * Shortcut for appending a statement input row.
+ * @param {string} name Language-neutral identifier which may used to find this
+ *     input again.  Should be unique to this block.
+ * @return {!Blockly.Input} The input object created.
+ */
+Blockly.Block.prototype.appendStatementInput = function(name) {
+  return this.appendInput_(Blockly.NEXT_STATEMENT, name);
+};
+
+/**
+ * Shortcut for appending a dummy input row.
+ * @param {string=} opt_name Language-neutral identifier which may used to find
+ *     this input again.  Should be unique to this block.
+ * @return {!Blockly.Input} The input object created.
+ */
+Blockly.Block.prototype.appendDummyInput = function(opt_name) {
+  return this.appendInput_(Blockly.DUMMY_INPUT, opt_name || '');
+};
+
+/**
+ * Initialize this block using a cross-platform, internationalization-friendly
+ * JSON description.
+ * @param {!Object} json Structured data describing the block.
+ */
+Blockly.Block.prototype.jsonInit = function(json) {
+  // Validate inputs.
+  goog.asserts.assert(json['output'] == undefined ||
+      json['previousStatement'] == undefined,
+      'Must not have both an output and a previousStatement.');
+
+  // Set basic properties of block.
+  if (json['colour'] !== undefined) {
+    this.setColour(json['colour']);
+  }
+
+  // Interpolate the message blocks.
+  var i = 0;
+  while (json['message' + i] !== undefined) {
+    this.interpolate_(json['message' + i], json['args' + i] || [],
+        json['lastDummyAlign' + i]);
+    i++;
+  }
+
+  if (json['inputsInline'] !== undefined) {
+    this.setInputsInline(json['inputsInline']);
+  }
+  // Set output and previous/next connections.
+  if (json['output'] !== undefined) {
+    this.setOutput(true, json['output']);
+  }
+  if (json['previousStatement'] !== undefined) {
+    this.setPreviousStatement(true, json['previousStatement']);
+  }
+  if (json['nextStatement'] !== undefined) {
+    this.setNextStatement(true, json['nextStatement']);
+  }
+  if (json['tooltip'] !== undefined) {
+    this.setTooltip(json['tooltip']);
+  }
+  if (json['helpUrl'] !== undefined) {
+    this.setHelpUrl(json['helpUrl']);
+  }
+};
+
+/**
+ * Interpolate a message description onto the block.
+ * @param {string} message Text contains interpolation tokens (%1, %2, ...)
+ *     that match with fields or inputs defined in the args array.
+ * @param {!Array} args Array of arguments to be interpolated.
+ * @param {=string} lastDummyAlign If a dummy input is added at the end,
+ *     how should it be aligned?
+ * @private
+ */
+Blockly.Block.prototype.interpolate_ = function(message, args, lastDummyAlign) {
+  var tokens = Blockly.tokenizeInterpolation(message);
+  // Interpolate the arguments.  Build a list of elements.
+  var indexDup = [];
+  var indexCount = 0;
+  var elements = [];
+  for (var i = 0; i < tokens.length; i++) {
+    var token = tokens[i];
+    if (typeof token == 'number') {
+      goog.asserts.assert(token > 0 && token <= args.length,
+          'Message index "%s" out of range.', token);
+      goog.asserts.assert(!indexDup[token],
+          'Message index "%s" duplicated.', token);
+      indexDup[token] = true;
+      indexCount++;
+      elements.push(args[token - 1]);
+    } else {
+      token = token.trim();
+      if (token) {
+        elements.push(token);
+      }
+    }
+  }
+  goog.asserts.assert(indexCount == args.length,
+      'Message does not reference all %s arg(s).', args.length);
+  // Add last dummy input if needed.
+  if (elements.length && (typeof elements[elements.length - 1] == 'string' ||
+      elements[elements.length - 1]['type'].indexOf('field_') == 0)) {
+    var dummyInput = {type: 'input_dummy'};
+    if (lastDummyAlign) {
+      dummyInput['align'] = lastDummyAlign;
+    }
+    elements.push(dummyInput);
+  }
+  // Lookup of alignment constants.
+  var alignmentLookup = {
+    'LEFT': Blockly.ALIGN_LEFT,
+    'RIGHT': Blockly.ALIGN_RIGHT,
+    'CENTRE': Blockly.ALIGN_CENTRE
+  };
+  // Populate block with inputs and fields.
+  var fieldStack = [];
+  for (var i = 0; i < elements.length; i++) {
+    var element = elements[i];
+    if (typeof element == 'string') {
+      fieldStack.push([element, undefined]);
+    } else {
+      var field = null;
+      var input = null;
+      do {
+        var altRepeat = false;
+        switch (element['type']) {
+          case 'input_value':
+            input = this.appendValueInput(element['name']);
+            break;
+          case 'input_statement':
+            input = this.appendStatementInput(element['name']);
+            break;
+          case 'input_dummy':
+            input = this.appendDummyInput(element['name']);
+            break;
+          case 'field_label':
+            field = new Blockly.FieldLabel(element['text'], element['class']);
+            break;
+          case 'field_input':
+            field = new Blockly.FieldTextInput(element['text']);
+            if (typeof element['spellcheck'] == 'boolean') {
+              field.setSpellcheck(element['spellcheck']);
+            }
+            break;
+          case 'field_angle':
+            field = new Blockly.FieldAngle(element['angle']);
+            break;
+          case 'field_checkbox':
+            field = new Blockly.FieldCheckbox(
+                element['checked'] ? 'TRUE' : 'FALSE');
+            break;
+          case 'field_colour':
+            field = new Blockly.FieldColour(element['colour']);
+            break;
+          case 'field_variable':
+            field = new Blockly.FieldVariable(element['variable']);
+            break;
+          case 'field_dropdown':
+            field = new Blockly.FieldDropdown(element['options']);
+            break;
+          case 'field_image':
+            field = new Blockly.FieldImage(element['src'],
+                element['width'], element['height'], element['alt']);
+            break;
+          case 'field_number':
+            field = new Blockly.FieldNumber(element['text']);
+            break;
+          case 'field_date':
+            if (Blockly.FieldDate) {
+              field = new Blockly.FieldDate(element['date']);
+              break;
+            }
+            // Fall through if FieldDate is not compiled in.
+          default:
+            // Unknown field.
+            if (element['alt']) {
+              element = element['alt'];
+              altRepeat = true;
+            }
+        }
+      } while (altRepeat);
+      if (field) {
+        fieldStack.push([field, element['name']]);
+      } else if (input) {
+        if (element['check']) {
+          input.setCheck(element['check']);
+        }
+        if (element['align']) {
+          input.setAlign(alignmentLookup[element['align']]);
+        }
+        for (var j = 0; j < fieldStack.length; j++) {
+          input.appendField(fieldStack[j][0], fieldStack[j][1]);
+        }
+        fieldStack.length = 0;
+      }
+    }
+  }
+};
+
+/**
+ * Add a value input, statement input or local variable to this block.
+ * @param {number} type Either Blockly.INPUT_VALUE or Blockly.NEXT_STATEMENT or
+ *     Blockly.DUMMY_INPUT.
+ * @param {string} name Language-neutral identifier which may used to find this
+ *     input again.  Should be unique to this block.
+ * @return {!Blockly.Input} The input object created.
+ * @private
+ */
+Blockly.Block.prototype.appendInput_ = function(type, name) {
+  var connection = null;
+  if (type == Blockly.INPUT_VALUE || type == Blockly.NEXT_STATEMENT) {
+    connection = this.makeConnection_(type);
+  }
+  var input = new Blockly.Input(type, name, this, connection);
+  // Append input to list.
+  this.inputList.push(input);
+  return input;
+};
+
+/**
+ * Move a named input to a different location on this block.
+ * @param {string} name The name of the input to move.
+ * @param {?string} refName Name of input that should be after the moved input,
+ *   or null to be the input at the end.
+ */
+Blockly.Block.prototype.moveInputBefore = function(name, refName) {
+  if (name == refName) {
+    return;
+  }
+  // Find both inputs.
+  var inputIndex = -1;
+  var refIndex = refName ? -1 : this.inputList.length;
+  for (var i = 0, input; input = this.inputList[i]; i++) {
+    if (input.name == name) {
+      inputIndex = i;
+      if (refIndex != -1) {
+        break;
+      }
+    } else if (refName && input.name == refName) {
+      refIndex = i;
+      if (inputIndex != -1) {
+        break;
+      }
+    }
+  }
+  goog.asserts.assert(inputIndex != -1, 'Named input "%s" not found.', name);
+  goog.asserts.assert(refIndex != -1, 'Reference input "%s" not found.',
+                      refName);
+  this.moveNumberedInputBefore(inputIndex, refIndex);
+};
+
+/**
+ * Move a numbered input to a different location on this block.
+ * @param {number} inputIndex Index of the input to move.
+ * @param {number} refIndex Index of input that should be after the moved input.
+ */
+Blockly.Block.prototype.moveNumberedInputBefore = function(
+    inputIndex, refIndex) {
+  // Validate arguments.
+  goog.asserts.assert(inputIndex != refIndex, 'Can\'t move input to itself.');
+  goog.asserts.assert(inputIndex < this.inputList.length,
+                      'Input index ' + inputIndex + ' out of bounds.');
+  goog.asserts.assert(refIndex <= this.inputList.length,
+                      'Reference input ' + refIndex + ' out of bounds.');
+  // Remove input.
+  var input = this.inputList[inputIndex];
+  this.inputList.splice(inputIndex, 1);
+  if (inputIndex < refIndex) {
+    refIndex--;
+  }
+  // Reinsert input.
+  this.inputList.splice(refIndex, 0, input);
+};
+
+/**
+ * Remove an input from this block.
+ * @param {string} name The name of the input.
+ * @param {boolean=} opt_quiet True to prevent error if input is not present.
+ * @throws {goog.asserts.AssertionError} if the input is not present and
+ *     opt_quiet is not true.
+ */
+Blockly.Block.prototype.removeInput = function(name, opt_quiet) {
+  for (var i = 0, input; input = this.inputList[i]; i++) {
+    if (input.name == name) {
+      if (input.connection && input.connection.isConnected()) {
+        input.connection.setShadowDom(null);
+        var block = input.connection.targetBlock();
+        if (block.isShadow()) {
+          // Destroy any attached shadow block.
+          block.dispose();
+        } else {
+          // Disconnect any attached normal block.
+          block.unplug();
+        }
+      }
+      input.dispose();
+      this.inputList.splice(i, 1);
+      return;
+    }
+  }
+  if (!opt_quiet) {
+    goog.asserts.fail('Input "%s" not found.', name);
+  }
+};
+
+/**
+ * Fetches the named input object.
+ * @param {string} name The name of the input.
+ * @return {Blockly.Input} The input object, or null if input does not exist.
+ */
+Blockly.Block.prototype.getInput = function(name) {
+  for (var i = 0, input; input = this.inputList[i]; i++) {
+    if (input.name == name) {
+      return input;
+    }
+  }
+  // This input does not exist.
+  return null;
+};
+
+/**
+ * Fetches the block attached to the named input.
+ * @param {string} name The name of the input.
+ * @return {Blockly.Block} The attached value block, or null if the input is
+ *     either disconnected or if the input does not exist.
+ */
+Blockly.Block.prototype.getInputTargetBlock = function(name) {
+  var input = this.getInput(name);
+  return input && input.connection && input.connection.targetBlock();
+};
+
+/**
+ * Returns the comment on this block (or '' if none).
+ * @return {string} Block's comment.
+ */
+Blockly.Block.prototype.getCommentText = function() {
+  return this.comment || '';
+};
+
+/**
+ * Set this block's comment text.
+ * @param {?string} text The text, or null to delete.
+ */
+Blockly.Block.prototype.setCommentText = function(text) {
+  if (this.comment != text) {
+    Blockly.Events.fire(new Blockly.Events.Change(
+        this, 'comment', null, this.comment, text || ''));
+    this.comment = text;
+  }
+};
+
+/**
+ * Set this block's warning text.
+ * @param {?string} text The text, or null to delete.
+ */
+Blockly.Block.prototype.setWarningText = function(text) {
+  // NOP.
+};
+
+/**
+ * Give this block a mutator dialog.
+ * @param {Blockly.Mutator} mutator A mutator dialog instance or null to remove.
+ */
+Blockly.Block.prototype.setMutator = function(mutator) {
+  // NOP.
+};
+
+/**
+ * Return the coordinates of the top-left corner of this block relative to the
+ * drawing surface's origin (0,0).
+ * @return {!goog.math.Coordinate} Object with .x and .y properties.
+ */
+Blockly.Block.prototype.getRelativeToSurfaceXY = function() {
+  return this.xy_;
+};
+
+/**
+ * Move a block by a relative offset.
+ * @param {number} dx Horizontal offset.
+ * @param {number} dy Vertical offset.
+ */
+Blockly.Block.prototype.moveBy = function(dx, dy) {
+  goog.asserts.assert(!this.parentBlock_, 'Block has parent.');
+  var event = new Blockly.Events.Move(this);
+  this.xy_.translate(dx, dy);
+  event.recordNew();
+  Blockly.Events.fire(event);
+};
+
+/**
+ * Create a connection of the specified type.
+ * @param {number} type The type of the connection to create.
+ * @return {!Blockly.Connection} A new connection of the specified type.
+ * @private
+ */
+Blockly.Block.prototype.makeConnection_ = function(type) {
+  return new Blockly.Connection(this, type);
 };

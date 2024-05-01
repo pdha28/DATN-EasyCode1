@@ -1,525 +1,607 @@
-/**
- * @license
- * Visual Blocks Editor
- *
- * Copyright 2012 Google Inc.
- * https://developers.google.com/blockly/
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *   http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
+// Copyright 2007 The Closure Library Authors. All Rights Reserved.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//      http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS-IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 
 /**
- * @fileoverview Utility methods.
- * These methods are not specific to Blockly, and could be factored out into
- * a JavaScript framework such as Closure.
- * @author fraser@google.com (Neil Fraser)
+ * @fileoverview A palette control.  A palette is a grid that the user can
+ * highlight or select via the keyboard or the mouse.
+ *
+ * @author attila@google.com (Attila Bodis)
+ * @see ../demos/palette.html
  */
-'use strict';
 
-goog.provide('Blockly.utils');
+goog.provide('goog.ui.Palette');
 
+goog.require('goog.array');
 goog.require('goog.dom');
-goog.require('goog.events.BrowserFeature');
-goog.require('goog.math.Coordinate');
-goog.require('goog.userAgent');
+goog.require('goog.events');
+goog.require('goog.events.EventType');
+goog.require('goog.events.KeyCodes');
+goog.require('goog.math.Size');
+goog.require('goog.ui.Component');
+goog.require('goog.ui.Control');
+goog.require('goog.ui.PaletteRenderer');
+goog.require('goog.ui.SelectionModel');
+
 
 
 /**
- * Add a CSS class to a element.
- * Similar to Closure's goog.dom.classes.add, except it handles SVG elements.
- * @param {!Element} element DOM element to add class to.
- * @param {string} className Name of class to add.
+ * A palette is a grid of DOM nodes that the user can highlight or select via
+ * the keyboard or the mouse.  The selection state of the palette is controlled
+ * an ACTION event.  Event listeners may retrieve the selected item using the
+ * {@link #getSelectedItem} or {@link #getSelectedIndex} method.
+ *
+ * Use this class as the base for components like color palettes or emoticon
+ * pickers.  Use {@link #setContent} to set/change the items in the palette
+ * after construction.  See palette.html demo for example usage.
+ *
+ * @param {Array<Node>} items Array of DOM nodes to be displayed as items
+ *     in the palette grid (limited to one per cell).
+ * @param {goog.ui.PaletteRenderer=} opt_renderer Renderer used to render or
+ *     decorate the palette; defaults to {@link goog.ui.PaletteRenderer}.
+ * @param {goog.dom.DomHelper=} opt_domHelper Optional DOM helper, used for
+ *     document interaction.
+ * @constructor
+ * @extends {goog.ui.Control}
+ */
+goog.ui.Palette = function(items, opt_renderer, opt_domHelper) {
+  goog.ui.Palette.base(
+      this, 'constructor', items,
+      opt_renderer || goog.ui.PaletteRenderer.getInstance(), opt_domHelper);
+  this.setAutoStates(
+      goog.ui.Component.State.CHECKED | goog.ui.Component.State.SELECTED |
+          goog.ui.Component.State.OPENED,
+      false);
+
+  /**
+   * A fake component for dispatching events on palette cell changes.
+   * @type {!goog.ui.Palette.CurrentCell_}
+   * @private
+   */
+  this.currentCellControl_ = new goog.ui.Palette.CurrentCell_();
+  this.currentCellControl_.setParentEventTarget(this);
+
+  /**
+   * @private {number} The last highlighted index, or -1 if it never had one.
+   */
+  this.lastHighlightedIndex_ = -1;
+};
+goog.inherits(goog.ui.Palette, goog.ui.Control);
+goog.tagUnsealableClass(goog.ui.Palette);
+
+
+/**
+ * Events fired by the palette object
+ * @enum {string}
+ */
+goog.ui.Palette.EventType = {
+  AFTER_HIGHLIGHT: goog.events.getUniqueId('afterhighlight')
+};
+
+
+/**
+ * Palette dimensions (columns x rows).  If the number of rows is undefined,
+ * it is calculated on first use.
+ * @type {goog.math.Size}
  * @private
  */
-Blockly.addClass_ = function(element, className) {
-  var classes = element.getAttribute('class') || '';
-  if ((' ' + classes + ' ').indexOf(' ' + className + ' ') == -1) {
-    if (classes) {
-      classes += ' ';
-    }
-    element.setAttribute('class', classes + className);
+goog.ui.Palette.prototype.size_ = null;
+
+
+/**
+ * Index of the currently highlighted item (-1 if none).
+ * @type {number}
+ * @private
+ */
+goog.ui.Palette.prototype.highlightedIndex_ = -1;
+
+
+/**
+ * Selection model controlling the palette's selection state.
+ * @type {goog.ui.SelectionModel}
+ * @private
+ */
+goog.ui.Palette.prototype.selectionModel_ = null;
+
+
+// goog.ui.Component / goog.ui.Control implementation.
+
+
+/** @override */
+goog.ui.Palette.prototype.disposeInternal = function() {
+  goog.ui.Palette.superClass_.disposeInternal.call(this);
+
+  if (this.selectionModel_) {
+    this.selectionModel_.dispose();
+    this.selectionModel_ = null;
   }
+
+  this.size_ = null;
+
+  this.currentCellControl_.dispose();
 };
 
-/**
- * Remove a CSS class from a element.
- * Similar to Closure's goog.dom.classes.remove, except it handles SVG elements.
- * @param {!Element} element DOM element to remove class from.
- * @param {string} className Name of class to remove.
- * @private
- */
-Blockly.removeClass_ = function(element, className) {
-  var classes = element.getAttribute('class');
-  if ((' ' + classes + ' ').indexOf(' ' + className + ' ') != -1) {
-    var classList = classes.split(/\s+/);
-    for (var i = 0; i < classList.length; i++) {
-      if (!classList[i] || classList[i] == className) {
-        classList.splice(i, 1);
-        i--;
-      }
-    }
-    if (classList.length) {
-      element.setAttribute('class', classList.join(' '));
-    } else {
-      element.removeAttribute('class');
-    }
-  }
-};
 
 /**
- * Checks if an element has the specified CSS class.
- * Similar to Closure's goog.dom.classes.has, except it handles SVG elements.
- * @param {!Element} element DOM element to check.
- * @param {string} className Name of class to check.
- * @return {boolean} True if class exists, false otherwise.
- * @private
+ * Overrides {@link goog.ui.Control#setContentInternal} by also updating the
+ * grid size and the selection model.  Considered protected.
+ * @param {goog.ui.ControlContent} content Array of DOM nodes to be displayed
+ *     as items in the palette grid (one item per cell).
+ * @protected
+ * @override
  */
-Blockly.hasClass_ = function(element, className) {
-  var classes = element.getAttribute('class');
-  return (' ' + classes + ' ').indexOf(' ' + className + ' ') != -1;
-};
+goog.ui.Palette.prototype.setContentInternal = function(content) {
+  var items = /** @type {Array<Node>} */ (content);
+  goog.ui.Palette.superClass_.setContentInternal.call(this, items);
 
-/**
- * Bind an event to a function call.
- * @param {!Node} node Node upon which to listen.
- * @param {string} name Event name to listen to (e.g. 'mousedown').
- * @param {Object} thisObject The value of 'this' in the function.
- * @param {!Function} func Function to call when event is triggered.
- * @return {!Array.<!Array>} Opaque data that can be passed to unbindEvent_.
- * @private
- */
-Blockly.bindEvent_ = function(node, name, thisObject, func) {
-  if (thisObject) {
-    var wrapFunc = function(e) {
-      func.call(thisObject, e);
-    };
+  // Adjust the palette size.
+  this.adjustSize_();
+
+  // Add the items to the selection model, replacing previous items (if any).
+  if (this.selectionModel_) {
+    // We already have a selection model; just replace the items.
+    this.selectionModel_.clear();
+    this.selectionModel_.addItems(items);
   } else {
-    var wrapFunc = func;
+    // Create a selection model, initialize the items, and hook up handlers.
+    this.selectionModel_ = new goog.ui.SelectionModel(items);
+    this.selectionModel_.setSelectionHandler(goog.bind(this.selectItem_, this));
+    this.getHandler().listen(
+        this.selectionModel_, goog.events.EventType.SELECT,
+        this.handleSelectionChange);
   }
-  node.addEventListener(name, wrapFunc, false);
-  var bindData = [[node, name, wrapFunc]];
-  // Add equivalent touch event.
-  if (name in Blockly.bindEvent_.TOUCH_MAP) {
-    wrapFunc = function(e) {
-      // Punt on multitouch events.
-      if (e.changedTouches.length == 1) {
-        // Map the touch event's properties to the event.
-        var touchPoint = e.changedTouches[0];
-        e.clientX = touchPoint.clientX;
-        e.clientY = touchPoint.clientY;
-      }
-      func.call(thisObject, e);
-      // Stop the browser from scrolling/zooming the page.
-      e.preventDefault();
-    };
-    for (var i = 0, eventName;
-         eventName = Blockly.bindEvent_.TOUCH_MAP[name][i]; i++) {
-      node.addEventListener(eventName, wrapFunc, false);
-      bindData.push([node, eventName, wrapFunc]);
+
+  // In all cases, clear the highlight.
+  this.highlightedIndex_ = -1;
+};
+
+
+/**
+ * Overrides {@link goog.ui.Control#getCaption} to return the empty string,
+ * since palettes don't have text captions.
+ * @return {string} The empty string.
+ * @override
+ */
+goog.ui.Palette.prototype.getCaption = function() {
+  return '';
+};
+
+
+/**
+ * Overrides {@link goog.ui.Control#setCaption} to be a no-op, since palettes
+ * don't have text captions.
+ * @param {string} caption Ignored.
+ * @override
+ */
+goog.ui.Palette.prototype.setCaption = function(caption) {
+  // Do nothing.
+};
+
+
+// Palette event handling.
+
+
+/**
+ * Handles mouseover events.  Overrides {@link goog.ui.Control#handleMouseOver}
+ * by determining which palette item (if any) was moused over, highlighting it,
+ * and un-highlighting any previously-highlighted item.
+ * @param {goog.events.BrowserEvent} e Mouse event to handle.
+ * @override
+ */
+goog.ui.Palette.prototype.handleMouseOver = function(e) {
+  goog.ui.Palette.superClass_.handleMouseOver.call(this, e);
+
+  var item = this.getRenderer().getContainingItem(this, e.target);
+  if (item && e.relatedTarget && goog.dom.contains(item, e.relatedTarget)) {
+    // Ignore internal mouse moves.
+    return;
+  }
+
+  if (item != this.getHighlightedItem()) {
+    this.setHighlightedItem(item);
+  }
+};
+
+
+/**
+ * Handles mousedown events.  Overrides {@link goog.ui.Control#handleMouseDown}
+ * by ensuring that the item on which the user moused down is highlighted.
+ * @param {goog.events.Event} e Mouse event to handle.
+ * @override
+ */
+goog.ui.Palette.prototype.handleMouseDown = function(e) {
+  goog.ui.Palette.superClass_.handleMouseDown.call(this, e);
+
+  if (this.isActive()) {
+    // Make sure we move the highlight to the cell on which the user moused
+    // down.
+    var item = this.getRenderer().getContainingItem(this, e.target);
+    if (item != this.getHighlightedItem()) {
+      this.setHighlightedItem(item);
     }
   }
-  return bindData;
 };
 
-/**
- * The TOUCH_MAP lookup dictionary specifies additional touch events to fire,
- * in conjunction with mouse events.
- * @type {Object}
- */
-Blockly.bindEvent_.TOUCH_MAP = {};
-if (goog.events.BrowserFeature.TOUCH_ENABLED) {
-  Blockly.bindEvent_.TOUCH_MAP = {
-    'mousedown': ['touchstart'],
-    'mousemove': ['touchmove'],
-    'mouseup': ['touchend', 'touchcancel']
-  };
-}
 
 /**
- * Unbind one or more events event from a function call.
- * @param {!Array.<!Array>} bindData Opaque data from bindEvent_.  This list is
- *     emptied during the course of calling this function.
- * @return {!Function} The function call.
- * @private
+ * Selects the currently highlighted palette item (triggered by mouseup or by
+ * keyboard action).  Overrides {@link goog.ui.Control#performActionInternal}
+ * by selecting the highlighted item and dispatching an ACTION event.
+ * @param {goog.events.Event} e Mouse or key event that triggered the action.
+ * @return {boolean} True if the action was allowed to proceed, false otherwise.
+ * @override
  */
-Blockly.unbindEvent_ = function(bindData) {
-  while (bindData.length) {
-    var bindDatum = bindData.pop();
-    var node = bindDatum[0];
-    var name = bindDatum[1];
-    var func = bindDatum[2];
-    node.removeEventListener(name, func, false);
+goog.ui.Palette.prototype.performActionInternal = function(e) {
+  var item = this.getHighlightedItem();
+  if (item) {
+    this.setSelectedItem(item);
+    return goog.ui.Palette.base(this, 'performActionInternal', e);
   }
-  return func;
+  return false;
 };
 
-/**
- * Don't do anything for this event, just halt propagation.
- * @param {!Event} e An event.
- */
-Blockly.noEvent = function(e) {
-  // This event has been handled.  No need to bubble up to the document.
-  e.preventDefault();
-  e.stopPropagation();
-};
 
 /**
- * Is this event targeting a text input widget?
- * @param {!Event} e An event.
- * @return {boolean} True if text input.
- * @private
+ * Handles keyboard events dispatched while the palette has focus.  Moves the
+ * highlight on arrow keys, and selects the highlighted item on Enter or Space.
+ * Returns true if the event was handled, false otherwise.  In particular, if
+ * the user attempts to navigate out of the grid, the highlight isn't changed,
+ * and this method returns false; it is then up to the parent component to
+ * handle the event (e.g. by wrapping the highlight around).  Overrides {@link
+ * goog.ui.Control#handleKeyEvent}.
+ * @param {goog.events.KeyEvent} e Key event to handle.
+ * @return {boolean} True iff the key event was handled by the component.
+ * @override
  */
-Blockly.isTargetInput_ = function(e) {
-  return e.target.type == 'textarea' || e.target.type == 'text' ||
-         e.target.type == 'number' || e.target.type == 'email' ||
-         e.target.type == 'password' || e.target.type == 'search' ||
-         e.target.type == 'tel' || e.target.type == 'url' ||
-         e.target.isContentEditable;
-};
+goog.ui.Palette.prototype.handleKeyEvent = function(e) {
+  var items = this.getContent();
+  var numItems = items ? items.length : 0;
+  var numColumns = this.size_.width;
 
-/**
- * Return the coordinates of the top-left corner of this element relative to
- * its parent.  Only for SVG elements and children (e.g. rect, g, path).
- * @param {!Element} element SVG element to find the coordinates of.
- * @return {!goog.math.Coordinate} Object with .x and .y properties.
- * @private
- */
-Blockly.getRelativeXY_ = function(element) {
-  var xy = new goog.math.Coordinate(0, 0);
-  // First, check for x and y attributes.
-  var x = element.getAttribute('x');
-  if (x) {
-    xy.x = parseInt(x, 10);
+  // If the component is disabled or the palette is empty, bail.
+  if (numItems == 0 || !this.isEnabled()) {
+    return false;
   }
-  var y = element.getAttribute('y');
-  if (y) {
-    xy.y = parseInt(y, 10);
-  }
-  // Second, check for transform="translate(...)" attribute.
-  var transform = element.getAttribute('transform');
-  var r = transform && transform.match(Blockly.getRelativeXY_.XY_REGEXP_);
-  if (r) {
-    xy.x += parseFloat(r[1]);
-    if (r[3]) {
-      xy.y += parseFloat(r[3]);
-    }
-  }
-  return xy;
-};
 
-/**
- * Static regex to pull the x,y values out of an SVG translate() directive.
- * Note that Firefox and IE (9,10) return 'translate(12)' instead of
- * 'translate(12, 0)'.
- * Note that IE (9,10) returns 'translate(16 8)' instead of 'translate(16, 8)'.
- * Note that IE has been reported to return scientific notation (0.123456e-42).
- * @type {!RegExp}
- * @private
- */
-Blockly.getRelativeXY_.XY_REGEXP_ =
-    /translate\(\s*([-+\d.e]+)([ ,]\s*([-+\d.e]+)\s*\))?/;
+  // User hit ENTER or SPACE; trigger action.
+  if (e.keyCode == goog.events.KeyCodes.ENTER ||
+      e.keyCode == goog.events.KeyCodes.SPACE) {
+    return this.performActionInternal(e);
+  }
 
-/**
- * Return the absolute coordinates of the top-left corner of this element,
- * scales that after canvas SVG element, if it's a descendant.
- * The origin (0,0) is the top-left corner of the Blockly SVG.
- * @param {!Element} element Element to find the coordinates of.
- * @param {!Blockly.Workspace} workspace Element must be in this workspace.
- * @return {!goog.math.Coordinate} Object with .x and .y properties.
- * @private
- */
-Blockly.getSvgXY_ = function(element, workspace) {
-  var x = 0;
-  var y = 0;
-  var scale = 1;
-  if (goog.dom.contains(workspace.getCanvas(), element) ||
-      goog.dom.contains(workspace.getBubbleCanvas(), element)) {
-    // Before the SVG canvas, scale the coordinates.
-    scale = workspace.scale;
-  }
-  do {
-    // Loop through this block and every parent.
-    var xy = Blockly.getRelativeXY_(element);
-    if (element == workspace.getCanvas() ||
-        element == workspace.getBubbleCanvas()) {
-      // After the SVG canvas, don't scale the coordinates.
-      scale = 1;
-    }
-    x += xy.x * scale;
-    y += xy.y * scale;
-    element = element.parentNode;
-  } while (element && element != workspace.getParentSvg());
-  return new goog.math.Coordinate(x, y);
-};
-
-/**
- * Helper method for creating SVG elements.
- * @param {string} name Element's tag name.
- * @param {!Object} attrs Dictionary of attribute names and values.
- * @param {Element} parent Optional parent on which to append the element.
- * @param {Blockly.Workspace=} opt_workspace Optional workspace for access to
- *     context (scale...).
- * @return {!SVGElement} Newly created SVG element.
- */
-Blockly.createSvgElement = function(name, attrs, parent, opt_workspace) {
-  var e = /** @type {!SVGElement} */ (
-      document.createElementNS(Blockly.SVG_NS, name));
-  for (var key in attrs) {
-    e.setAttribute(key, attrs[key]);
-  }
-  // IE defines a unique attribute "runtimeStyle", it is NOT applied to
-  // elements created with createElementNS. However, Closure checks for IE
-  // and assumes the presence of the attribute and crashes.
-  if (document.body.runtimeStyle) {  // Indicates presence of IE-only attr.
-    e.runtimeStyle = e.currentStyle = e.style;
-  }
-  if (parent) {
-    parent.appendChild(e);
-  }
-  return e;
-};
-
-/**
- * Is this event a right-click?
- * @param {!Event} e Mouse event.
- * @return {boolean} True if right-click.
- */
-Blockly.isRightButton = function(e) {
-  if (e.ctrlKey && goog.userAgent.MAC) {
-    // Control-clicking on Mac OS X is treated as a right-click.
-    // WebKit on Mac OS X fails to change button to 2 (but Gecko does).
+  // User hit HOME or END; move highlight.
+  if (e.keyCode == goog.events.KeyCodes.HOME) {
+    this.setHighlightedIndex(0);
+    return true;
+  } else if (e.keyCode == goog.events.KeyCodes.END) {
+    this.setHighlightedIndex(numItems - 1);
     return true;
   }
-  return e.button == 2;
-};
 
-/**
- * Return the converted coordinates of the given mouse event.
- * The origin (0,0) is the top-left corner of the Blockly svg.
- * @param {!Event} e Mouse event.
- * @param {!Element} svg SVG element.
- * @return {!Object} Object with .x and .y properties.
- */
-Blockly.mouseToSvg = function(e, svg) {
-  var svgPoint = svg.createSVGPoint();
-  svgPoint.x = e.clientX;
-  svgPoint.y = e.clientY;
-  var matrix = svg.getScreenCTM();
-  matrix = matrix.inverse();
-  return svgPoint.matrixTransform(matrix);
-};
+  // If nothing is highlighted, start from the selected index.  If nothing is
+  // selected either, highlightedIndex is -1.
+  var highlightedIndex = this.highlightedIndex_ < 0 ? this.getSelectedIndex() :
+                                                      this.highlightedIndex_;
 
-/**
- * Given an array of strings, return the length of the shortest one.
- * @param {!Array.<string>} array Array of strings.
- * @return {number} Length of shortest string.
- */
-Blockly.shortestStringLength = function(array) {
-  if (!array.length) {
-    return 0;
-  }
-  var len = array[0].length;
-  for (var i = 1; i < array.length; i++) {
-    len = Math.min(len, array[i].length);
-  }
-  return len;
-};
-
-/**
- * Given an array of strings, return the length of the common prefix.
- * Words may not be split.  Any space after a word is included in the length.
- * @param {!Array.<string>} array Array of strings.
- * @param {number=} opt_shortest Length of shortest string.
- * @return {number} Length of common prefix.
- */
-Blockly.commonWordPrefix = function(array, opt_shortest) {
-  if (!array.length) {
-    return 0;
-  } else if (array.length == 1) {
-    return array[0].length;
-  }
-  var wordPrefix = 0;
-  var max = opt_shortest || Blockly.shortestStringLength(array);
-  for (var len = 0; len < max; len++) {
-    var letter = array[0][len];
-    for (var i = 1; i < array.length; i++) {
-      if (letter != array[i][len]) {
-        return wordPrefix;
+  switch (e.keyCode) {
+    case goog.events.KeyCodes.LEFT:
+      // If the highlighted index is uninitialized, or is at the beginning, move
+      // it to the end.
+      if (highlightedIndex == -1 || highlightedIndex == 0) {
+        highlightedIndex = numItems;
       }
-    }
-    if (letter == ' ') {
-      wordPrefix = len + 1;
-    }
-  }
-  for (var i = 1; i < array.length; i++) {
-    var letter = array[i][len];
-    if (letter && letter != ' ') {
-      return wordPrefix;
-    }
-  }
-  return max;
-};
+      this.setHighlightedIndex(highlightedIndex - 1);
+      e.preventDefault();
+      return true;
+      break;
 
-/**
- * Given an array of strings, return the length of the common suffix.
- * Words may not be split.  Any space after a word is included in the length.
- * @param {!Array.<string>} array Array of strings.
- * @param {number=} opt_shortest Length of shortest string.
- * @return {number} Length of common suffix.
- */
-Blockly.commonWordSuffix = function(array, opt_shortest) {
-  if (!array.length) {
-    return 0;
-  } else if (array.length == 1) {
-    return array[0].length;
-  }
-  var wordPrefix = 0;
-  var max = opt_shortest || Blockly.shortestStringLength(array);
-  for (var len = 0; len < max; len++) {
-    var letter = array[0].substr(-len - 1, 1);
-    for (var i = 1; i < array.length; i++) {
-      if (letter != array[i].substr(-len - 1, 1)) {
-        return wordPrefix;
+    case goog.events.KeyCodes.RIGHT:
+      // If the highlighted index at the end, move it to the beginning.
+      if (highlightedIndex == numItems - 1) {
+        highlightedIndex = -1;
       }
-    }
-    if (letter == ' ') {
-      wordPrefix = len + 1;
-    }
-  }
-  for (var i = 1; i < array.length; i++) {
-    var letter = array[i].charAt(array[i].length - len - 1);
-    if (letter && letter != ' ') {
-      return wordPrefix;
-    }
-  }
-  return max;
-};
+      this.setHighlightedIndex(highlightedIndex + 1);
+      e.preventDefault();
+      return true;
+      break;
 
-/**
- * Is the given string a number (includes negative and decimals).
- * @param {string} str Input string.
- * @return {boolean} True if number, false otherwise.
- */
-Blockly.isNumber = function(str) {
-  return !!str.match(/^\s*-?\d+(\.\d+)?\s*$/);
-};
-
-/**
- * Parse a string with any number of interpolation tokens (%1, %2, ...).
- * '%' characters may be self-escaped (%%).
- * @param {string} message Text containing interpolation tokens.
- * @return {!Array.<string|number>} Array of strings and numbers.
- */
-Blockly.tokenizeInterpolation = function(message) {
-  var tokens = [];
-  var chars = message.split('');
-  chars.push('');  // End marker.
-  // Parse the message with a finite state machine.
-  // 0 - Base case.
-  // 1 - % found.
-  // 2 - Digit found.
-  var state = 0;
-  var buffer = [];
-  var number = null;
-  for (var i = 0; i < chars.length; i++) {
-    var c = chars[i];
-    if (state == 0) {
-      if (c == '%') {
-        state = 1;  // Start escape.
-      } else {
-        buffer.push(c);  // Regular char.
+    case goog.events.KeyCodes.UP:
+      if (highlightedIndex == -1) {
+        highlightedIndex = numItems + numColumns - 1;
       }
-    } else if (state == 1) {
-      if (c == '%') {
-        buffer.push(c);  // Escaped %: %%
-        state = 0;
-      } else if ('0' <= c && c <= '9') {
-        state = 2;
-        number = c;
-        var text = buffer.join('');
-        if (text) {
-          tokens.push(text);
-        }
-        buffer.length = 0;
-      } else {
-        buffer.push('%', c);  // Not an escape: %a
-        state = 0;
+      if (highlightedIndex >= numColumns) {
+        this.setHighlightedIndex(highlightedIndex - numColumns);
+        e.preventDefault();
+        return true;
       }
-    } else if (state == 2) {
-      if ('0' <= c && c <= '9') {
-        number += c;  // Multi-digit number.
-      } else {
-        tokens.push(parseInt(number, 10));
-        i--;  // Parse this char again.
-        state = 0;
+      break;
+
+    case goog.events.KeyCodes.DOWN:
+      if (highlightedIndex == -1) {
+        highlightedIndex = -numColumns;
       }
-    }
+      if (highlightedIndex < numItems - numColumns) {
+        this.setHighlightedIndex(highlightedIndex + numColumns);
+        e.preventDefault();
+        return true;
+      }
+      break;
   }
-  var text = buffer.join('');
-  if (text) {
-    tokens.push(text);
-  }
-  return tokens;
+
+  return false;
 };
 
+
 /**
- * Generate a unique ID.  This should be globally unique.
- * 87 characters ^ 20 length > 128 bits (better than a UUID).
- * @return {string} A globally unique ID string.
+ * Handles selection change events dispatched by the selection model.
+ * @param {goog.events.Event} e Selection event to handle.
  */
-Blockly.genUid = function() {
-  var length = 20;
-  var soupLength = Blockly.genUid.soup_.length;
-  var id = [];
-  for (var i = 0; i < length; i++) {
-    id[i] = Blockly.genUid.soup_.charAt(Math.random() * soupLength);
-  }
-  return id.join('');
+goog.ui.Palette.prototype.handleSelectionChange = function(e) {
+  // No-op in the base class.
 };
 
+
+// Palette management.
+
+
 /**
- * Legal characters for the unique ID.
- * Should be all on a US keyboard.  No XML special characters or control codes.
- * Removed $ due to issue 251.
+ * Returns the size of the palette grid.
+ * @return {goog.math.Size} Palette size (columns x rows).
+ */
+goog.ui.Palette.prototype.getSize = function() {
+  return this.size_;
+};
+
+
+/**
+ * Sets the size of the palette grid to the given size.  Callers can either
+ * pass a single {@link goog.math.Size} or a pair of numbers (first the number
+ * of columns, then the number of rows) to this method.  In both cases, the
+ * number of rows is optional and will be calculated automatically if needed.
+ * It is an error to attempt to change the size of the palette after it has
+ * been rendered.
+ * @param {goog.math.Size|number} size Either a size object or the number of
+ *     columns.
+ * @param {number=} opt_rows The number of rows (optional).
+ */
+goog.ui.Palette.prototype.setSize = function(size, opt_rows) {
+  if (this.getElement()) {
+    throw Error(goog.ui.Component.Error.ALREADY_RENDERED);
+  }
+
+  this.size_ = goog.isNumber(size) ?
+      new goog.math.Size(size, /** @type {number} */ (opt_rows)) :
+      size;
+
+  // Adjust size, if needed.
+  this.adjustSize_();
+};
+
+
+/**
+ * Returns the 0-based index of the currently highlighted palette item, or -1
+ * if no item is highlighted.
+ * @return {number} Index of the highlighted item (-1 if none).
+ */
+goog.ui.Palette.prototype.getHighlightedIndex = function() {
+  return this.highlightedIndex_;
+};
+
+
+/**
+ * Returns the currently highlighted palette item, or null if no item is
+ * highlighted.
+ * @return {Node} The highlighted item (undefined if none).
+ */
+goog.ui.Palette.prototype.getHighlightedItem = function() {
+  var items = this.getContent();
+  return items && items[this.highlightedIndex_];
+};
+
+
+/**
+ * @return {Element} The highlighted cell.
  * @private
  */
-Blockly.genUid.soup_ = '!#%()*+,-./:;=?@[]^_`{|}~' +
-    'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+goog.ui.Palette.prototype.getHighlightedCellElement_ = function() {
+  return this.getRenderer().getCellForItem(this.getHighlightedItem());
+};
+
 
 /**
- * Local prompt function created to allow blockly developers to overwrite it
- * with a customised version. This version uses the default window.prompt
- * functionality, but it has been designed to be easily replaced by an 
- * asynchronous HTML based prompt.
- * @param {string} message Main text message for the window prompt.
- * @param {string=} opt_defaultInput Input string to be displayed by default.
- * @param {function=} opt_callback Optional function callback to process the
- *     user input.
- * @return {undefined|null|string} If no callback is provided it returns the
- *     value directly from window.prompt (null or string), otherwise it
- *     returns undefined.
+ * Highlights the item at the given 0-based index, or removes the highlight
+ * if the argument is -1 or out of range.  Any previously-highlighted item
+ * will be un-highlighted.
+ * @param {number} index 0-based index of the item to highlight.
  */
-Blockly.prompt = function(message, opt_defaultInput, opt_callback) {
-  if (opt_callback === undefined) {
-    // If no callback provided to revert back to the normal blockly prompt
-    return window.prompt(message, opt_defaultInput);
-  } else {
-    // window.prompt still a blocking function, but returns value via callback
-    if (typeof opt_callback == 'function') {
-      opt_callback(window.prompt(message, opt_defaultInput));
-    } else {
-      console.log('Blocky prompt callback needs to be a callable function.');
+goog.ui.Palette.prototype.setHighlightedIndex = function(index) {
+  if (index != this.highlightedIndex_) {
+    this.highlightIndex_(this.highlightedIndex_, false);
+    this.lastHighlightedIndex_ = this.highlightedIndex_;
+    this.highlightedIndex_ = index;
+    this.highlightIndex_(index, true);
+    this.dispatchEvent(goog.ui.Palette.EventType.AFTER_HIGHLIGHT);
+  }
+};
+
+
+/**
+ * Highlights the given item, or removes the highlight if the argument is null
+ * or invalid.  Any previously-highlighted item will be un-highlighted.
+ * @param {Node|undefined} item Item to highlight.
+ */
+goog.ui.Palette.prototype.setHighlightedItem = function(item) {
+  var items = /** @type {Array<Node>} */ (this.getContent());
+  this.setHighlightedIndex(
+      (items && item) ? goog.array.indexOf(items, item) : -1);
+};
+
+
+/**
+ * Returns the 0-based index of the currently selected palette item, or -1
+ * if no item is selected.
+ * @return {number} Index of the selected item (-1 if none).
+ */
+goog.ui.Palette.prototype.getSelectedIndex = function() {
+  return this.selectionModel_ ? this.selectionModel_.getSelectedIndex() : -1;
+};
+
+
+/**
+ * Returns the currently selected palette item, or null if no item is selected.
+ * @return {Node} The selected item (null if none).
+ */
+goog.ui.Palette.prototype.getSelectedItem = function() {
+  return this.selectionModel_ ?
+      /** @type {Node} */ (this.selectionModel_.getSelectedItem()) :
+                          null;
+};
+
+
+/**
+ * Selects the item at the given 0-based index, or clears the selection
+ * if the argument is -1 or out of range.  Any previously-selected item
+ * will be deselected.
+ * @param {number} index 0-based index of the item to select.
+ */
+goog.ui.Palette.prototype.setSelectedIndex = function(index) {
+  if (this.selectionModel_) {
+    this.selectionModel_.setSelectedIndex(index);
+  }
+};
+
+
+/**
+ * Selects the given item, or clears the selection if the argument is null or
+ * invalid.  Any previously-selected item will be deselected.
+ * @param {Node} item Item to select.
+ */
+goog.ui.Palette.prototype.setSelectedItem = function(item) {
+  if (this.selectionModel_) {
+    this.selectionModel_.setSelectedItem(item);
+  }
+};
+
+
+/**
+ * Private helper; highlights or un-highlights the item at the given index
+ * based on the value of the Boolean argument.  This implementation simply
+ * applies highlight styling to the cell containing the item to be highighted.
+ * Does nothing if the palette hasn't been rendered yet.
+ * @param {number} index 0-based index of item to highlight or un-highlight.
+ * @param {boolean} highlight If true, the item is highlighted; otherwise it
+ *     is un-highlighted.
+ * @private
+ */
+goog.ui.Palette.prototype.highlightIndex_ = function(index, highlight) {
+  if (this.getElement()) {
+    var items = this.getContent();
+    if (items && index >= 0 && index < items.length) {
+      var cellEl = this.getHighlightedCellElement_();
+      if (this.currentCellControl_.getElement() != cellEl) {
+        this.currentCellControl_.setElementInternal(cellEl);
+      }
+      if (this.currentCellControl_.tryHighlight(highlight)) {
+        this.getRenderer().highlightCell(this, items[index], highlight);
+      }
     }
   }
-  return undefined;
+};
+
+
+/** @override */
+goog.ui.Palette.prototype.setHighlighted = function(highlight) {
+  if (highlight && this.highlightedIndex_ == -1) {
+    // If there was a last highlighted index, use that. Otherwise, highlight the
+    // first cell.
+    this.setHighlightedIndex(
+        this.lastHighlightedIndex_ > -1 ? this.lastHighlightedIndex_ : 0);
+  } else if (!highlight) {
+    this.setHighlightedIndex(-1);
+  }
+  // The highlight event should be fired once the component has updated its own
+  // state.
+  goog.ui.Palette.base(this, 'setHighlighted', highlight);
+};
+
+
+/**
+ * Private helper; selects or deselects the given item based on the value of
+ * the Boolean argument.  This implementation simply applies selection styling
+ * to the cell containing the item to be selected.  Does nothing if the palette
+ * hasn't been rendered yet.
+ * @param {Node} item Item to select or deselect.
+ * @param {boolean} select If true, the item is selected; otherwise it is
+ *     deselected.
+ * @private
+ */
+goog.ui.Palette.prototype.selectItem_ = function(item, select) {
+  if (this.getElement()) {
+    this.getRenderer().selectCell(this, item, select);
+  }
+};
+
+
+/**
+ * Calculates and updates the size of the palette based on any preset values
+ * and the number of palette items.  If there is no preset size, sets the
+ * palette size to the smallest square big enough to contain all items.  If
+ * there is a preset number of columns, increases the number of rows to hold
+ * all items if needed.  (If there are too many rows, does nothing.)
+ * @private
+ */
+goog.ui.Palette.prototype.adjustSize_ = function() {
+  var items = this.getContent();
+  if (items) {
+    if (this.size_ && this.size_.width) {
+      // There is already a size set; honor the number of columns (if >0), but
+      // increase the number of rows if needed.
+      var minRows = Math.ceil(items.length / this.size_.width);
+      if (!goog.isNumber(this.size_.height) || this.size_.height < minRows) {
+        this.size_.height = minRows;
+      }
+    } else {
+      // No size has been set; size the grid to the smallest square big enough
+      // to hold all items (hey, why not?).
+      var length = Math.ceil(Math.sqrt(items.length));
+      this.size_ = new goog.math.Size(length, length);
+    }
+  } else {
+    // No items; set size to 0x0.
+    this.size_ = new goog.math.Size(0, 0);
+  }
+};
+
+
+
+/**
+ * A component to represent the currently highlighted cell.
+ * @constructor
+ * @extends {goog.ui.Control}
+ * @private
+ */
+goog.ui.Palette.CurrentCell_ = function() {
+  goog.ui.Palette.CurrentCell_.base(this, 'constructor', null);
+  this.setDispatchTransitionEvents(goog.ui.Component.State.HOVER, true);
+};
+goog.inherits(goog.ui.Palette.CurrentCell_, goog.ui.Control);
+
+
+/**
+ * @param {boolean} highlight Whether to highlight or unhighlight the component.
+ * @return {boolean} Whether it was successful.
+ */
+goog.ui.Palette.CurrentCell_.prototype.tryHighlight = function(highlight) {
+  this.setHighlighted(highlight);
+  return this.isHighlighted() == highlight;
 };
