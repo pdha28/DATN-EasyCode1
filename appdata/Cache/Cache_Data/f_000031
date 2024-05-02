@@ -1,766 +1,543 @@
 /**
- * @license
- * Visual Blocks Editor
+ * @license Licensed under the Apache License, Version 2.0 (the "License"):
+ *          http://www.apache.org/licenses/LICENSE-2.0
  *
- * Copyright 2013 Google Inc.
- * https://developers.google.com/blockly/
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *   http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
-
-/**
- * @fileoverview Inject Blockly's CSS synchronously.
- * @author fraser@google.com (Neil Fraser)
+ * @fileoverview JavaScript to configure front end design for Ardublockly app.
  */
 'use strict';
 
-goog.provide('Blockly.Css');
-
-
-/**
- * List of cursors.
- * @enum {string}
- */
-Blockly.Css.Cursor = {
-  OPEN: 'handopen',
-  CLOSED: 'handclosed',
-  DELETE: 'handdelete'
+/** Create a namespace for the application. */
+var Ardublockly = Ardublockly || {};
+/** Initialises all the design related JavaScript. */
+Ardublockly.designJsInit = function() {
+  Ardublockly.materializeJsInit();
+  Ardublockly.resizeToggleToolboxBotton();
+  Ardublockly.sketchNameSizeEffect();
+  Ardublockly.sketchNameSet();
+  Ardublockly.showExtraIdeButtons(true);
 };
 
 /**
- * Current cursor (cached value).
- * @type {string}
- * @private
+ * Initialises all required components from materialize framework.
+ * The be executed on document ready.
  */
-Blockly.Css.currentCursor_ = '';
+Ardublockly.hideCode=function(){
+  var block = document.querySelector('#block_content');
+  block.classList.remove('l8');
+  block.classList.add('l12');
+  $('#arduino_content').hide();
+  Ardublockly.resizeToggleToolboxBotton();
+}
 
-/**
- * Large stylesheet added by Blockly.Css.inject.
- * @type {Element}
- * @private
- */
-Blockly.Css.styleSheet_ = null;
+Ardublockly.showCode=function(){
+  var block = document.querySelector('#block_content');
+  block.classList.remove('l12');
+  block.classList.add('l8');
+  $('#arduino_content').show();
+  Ardublockly.resizeToggleToolboxBotton();
+}
 
-/**
- * Path to media directory, with any trailing slash removed.
- * @type {string}
- * @private
- */
-Blockly.Css.mediaPath_ = '';
+Ardublockly.materializeJsInit = function() {
+  // Navigation bar
+  $('.button-collapse').sideNav({
+      menuWidth: 240,
+      activationWidth: 70,
+      edge: 'left'
+  });
+  // Drop down menus
+  $('.dropdown-button').dropdown({hover: false});
+  // Overlay content panels using modals (android dialogs)
+  $('.modal-trigger').leanModal({
+      dismissible: true,
+      opacity: .5,
+      in_duration: 200,
+      out_duration: 250
+   });
+  // Pop-up tool tips
+  $('.tooltipped').tooltip({'delay': 50});
+  // Select menus
+  $('select').material_select();
+};
 
-/**
- * Inject the CSS into the DOM.  This is preferable over using a regular CSS
- * file since:
- * a) It loads synchronously and doesn't force a redraw later.
- * b) It speeds up loading by not blocking on a separate HTTP transfer.
- * c) The CSS content may be made dynamic depending on init options.
- * @param {boolean} hasCss If false, don't inject CSS
- *     (providing CSS becomes the document's responsibility).
- * @param {string} pathToMedia Path from page to the Blockly media directory.
- */
-Blockly.Css.inject = function(hasCss, pathToMedia) {
-  // Only inject the CSS once.
-  if (Blockly.Css.styleSheet_) {
-    return;
-  }
-  // Placeholder for cursor rule.  Must be first rule (index 0).
-  var text = '.blocklyDraggable {}\n';
-  if (hasCss) {
-    text += Blockly.Css.CONTENT.join('\n');
-    if (Blockly.FieldDate) {
-      text += Blockly.FieldDate.CSS.join('\n');
-    }
-  }
-  // Strip off any trailing slash (either Unix or Windows).
-  Blockly.Css.mediaPath_ = pathToMedia.replace(/[\\\/]$/, '');
-  text = text.replace(/<<<PATH>>>/g, Blockly.Css.mediaPath_);
-  // Inject CSS tag.
-  var cssNode = document.createElement('style');
-  document.head.appendChild(cssNode);
-  var cssTextNode = document.createTextNode(text);
-  cssNode.appendChild(cssTextNode);
-  Blockly.Css.styleSheet_ = cssNode.sheet;
-  Blockly.Css.setCursor(Blockly.Css.Cursor.OPEN);
+/** Binds the event listeners relevant to the page design. */
+Ardublockly.bindDesignEventListeners = function() {
+  // Resize blockly workspace on window resize
+  window.addEventListener(
+      'resize', Ardublockly.resizeBlocklyWorkspace, false);
+  // Display/hide the XML load button when the XML collapsible header is clicked
+  document.getElementById('xml_collapsible_header').addEventListener(
+      'click', Ardublockly.buttonLoadXmlCodeDisplay);
+  // Toggle the content height on click to the IDE output collapsible header
+  document.getElementById('ide_output_collapsible_header').addEventListener(
+      'click', function() {
+        Ardublockly.contentHeightToggle();
+      });
+  // Display/hide the additional IDE buttons when mouse over/out of play button
+  // $('#button_ide_large').mouseenter(function() {
+  //     Ardublockly.showExtraIdeButtons(true);
+  // });
+  // $('#ide_buttons_wrapper').mouseleave(function() {
+  //     Ardublockly.showExtraIdeButtons(false);
+  // });
 };
 
 /**
- * Set the cursor to be displayed when over something draggable.
- * @param {Blockly.Css.Cursor} cursor Enum.
+ * Displays or hides the 'load textarea xml' button based on the state of the
+ * collapsible 'xml_collapsible_body'.
  */
-Blockly.Css.setCursor = function(cursor) {
-  if (Blockly.Css.currentCursor_ == cursor) {
-    return;
-  }
-  Blockly.Css.currentCursor_ = cursor;
-  var url = 'url(' + Blockly.Css.mediaPath_ + '/' + cursor + '.cur), auto';
-  // There are potentially hundreds of draggable objects.  Changing their style
-  // properties individually is too slow, so change the CSS rule instead.
-  var rule = '.blocklyDraggable {\n  cursor: ' + url + ';\n}\n';
-  Blockly.Css.styleSheet_.deleteRule(0);
-  Blockly.Css.styleSheet_.insertRule(rule, 0);
-  // There is probably only one toolbox, so just change its style property.
-  var toolboxen = document.getElementsByClassName('blocklyToolboxDiv');
-  for (var i = 0, toolbox; toolbox = toolboxen[i]; i++) {
-    if (cursor == Blockly.Css.Cursor.DELETE) {
-      toolbox.style.cursor = url;
+Ardublockly.buttonLoadXmlCodeDisplay = function() {
+  var xmlCollapsibleBody = document.getElementById('xml_collapsible_body');
+  // Waiting 400 ms to check status due to the animation delay (300 ms)
+  setTimeout(function() {
+    if (xmlCollapsibleBody.style.display == 'none') {
+      $('#button_load_xml').hide();
     } else {
-      toolbox.style.cursor = '';
+      $('#button_load_xml').fadeIn('slow');
     }
-  }
-  // Set cursor on the whole document, so that rapid movements
-  // don't result in cursor changing to an arrow momentarily.
-  var html = document.body.parentNode;
-  if (cursor == Blockly.Css.Cursor.OPEN) {
-    html.style.cursor = '';
-  } else {
-    html.style.cursor = url;
+  }, 400);
+};
+
+/**
+ * Changes the IDE launch buttons based on the option indicated in the argument.
+ * @param {!string} value One of the 3 possible values from the drop down select
+ *     in the settings modal: 'upload', 'verify', or 'open'.
+ */
+Ardublockly.changeIdeButtonsDesign = function(value) {
+  var buttonLeft = document.getElementById('button_ide_left');
+  var iconLeft = document.getElementById('button_ide_left_icon');
+  var buttonMiddle = document.getElementById('button_ide_middle');
+  var iconMiddle = document.getElementById('button_ide_middle_icon');
+  var buttonLarge = document.getElementById('button_ide_large');
+  var iconLarge = document.getElementById('button_ide_large_icon');
+
+  if (value === 'upload') {
+    buttonLeft.className =
+        buttonLeft.className.replace(/arduino_\S+/, 'arduino_yellow');
+    iconLeft.className = 'mdi-action-open-in-browser';
+    buttonMiddle.className =
+        buttonMiddle.className.replace(/arduino_\S+/, 'arduino_teal');
+    iconMiddle.className = 'mdi-navigation-check';
+    buttonLarge.className =
+        buttonLarge.className.replace(/arduino_\S+/, 'arduino_orange');
+    iconLarge.className = 'mdi-av-play-arrow';
+  } else if (value === 'verify') {
+    buttonLeft.className =
+        buttonLeft.className.replace(/arduino_\S+/, 'arduino_yellow');
+    iconLeft.className = 'mdi-action-open-in-browser';
+    buttonMiddle.className =
+        buttonMiddle.className.replace(/arduino_\S+/, 'arduino_orange');
+    iconMiddle.className = 'mdi-av-play-arrow';
+    buttonLarge.className =
+        buttonLarge.className.replace(/arduino_\S+/, 'arduino_teal');
+    iconLarge.className = 'mdi-navigation-check';
+  } else if (value === 'open') {
+    buttonLeft.className =
+        buttonLeft.className.replace(/arduino_\S+/, 'arduino_teal');
+    iconLeft.className = 'mdi-navigation-check';
+    buttonMiddle.className =
+        buttonMiddle.className.replace(/arduino_\S+/, 'arduino_orange');
+    iconMiddle.className = 'mdi-av-play-arrow';
+    buttonLarge.className =
+        buttonLarge.className.replace(/arduino_\S+/, 'arduino_yellow');
+    iconLarge.className = 'mdi-action-open-in-browser';
   }
 };
 
 /**
- * Array making up the CSS content for Blockly.
+ * Displays or hides the additional Arduino IDE action buttons.
+ * Hide/display effects done with CCS3 transitions on visibility and opacity.
+ * @param {!boolean} show Indicates if the extra buttons are to be shown.
  */
-Blockly.Css.CONTENT = [
-  '.blocklySvg {',
-    'background-color: #fff;',
-    'outline: none;',
-    'overflow: hidden;',  /* IE overflows by default. */
-  '}',
-
-  '.blocklyWidgetDiv {',
-    'display: none;',
-    'position: absolute;',
-    'z-index: 999;',
-  '}',
-
-  '.blocklyTooltipDiv {',
-    'background-color: #ffffc7;',
-    'border: 1px solid #ddc;',
-    'box-shadow: 4px 4px 20px 1px rgba(0,0,0,.15);',
-    'color: #000;',
-    'display: none;',
-    'font-family: sans-serif;',
-    'font-size: 9pt;',
-    'opacity: 0.9;',
-    'padding: 2px;',
-    'position: absolute;',
-    'z-index: 1000;',
-  '}',
-
-  '.blocklyResizeSE {',
-    'cursor: se-resize;',
-    'fill: #aaa;',
-  '}',
-
-  '.blocklyResizeSW {',
-    'cursor: sw-resize;',
-    'fill: #aaa;',
-  '}',
-
-  '.blocklyResizeLine {',
-    'stroke: #888;',
-    'stroke-width: 1;',
-  '}',
-
-  '.blocklyHighlightedConnectionPath {',
-    'fill: none;',
-    'stroke: #fc3;',
-    'stroke-width: 4px;',
-  '}',
-
-  '.blocklyPathLight {',
-    'fill: none;',
-    'stroke-linecap: round;',
-    'stroke-width: 1;',
-  '}',
-
-  '.blocklySelected>.blocklyPath {',
-    'stroke: #fc3;',
-    'stroke-width: 3px;',
-  '}',
-
-  '.blocklySelected>.blocklyPathLight {',
-    'display: none;',
-  '}',
-
-  '.blocklyDragging>.blocklyPath,',
-  '.blocklyDragging>.blocklyPathLight {',
-    'fill-opacity: .8;',
-    'stroke-opacity: .8;',
-  '}',
-
-  '.blocklyDragging>.blocklyPathDark {',
-    'display: none;',
-  '}',
-
-  '.blocklyDisabled>.blocklyPath {',
-    'fill-opacity: .5;',
-    'stroke-opacity: .5;',
-  '}',
-
-  '.blocklyDisabled>.blocklyPathLight,',
-  '.blocklyDisabled>.blocklyPathDark {',
-    'display: none;',
-  '}',
-
-  '.blocklyText {',
-    'cursor: default;',
-    'fill: #fff;',
-    'font-family: sans-serif;',
-    'font-size: 11pt;',
-  '}',
-
-  '.blocklyNonEditableText>text {',
-    'pointer-events: none;',
-  '}',
-
-  '.blocklyNonEditableText>rect,',
-  '.blocklyEditableText>rect {',
-    'fill: #fff;',
-    'fill-opacity: .6;',
-  '}',
-
-  '.blocklyNonEditableText>text,',
-  '.blocklyEditableText>text {',
-    'fill: #000;',
-  '}',
-
-  '.blocklyEditableText:hover>rect {',
-    'stroke: #fff;',
-    'stroke-width: 2;',
-  '}',
-
-  '.blocklyBubbleText {',
-    'fill: #000;',
-  '}',
-
-  /*
-    Don't allow users to select text.  It gets annoying when trying to
-    drag a block and selected text moves instead.
-  */
-  '.blocklySvg text {',
-    'user-select: none;',
-    '-moz-user-select: none;',
-    '-webkit-user-select: none;',
-    'cursor: inherit;',
-  '}',
-
-  '.blocklyHidden {',
-    'display: none;',
-  '}',
-
-  '.blocklyFieldDropdown:not(.blocklyHidden) {',
-    'display: block;',
-  '}',
-
-  '.blocklyIconGroup {',
-    'cursor: default;',
-  '}',
-
-  '.blocklyIconGroup:not(:hover),',
-  '.blocklyIconGroupReadonly {',
-    'opacity: .6;',
-  '}',
-
-  '.blocklyIconShape {',
-    'fill: #00f;',
-    'stroke: #fff;',
-    'stroke-width: 1px;',
-  '}',
-
-  '.blocklyIconSymbol {',
-    'fill: #fff;',
-  '}',
-
-  '.blocklyMinimalBody {',
-    'margin: 0;',
-    'padding: 0;',
-  '}',
-
-  '.blocklyCommentTextarea {',
-    'background-color: #ffc;',
-    'border: 0;',
-    'margin: 0;',
-    'padding: 2px;',
-    'resize: none;',
-  '}',
-
-  '.blocklyHtmlInput {',
-    'border: none;',
-    'border-radius: 4px;',
-    'font-family: sans-serif;',
-    'height: 100%;',
-    'margin: 0;',
-    'outline: none;',
-    'padding: 0 1px;',
-    'width: 100%',
-  '}',
-
-  '.blocklyMainBackground {',
-    'stroke-width: 1;',
-    'stroke: #c6c6c6;',  /* Equates to #ddd due to border being off-pixel. */
-  '}',
-
-  '.blocklyMutatorBackground {',
-    'fill: #fff;',
-    'stroke: #ddd;',
-    'stroke-width: 1;',
-  '}',
-
-  '.blocklyFlyoutBackground {',
-    'fill: #ddd;',
-    'fill-opacity: .8;',
-  '}',
-
-  '.blocklyScrollbarBackground {',
-    'opacity: 0;',
-  '}',
-
-  '.blocklyScrollbarKnob {',
-    'fill: #ccc;',
-  '}',
-
-  '.blocklyScrollbarBackground:hover+.blocklyScrollbarKnob,',
-  '.blocklyScrollbarKnob:hover {',
-    'fill: #bbb;',
-  '}',
-
-  '.blocklyZoom>image {',
-    'opacity: .4;',
-  '}',
-
-  '.blocklyZoom>image:hover {',
-    'opacity: .6;',
-  '}',
-
-  '.blocklyZoom>image:active {',
-    'opacity: .8;',
-  '}',
-
-  /* Darken flyout scrollbars due to being on a grey background. */
-  /* By contrast, workspace scrollbars are on a white background. */
-  '.blocklyFlyout .blocklyScrollbarKnob {',
-    'fill: #bbb;',
-  '}',
-
-  '.blocklyFlyout .blocklyScrollbarBackground:hover+.blocklyScrollbarKnob,',
-  '.blocklyFlyout .blocklyScrollbarKnob:hover {',
-    'fill: #aaa;',
-  '}',
-
-  '.blocklyInvalidInput {',
-    'background: #faa;',
-  '}',
-
-  '.blocklyAngleCircle {',
-    'stroke: #444;',
-    'stroke-width: 1;',
-    'fill: #ddd;',
-    'fill-opacity: .8;',
-  '}',
-
-  '.blocklyAngleMarks {',
-    'stroke: #444;',
-    'stroke-width: 1;',
-  '}',
-
-  '.blocklyAngleGauge {',
-    'fill: #f88;',
-    'fill-opacity: .8;',
-  '}',
-
-  '.blocklyAngleLine {',
-    'stroke: #f00;',
-    'stroke-width: 2;',
-    'stroke-linecap: round;',
-  '}',
-
-  '.blocklyContextMenu {',
-    'border-radius: 4px;',
-  '}',
-
-  '.blocklyDropdownMenu {',
-    'padding: 0 !important;',
-  '}',
-
-  /* Override the default Closure URL. */
-  '.blocklyWidgetDiv .goog-option-selected .goog-menuitem-checkbox,',
-  '.blocklyWidgetDiv .goog-option-selected .goog-menuitem-icon {',
-    'background: url(<<<PATH>>>/sprites.png) no-repeat -48px -16px !important;',
-  '}',
-
-  /* Category tree in Toolbox. */
-  '.blocklyToolboxDiv {',
-    'background-color: #ddd;',
-    'overflow-x: visible;',
-    'overflow-y: auto;',
-    'position: absolute;',
-  '}',
-
-  '.blocklyTreeRoot {',
-    'padding: 4px 0;',
-  '}',
-
-  '.blocklyTreeRoot:focus {',
-    'outline: none;',
-  '}',
-
-  '.blocklyTreeRow {',
-    'height: 22px;',
-    'line-height: 22px;',
-    'margin-bottom: 3px;',
-    'padding-right: 8px;',
-    'white-space: nowrap;',
-  '}',
-
-  '.blocklyHorizontalTree {',
-    'float: left;',
-    'margin: 1px 5px 8px 0;',
-  '}',
-
-  '.blocklyHorizontalTreeRtl {',
-    'float: right;',
-    'margin: 1px 0 8px 5px;',
-  '}',
-
-  '.blocklyToolboxDiv[dir="RTL"] .blocklyTreeRow {',
-    'margin-left: 8px;',
-  '}',
-
-  '.blocklyTreeRow:not(.blocklyTreeSelected):hover {',
-    'background-color: #e4e4e4;',
-  '}',
-
-  '.blocklyTreeSeparator {',
-    'border-bottom: solid #e5e5e5 1px;',
-    'height: 0;',
-    'margin: 5px 0;',
-  '}',
-
-  '.blocklyTreeSeparatorGroup {',
-  'border-bottom: solid yellow 5px;',
-  'height: 0;',
-  'margin: 5px 0;',
-  '}',
-
-  '.blocklyTreeSeparatorHorizontal {',
-    'border-right: solid #e5e5e5 1px;',
-    'width: 0;',
-    'padding: 5px 0;',
-    'margin: 0 5px;',
-  '}',
-
-
-  '.blocklyTreeIcon {',
-    'background-image: url(<<<PATH>>>/sprites.png);',
-    'height: 16px;',
-    'vertical-align: middle;',
-    'width: 16px;',
-  '}',
-
-  '.blocklyTreeIconClosedLtr {',
-    'background-position: -32px -1px;',
-  '}',
-
-  '.blocklyTreeIconClosedRtl {',
-    'background-position: 0px -1px;',
-  '}',
-
-  '.blocklyTreeIconOpen {',
-    'background-position: -16px -1px;',
-  '}',
-
-  '.blocklyTreeSelected>.blocklyTreeIconClosedLtr {',
-    'background-position: -32px -17px;',
-  '}',
-
-  '.blocklyTreeSelected>.blocklyTreeIconClosedRtl {',
-    'background-position: 0px -17px;',
-  '}',
-
-  '.blocklyTreeSelected>.blocklyTreeIconOpen {',
-    'background-position: -16px -17px;',
-  '}',
-
-  '.blocklyTreeIconNone,',
-  '.blocklyTreeSelected>.blocklyTreeIconNone {',
-    'background-position: -48px -1px;',
-  '}',
-
-  '.blocklyTreeLabel {',
-    'cursor: default;',
-    'font-family: sans-serif;',
-    'font-size: 16px;',
-    'padding: 0 3px;',
-    'vertical-align: middle;',
-  '}',
-
-  '.blocklyTreeSelected .blocklyTreeLabel {',
-    'color: #fff;',
-  '}',
-
-  /* Copied from: goog/css/colorpicker-simplegrid.css */
-  /*
-   * Copyright 2007 The Closure Library Authors. All Rights Reserved.
-   *
-   * Use of this source code is governed by the Apache License, Version 2.0.
-   * See the COPYING file for details.
-   */
-
-  /* Author: pupius@google.com (Daniel Pupius) */
-
-  /*
-    Styles to make the colorpicker look like the old gmail color picker
-    NOTE: without CSS scoping this will override styles defined in palette.css
-  */
-  '.blocklyWidgetDiv .goog-palette {',
-    'outline: none;',
-    'cursor: default;',
-  '}',
-
-  '.blocklyWidgetDiv .goog-palette-table {',
-    'border: 1px solid #666;',
-    'border-collapse: collapse;',
-  '}',
-
-  '.blocklyWidgetDiv .goog-palette-cell {',
-    'height: 13px;',
-    'width: 15px;',
-    'margin: 0;',
-    'border: 0;',
-    'text-align: center;',
-    'vertical-align: middle;',
-    'border-right: 1px solid #666;',
-    'font-size: 1px;',
-  '}',
-
-  '.blocklyWidgetDiv .goog-palette-colorswatch {',
-    'position: relative;',
-    'height: 13px;',
-    'width: 15px;',
-    'border: 1px solid #666;',
-  '}',
-
-  '.blocklyWidgetDiv .goog-palette-cell-hover .goog-palette-colorswatch {',
-    'border: 1px solid #FFF;',
-  '}',
-
-  '.blocklyWidgetDiv .goog-palette-cell-selected .goog-palette-colorswatch {',
-    'border: 1px solid #000;',
-    'color: #fff;',
-  '}',
-
-  /* Copied from: goog/css/menu.css */
-  /*
-   * Copyright 2009 The Closure Library Authors. All Rights Reserved.
-   *
-   * Use of this source code is governed by the Apache License, Version 2.0.
-   * See the COPYING file for details.
-   */
-
-  /**
-   * Standard styling for menus created by goog.ui.MenuRenderer.
-   *
-   * @author attila@google.com (Attila Bodis)
-   */
-
-  '.blocklyWidgetDiv .goog-menu {',
-    'background: #fff;',
-    'border-color: #ccc #666 #666 #ccc;',
-    'border-style: solid;',
-    'border-width: 1px;',
-    'cursor: default;',
-    'font: normal 13px Arial, sans-serif;',
-    'margin: 0;',
-    'outline: none;',
-    'padding: 4px 0;',
-    'position: absolute;',
-    'overflow-y: auto;',
-    'overflow-x: hidden;',
-    'max-height: 100%;',
-    'z-index: 20000;',  /* Arbitrary, but some apps depend on it... */
-  '}',
-
-  /* Copied from: goog/css/menuitem.css */
-  /*
-   * Copyright 2009 The Closure Library Authors. All Rights Reserved.
-   *
-   * Use of this source code is governed by the Apache License, Version 2.0.
-   * See the COPYING file for details.
-   */
-
-  /**
-   * Standard styling for menus created by goog.ui.MenuItemRenderer.
-   *
-   * @author attila@google.com (Attila Bodis)
-   */
-
-  /**
-   * State: resting.
-   *
-   * NOTE(mleibman,chrishenry):
-   * The RTL support in Closure is provided via two mechanisms -- "rtl" CSS
-   * classes and BiDi flipping done by the CSS compiler.  Closure supports RTL
-   * with or without the use of the CSS compiler.  In order for them not
-   * to conflict with each other, the "rtl" CSS classes need to have the #noflip
-   * annotation.  The non-rtl counterparts should ideally have them as well, but,
-   * since .goog-menuitem existed without .goog-menuitem-rtl for so long before
-   * being added, there is a risk of people having templates where they are not
-   * rendering the .goog-menuitem-rtl class when in RTL and instead rely solely
-   * on the BiDi flipping by the CSS compiler.  That's why we're not adding the
-   * #noflip to .goog-menuitem.
-   */
-  '.blocklyWidgetDiv .goog-menuitem {',
-    'color: #000;',
-    'font: normal 13px Arial, sans-serif;',
-    'list-style: none;',
-    'margin: 0;',
-     /* 28px on the left for icon or checkbox; 7em on the right for shortcut. */
-    'padding: 4px 7em 4px 28px;',
-    'white-space: nowrap;',
-  '}',
-
-  /* BiDi override for the resting state. */
-  /* #noflip */
-  '.blocklyWidgetDiv .goog-menuitem.goog-menuitem-rtl {',
-     /* Flip left/right padding for BiDi. */
-    'padding-left: 7em;',
-    'padding-right: 28px;',
-  '}',
-
-  /* If a menu doesn't have checkable items or items with icons, remove padding. */
-  '.blocklyWidgetDiv .goog-menu-nocheckbox .goog-menuitem,',
-  '.blocklyWidgetDiv .goog-menu-noicon .goog-menuitem {',
-    'padding-left: 12px;',
-  '}',
-
-  /*
-   * If a menu doesn't have items with shortcuts, leave just enough room for
-   * submenu arrows, if they are rendered.
-   */
-  '.blocklyWidgetDiv .goog-menu-noaccel .goog-menuitem {',
-    'padding-right: 20px;',
-  '}',
-
-  '.blocklyWidgetDiv .goog-menuitem-content {',
-    'color: #000;',
-    'font: normal 13px Arial, sans-serif;',
-  '}',
-
-  /* State: disabled. */
-  '.blocklyWidgetDiv .goog-menuitem-disabled .goog-menuitem-accel,',
-  '.blocklyWidgetDiv .goog-menuitem-disabled .goog-menuitem-content {',
-    'color: #ccc !important;',
-  '}',
-
-  '.blocklyWidgetDiv .goog-menuitem-disabled .goog-menuitem-icon {',
-    'opacity: 0.3;',
-    '-moz-opacity: 0.3;',
-    'filter: alpha(opacity=30);',
-  '}',
-
-  /* State: hover. */
-  '.blocklyWidgetDiv .goog-menuitem-highlight,',
-  '.blocklyWidgetDiv .goog-menuitem-hover {',
-    'background-color: #d6e9f8;',
-     /* Use an explicit top and bottom border so that the selection is visible',
-      * in high contrast mode. */
-    'border-color: #d6e9f8;',
-    'border-style: dotted;',
-    'border-width: 1px 0;',
-    'padding-bottom: 3px;',
-    'padding-top: 3px;',
-  '}',
-
-  /* State: selected/checked. */
-  '.blocklyWidgetDiv .goog-menuitem-checkbox,',
-  '.blocklyWidgetDiv .goog-menuitem-icon {',
-    'background-repeat: no-repeat;',
-    'height: 16px;',
-    'left: 6px;',
-    'position: absolute;',
-    'right: auto;',
-    'vertical-align: middle;',
-    'width: 16px;',
-  '}',
-
-  /* BiDi override for the selected/checked state. */
-  /* #noflip */
-  '.blocklyWidgetDiv .goog-menuitem-rtl .goog-menuitem-checkbox,',
-  '.blocklyWidgetDiv .goog-menuitem-rtl .goog-menuitem-icon {',
-     /* Flip left/right positioning. */
-    'left: auto;',
-    'right: 6px;',
-  '}',
-
-  '.blocklyWidgetDiv .goog-option-selected .goog-menuitem-checkbox,',
-  '.blocklyWidgetDiv .goog-option-selected .goog-menuitem-icon {',
-     /* Client apps may override the URL at which they serve the sprite. */
-    'background: url(//ssl.gstatic.com/editor/editortoolbar.png) no-repeat -512px 0;',
-  '}',
-
-  /* Keyboard shortcut ("accelerator") style. */
-  '.blocklyWidgetDiv .goog-menuitem-accel {',
-    'color: #999;',
-     /* Keyboard shortcuts are untranslated; always left-to-right. */
-     /* #noflip */
-    'direction: ltr;',
-    'left: auto;',
-    'padding: 0 6px;',
-    'position: absolute;',
-    'right: 0;',
-    'text-align: right;',
-  '}',
-
-  /* BiDi override for shortcut style. */
-  /* #noflip */
-  '.blocklyWidgetDiv .goog-menuitem-rtl .goog-menuitem-accel {',
-     /* Flip left/right positioning and text alignment. */
-    'left: 0;',
-    'right: auto;',
-    'text-align: left;',
-  '}',
-
-  /* Mnemonic styles. */
-  '.blocklyWidgetDiv .goog-menuitem-mnemonic-hint {',
-    'text-decoration: underline;',
-  '}',
-
-  '.blocklyWidgetDiv .goog-menuitem-mnemonic-separator {',
-    'color: #999;',
-    'font-size: 12px;',
-    'padding-left: 4px;',
-  '}',
-
-  /* Copied from: goog/css/menuseparator.css */
-  /*
-   * Copyright 2009 The Closure Library Authors. All Rights Reserved.
-   *
-   * Use of this source code is governed by the Apache License, Version 2.0.
-   * See the COPYING file for details.
-   */
-
-  /**
-   * Standard styling for menus created by goog.ui.MenuSeparatorRenderer.
-   *
-   * @author attila@google.com (Attila Bodis)
-   */
-
-  '.blocklyWidgetDiv .goog-menuseparator {',
-    'border-top: 1px solid #ccc;',
-    'margin: 4px 0;',
-    'padding: 0;',
-  '}',
-
-  ''
-];
+Ardublockly.showExtraIdeButtons = function(show) {
+  var IdeButtonLeft = document.getElementById('button_ide_left');
+  var IdeButtonMiddle = document.getElementById('button_ide_middle');
+  if (show) {
+    // prevent previously set time-out to hide buttons while trying to show them
+    clearTimeout(Ardublockly.outHoldtimeoutHandle);
+    clearTimeout(Ardublockly.hidetimeoutHandle);
+    IdeButtonMiddle.style.visibility = 'visible';
+    IdeButtonMiddle.style.opacity = '1';
+    Ardublockly.showtimeoutHandle = setTimeout(function() {
+      IdeButtonLeft.style.visibility = 'visible';
+      IdeButtonLeft.style.opacity = '1';
+    }, 50);
+  } else {
+    // As the mouse out can be accidental, only hide them after a delay
+    // Ardublockly.outHoldtimeoutHandle = setTimeout(function() {
+    //   // Prevent show time-out to affect the hiding of the buttons
+    //   clearTimeout(Ardublockly.showtimeoutHandle);
+    //   IdeButtonLeft.style.visibility = 'hidden';
+    //   IdeButtonLeft.style.opacity = '0';
+    //   Ardublockly.hidetimeoutHandle = setTimeout(function() {
+    //     IdeButtonMiddle.style.visibility = 'hidden';
+    //     IdeButtonMiddle.style.opacity = '0';
+    //   }, 50);
+    // }, 200);
+  }
+};
+
+/**
+ * Shows or hides the spinner around the large IDE button.
+ * @param {!boolean} active True turns ON the spinner, false OFF.
+ */
+Ardublockly.largeIdeButtonSpinner = function(active) {
+  var spinner = document.getElementById('button_ide_large_spinner');
+  var buttonIdeLarge = document.getElementById('button_ide_large');
+  var buttonClass = buttonIdeLarge.className;
+  if (active) {
+    spinner.style.display = 'block';
+    buttonIdeLarge.className = buttonIdeLarge.className + ' grey';
+  } else {
+    spinner.style.display = 'none';
+    buttonIdeLarge.className = buttonClass.replace(' grey', '');
+ }
+};
+
+/**
+ * Sets the toolbox HTML element to be display or not and change the visibility
+ * button to reflect the new state.
+ * When the toolbox is visible it should display the "visibility-off" icon with
+ * no background, and the opposite when toolbox is hidden.
+ * @param {!boolean} show Indicates if the toolbox should be set visible.
+ */
+Ardublockly.displayToolbox = function(show) {
+  var toolbox = $('.blocklyToolboxDiv');
+  var toolboxTree = $('.blocklyTreeRoot');
+  var button = document.getElementById('button_toggle_toolbox');
+  var buttonIcon = document.getElementById('button_toggle_toolbox_icon');
+
+  // Because firing multiple clicks can confuse the animation, create an overlay
+  // element to stop clicks (due to the materialize framework controlling the
+  // event listeners is better to do it this way for easy framework update).
+  var elLocation = $('#button_toggle_toolbox').offset();
+  jQuery('<div/>', {
+      id: 'toolboxButtonScreen',
+      css: {
+        position: 'fixed',
+        top: elLocation.top,
+        left: elLocation.left,
+        height: $('#button_toggle_toolbox').height(),
+        width: $('#button_toggle_toolbox').width(),
+        cursor: 'pointer',
+        zIndex: 12
+      },
+  }).appendTo('body');
+
+  var classOn = 'button_toggle_toolbox_on';
+  var classOff = 'button_toggle_toolbox_off';
+  var visOn = 'mdi-action-visibility';
+  var visOff = 'mdi-action-visibility-off';
+  if (show) {
+    toolbox.show();
+    button.className = button.className.replace(classOn, classOff);
+    buttonIcon.className = buttonIcon.className.replace(visOn, visOff);
+    toolbox.animate(
+        {height: document.getElementById('content_blocks').style.height}, 300,
+        function() {
+          toolboxTree.css('overflow-y', 'auto');
+          window.dispatchEvent(new Event('resize'));
+          $('#toolboxButtonScreen').remove();
+        });
+  } else {
+    toolboxTree.css('overflow-y', 'hidden');
+    buttonIcon.className = buttonIcon.className.replace(visOff, visOn);
+    toolbox.animate({height: 38}, 300, function() {
+      button.className = button.className.replace(classOff, classOn);
+      toolbox.fadeOut(350, 'linear', function() {
+        window.dispatchEvent(new Event('resize'));
+        setTimeout(function() { toolbox.height(38); }, 100);
+        $('#toolboxButtonScreen').remove();
+      });
+    });
+  }
+};
+
+/**
+ * Resizes the button to toggle the toolbox visibility to the width of the
+ * toolbox.
+ * The toolbox width does not change with workspace width, so safe to do once.
+ */
+Ardublockly.resizeToggleToolboxBotton = function() {
+  window.dispatchEvent(new Event('resize'));
+  var button = $('#button_toggle_toolbox');
+  // Sets the toolbox toggle button width to that of the toolbox
+  if (Ardublockly.isToolboxVisible() && Ardublockly.blocklyToolboxWidth()) {
+    // For some reason normal set style and getElementById didn't work
+    button.width(Ardublockly.blocklyToolboxWidth());
+    button[0].style.display = '';
+  }
+};
+
+/** Resizes the container for the Blockly workspace. */
+Ardublockly.resizeBlocklyWorkspace = function() {
+  var contentBlocks = document.getElementById('content_blocks');
+  var wrapperPanelSize =
+      Ardublockly.getBBox_(document.getElementById('blocks_panel'));
+
+  contentBlocks.style.top = wrapperPanelSize.y + 'px';
+  contentBlocks.style.left = wrapperPanelSize.x + 'px';
+  // Height and width need to be set, read back, then set again to
+  // compensate for scrollbars.
+  contentBlocks.style.height = wrapperPanelSize.height + 'px';
+  contentBlocks.style.height =
+      (2 * wrapperPanelSize.height - contentBlocks.offsetHeight) + 'px';
+  contentBlocks.style.width = wrapperPanelSize.width + 'px';
+  contentBlocks.style.width =
+      (2 * wrapperPanelSize.width - contentBlocks.offsetWidth) + 'px';
+};
+
+/**
+ * Sets the text for a "Materialize Modal" (like an android Dialog) to have
+ * alert-like HTML messages.
+ * @param {!string} title HTML to include in title.
+ * @param {!element} body HTML to include in body.
+ * @param {boolean=} confirm Indicates if the user is shown and option to just
+ *     'Ok' or 'Ok and cancel'.
+ * @param {string=|function=} callback If confirm option is selected this would
+ *     be the function called when clicked 'OK'.
+ */
+Ardublockly.materialAlert = function(title, body, confirm, callback) {
+  $('#gen_alert_title').text(title);
+  $('#gen_alert_body').text('');
+  $('#gen_alert_body').append(body);
+  if (confirm == true) {
+    $('#gen_alert_cancel_link').css({'display': 'block'});
+    if (callback) {
+      $('#gen_alert_ok_link').bind('click', callback);
+    }
+  } else {
+    $('#gen_alert_cancel_link').css({'display': 'none'});
+    $('#gen_alert_ok_link').unbind('click');
+  }
+  $('#gen_alert').openModal();
+  window.location.hash = '';
+};
+
+/** Opens the modal that displays the "not connected to server" message. */
+Ardublockly.openNotConnectedModal = function() {
+  $('#not_running_dialog').openModal({
+    dismissible: true,
+    opacity: .5,
+    in_duration: 200,
+    out_duration: 250
+  });
+};
+
+/** Opens the modal that displays the Settings. */
+Ardublockly.openSettingsModal = function() {
+  $('#settings_dialog').openModal({
+    dismissible: true,
+    opacity: .5,
+    in_duration: 200,
+    out_duration: 250
+  });
+};
+/** Opens the modal that displays the Com. */
+Ardublockly.openSettingComModal = function() {
+  $('#setting_com').openModal({
+    dismissible: true,
+    opacity: .5,
+    in_duration: 200,
+    out_duration: 250
+  });
+};
+
+/**
+ * Opens the modal that allows selection on additional toolbox categories.
+ * @param {!element} htmlContent HTML to include in modal body.
+ */
+Ardublockly.openAdditionalBlocksModal = function(htmlContent) {
+  $('#blocks_menu_body').text('');
+  $('#blocks_menu_body').append(htmlContent);
+  $('#blocks_menu').openModal({
+    dismissible: true,
+    opacity: .5,
+    in_duration: 200,
+    out_duration: 250
+  });
+};
+
+/**
+ * Creates an HTML node with the blocks category information from arguments.
+ * @param {!string} title Text to include as category title.
+ * @param {!string} description TExt to include in as description.
+ * @param {!function} clickBind Function to bind to the tick box click.
+ * @return {!element} HTML element to display the category content.
+ */
+Ardublockly.createExtraBlocksCatHtml = function(title, description, clickBind) {
+  var tickId = title.replace(/\s+/g, '');
+  var tickHtml = document.createElement('input');
+  tickHtml.type = 'checkbox';
+  tickHtml.id = tickId;
+  tickHtml.addEventListener('click', function() {
+    clickBind(document.getElementById(tickId).checked);
+  });
+  var tickLabelHtml = document.createElement('label');
+  tickLabelHtml.htmlFor = tickId;
+  tickLabelHtml.className = 'modal_label_title';
+  tickLabelHtml.appendChild(document.createTextNode(title));
+  var separatorHtml = document.createElement('div');
+  separatorHtml.className = 'divider';
+  var descriptionHthml = document.createElement('div');
+  descriptionHthml.appendChild(document.createTextNode(description));
+
+  var htmlContent = document.createElement('div');
+  htmlContent.className = 'modal_section';
+  htmlContent.appendChild(tickHtml);
+  htmlContent.appendChild(tickLabelHtml);
+  htmlContent.appendChild(separatorHtml);
+  htmlContent.appendChild(descriptionHthml);
+  return htmlContent;
+};
+
+/**
+ * Displays a short message for 4 seconds in the form of a Materialize toast.
+ * @param {!string} message Text to be temporarily displayed.
+ */
+Ardublockly.MaterialToast = function(message) {
+  Materialize.toast(message, 4000);
+};
+
+/**
+ * Populates the Arduino IDE output content area and triggers the visual
+ * highlight to call for the user attention.
+ * @param {!element} bodyEl HTML to include into IDE output content area.
+ */
+Ardublockly.arduinoIdeOutput = function(bodyEl) {
+  console.log(bodyEl);
+  var ideOuputContent = document.getElementById('content_ide_output');
+  ideOuputContent.innerHTML = '';
+  ideOuputContent.appendChild(bodyEl);
+  Ardublockly.highlightIdeOutputHeader();
+};
+
+/**
+ * Clears the content of the Arduino IDE output element to a default text.
+ * @param {!element} bodyEl HTML to include into IDE output content area.
+ */
+Ardublockly.resetIdeOutputContent = function(bodyEl) {
+  var ideOuputContent = document.getElementById('content_ide_output');
+  ideOuputContent.innerHTML = '<span class="arduino_dialog_out">' +
+      Ardublockly.getLocalStr('arduinoOpWaiting') + '</span>';
+};
+
+/**
+ * Initialises the sketch name input text JavaScript to dynamically adjust its
+ * width to the width of its contents.
+ */
+Ardublockly.sketchNameSizeEffect = function() {
+  var resizeInput = function() {
+    $(this).attr('size', $(this).val().length);
+  };
+
+  var correctInput = function() {
+    // If nothing in the input, add default name
+    if ($(this).val() == '') {
+      $(this).val('Sketch_Name');
+      $(this).attr('size', 10);
+    }
+    // Replace all spaces with underscores
+    $(this).val($(this).val().replace(/ /g, '_'));
+  };
+
+  var sketchNameInput = $('#sketch_name');
+  sketchNameInput.keydown(resizeInput).each(resizeInput);
+  sketchNameInput.blur(correctInput);
+};
+
+/**
+ * Sets a string to the SketchName input field and triggers the events set from
+ * Ardublockly.sketchNameSizeEffect().
+ * @param {string?} newName Optional string to place in the sketch_name input.
+ */
+Ardublockly.sketchNameSet = function(newName) {
+  var sketchNewName = newName || '';
+  var sketchNameInput = $('#sketch_name');
+  sketchNameInput.val(sketchNewName);
+  sketchNameInput.attr('size', sketchNewName.length);
+  sketchNameInput.keydown();
+  sketchNameInput.blur();
+};
+
+/** Creates a highlight animation to the Arduino IDE output header. */
+Ardublockly.highlightIdeOutputHeader = function() {
+  var header = document.getElementById('ide_output_collapsible_header');
+  var h = 'ide_output_header_highlight';
+  var n = 'ide_output_header_normal';
+  header.className = header.className.replace(/ide_output_header_\S+/, h);
+  setTimeout(function() {
+    header.className = header.className.replace(/ide_output_header_\S+/, n);
+    setTimeout(function() {
+      header.className = header.className.replace(/ide_output_header_\S+/, h);
+      setTimeout(function() {
+        header.className = header.className.replace(/ide_output_header_\S+/, n);
+      }, 500);
+    }, 500);
+  }, 500);
+};
+
+/**
+ * Controls the height of the block and collapsible content between 2 states
+ * using CSS classes.
+ * It's state is dependent on the state of the IDE output collapsible. The
+ * collapsible functionality from Materialize framework adds the active class,
+ * so this class is consulted to shrink or expand the content height.
+ */
+Ardublockly.contentHeightToggle = function() {
+  var outputHeader = document.getElementById('ide_output_collapsible_header');
+  var blocks = document.getElementById('blocks_panel');
+  var arduino = document.getElementById('content_arduino');
+  var xml = document.getElementById('content_xml');
+
+  // Blockly doesn't resize with CSS3 transitions enabled, so do it manually
+  var timerId = setInterval(function() {
+    window.dispatchEvent(new Event('resize'));
+  }, 15);
+  setTimeout(function() {
+    clearInterval(timerId);
+  }, 400);
+
+  // Apart from checking if the output is visible, do not bother to shrink in
+  // small screens as the minimum height of the content will kick in and cause
+  // the content to be behind the IDE output data anyway.
+  if (!outputHeader.className.match('active') && $(window).height() > 800) {
+    blocks.className = 'content height_transition blocks_panel_small';
+    arduino.className = 'content height_transition content_arduino_small';
+    xml.className = 'content height_transition content_xml_small';
+  } else {
+    blocks.className = 'content height_transition blocks_panel_large';
+    arduino.className = 'content height_transition content_arduino_large';
+    xml.className = 'content height_transition content_xml_large';
+  }
+
+  // If the height transition CSS is left then blockly does not resize
+  setTimeout(function() {
+    blocks.className = blocks.className.replace('height_transition', '');
+    arduino.className = arduino.className.replace('height_transition', '');
+    xml.className = xml.className.replace('height_transition', '');
+  }, 400);
+};
+
+/**
+ * Compute the absolute coordinates and dimensions of an HTML element.
+ * @param {!Element} element Element to match.
+ * @return {!Object} Contains height, width, x, and y properties.
+ * @private
+ */
+Ardublockly.getBBox_ = function(element) {
+  var height = element.offsetHeight;
+  var width = element.offsetWidth;
+  var x = 0;
+  var y = 0;
+  do {
+    x += element.offsetLeft;
+    y += element.offsetTop;
+    element = element.offsetParent;
+  } while (element);
+  return {
+    height: height,
+    width: width,
+    x: x,
+    y: y
+  };
+};

@@ -2,7 +2,7 @@
  * @license
  * Visual Blocks Editor
  *
- * Copyright 2014 Google Inc.
+ * Copyright 2016 Google Inc.
  * https://developers.google.com/blockly/
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -19,1133 +19,936 @@
  */
 
 /**
- * @fileoverview Object representing a workspace rendered as SVG.
- * @author fraser@google.com (Neil Fraser)
+ * @fileoverview Methods for graphically rendering a block as SVG.
+ * @author fenichel@google.com (Rachel Fenichel)
  */
+
 'use strict';
 
-goog.provide('Blockly.WorkspaceSvg');
+goog.provide('Blockly.BlockSvg.render');
 
-// TODO(scr): Fix circular dependencies
-// goog.require('Blockly.Block');
-goog.require('Blockly.ConnectionDB');
-goog.require('Blockly.Options');
-goog.require('Blockly.ScrollbarPair');
-goog.require('Blockly.Trashcan');
-goog.require('Blockly.Workspace');
-goog.require('Blockly.Xml');
-goog.require('Blockly.ZoomControls');
+goog.require('Blockly.BlockSvg');
 
-goog.require('goog.dom');
-goog.require('goog.math.Coordinate');
-goog.require('goog.userAgent');
 
+// UI constants for rendering blocks.
+/**
+ * Horizontal space between elements.
+ * @const
+ */
+Blockly.BlockSvg.SEP_SPACE_X = 10;
+/**
+ * Vertical space between elements.
+ * @const
+ */
+Blockly.BlockSvg.SEP_SPACE_Y = 10;
+/**
+ * Vertical padding around inline elements.
+ * @const
+ */
+Blockly.BlockSvg.INLINE_PADDING_Y = 5;
+/**
+ * Minimum height of a block.
+ * @const
+ */
+Blockly.BlockSvg.MIN_BLOCK_Y = 25;
+/**
+ * Height of horizontal puzzle tab.
+ * @const
+ */
+Blockly.BlockSvg.TAB_HEIGHT = 20;
+/**
+ * Width of horizontal puzzle tab.
+ * @const
+ */
+Blockly.BlockSvg.TAB_WIDTH = 8;
+/**
+ * Width of vertical tab (inc left margin).
+ * @const
+ */
+Blockly.BlockSvg.NOTCH_WIDTH = 30;
+/**
+ * Rounded corner radius.
+ * @const
+ */
+Blockly.BlockSvg.CORNER_RADIUS = 8;
+/**
+ * Do blocks with no previous or output connections have a 'hat' on top?
+ * @const
+ */
+Blockly.BlockSvg.START_HAT = false;
+/**
+ * Height of the top hat.
+ * @const
+ */
+Blockly.BlockSvg.START_HAT_HEIGHT = 15;
+/**
+ * Path of the top hat's curve.
+ * @const
+ */
+Blockly.BlockSvg.START_HAT_PATH = 'c 30,-' +
+    Blockly.BlockSvg.START_HAT_HEIGHT + ' 70,-' +
+    Blockly.BlockSvg.START_HAT_HEIGHT + ' 100,0';
+/**
+ * Path of the top hat's curve's highlight in LTR.
+ * @const
+ */
+Blockly.BlockSvg.START_HAT_HIGHLIGHT_LTR =
+    'c 17.8,-9.2 45.3,-14.9 75,-8.7 M 100.5,0.5';
+/**
+ * Path of the top hat's curve's highlight in RTL.
+ * @const
+ */
+Blockly.BlockSvg.START_HAT_HIGHLIGHT_RTL =
+    'm 25,-8.7 c 29.7,-6.2 57.2,-0.5 75,8.7';
+/**
+ * Distance from shape edge to intersect with a curved corner at 45 degrees.
+ * Applies to highlighting on around the inside of a curve.
+ * @const
+ */
+Blockly.BlockSvg.DISTANCE_45_INSIDE = (1 - Math.SQRT1_2) *
+    (Blockly.BlockSvg.CORNER_RADIUS - 0.5) + 0.5;
+/**
+ * Distance from shape edge to intersect with a curved corner at 45 degrees.
+ * Applies to highlighting on around the outside of a curve.
+ * @const
+ */
+Blockly.BlockSvg.DISTANCE_45_OUTSIDE = (1 - Math.SQRT1_2) *
+    (Blockly.BlockSvg.CORNER_RADIUS + 0.5) - 0.5;
+/**
+ * SVG path for drawing next/previous notch from left to right.
+ * @const
+ */
+Blockly.BlockSvg.NOTCH_PATH_LEFT = 'l 6,4 3,0 6,-4';
+/**
+ * SVG path for drawing next/previous notch from left to right with
+ * highlighting.
+ * @const
+ */
+Blockly.BlockSvg.NOTCH_PATH_LEFT_HIGHLIGHT = 'l 6,4 3,0 6,-4';
+/**
+ * SVG path for drawing next/previous notch from right to left.
+ * @const
+ */
+Blockly.BlockSvg.NOTCH_PATH_RIGHT = 'l -6,4 -3,0 -6,-4';
+/**
+ * SVG path for drawing jagged teeth at the end of collapsed blocks.
+ * @const
+ */
+Blockly.BlockSvg.JAGGED_TEETH = 'l 8,0 0,4 8,4 -16,8 8,4';
+/**
+ * Height of SVG path for jagged teeth at the end of collapsed blocks.
+ * @const
+ */
+Blockly.BlockSvg.JAGGED_TEETH_HEIGHT = 20;
+/**
+ * Width of SVG path for jagged teeth at the end of collapsed blocks.
+ * @const
+ */
+Blockly.BlockSvg.JAGGED_TEETH_WIDTH = 15;
+/**
+ * SVG path for drawing a horizontal puzzle tab from top to bottom.
+ * @const
+ */
+Blockly.BlockSvg.TAB_PATH_DOWN = 'v 5 c 0,10 -' + Blockly.BlockSvg.TAB_WIDTH +
+    ',-8 -' + Blockly.BlockSvg.TAB_WIDTH + ',7.5 s ' +
+    Blockly.BlockSvg.TAB_WIDTH + ',-2.5 ' + Blockly.BlockSvg.TAB_WIDTH + ',7.5';
+/**
+ * SVG path for drawing a horizontal puzzle tab from top to bottom with
+ * highlighting from the upper-right.
+ * @const
+ */
+Blockly.BlockSvg.TAB_PATH_DOWN_HIGHLIGHT_RTL = 'v 6.5 m -' +
+    (Blockly.BlockSvg.TAB_WIDTH * 0.97) + ',3 q -' +
+    (Blockly.BlockSvg.TAB_WIDTH * 0.05) + ',10 ' +
+    (Blockly.BlockSvg.TAB_WIDTH * 0.3) + ',9.5 m ' +
+    (Blockly.BlockSvg.TAB_WIDTH * 0.67) + ',-1.9 v 1.4';
 
 /**
- * Class for a workspace.  This is an onscreen area with optional trashcan,
- * scrollbars, bubbles, and dragging.
- * @param {!Blockly.Options} options Dictionary of options.
- * @extends {Blockly.Workspace}
- * @constructor
+ * SVG start point for drawing the top-left corner.
+ * @const
  */
-Blockly.WorkspaceSvg = function(options) {
-  Blockly.WorkspaceSvg.superClass_.constructor.call(this, options);
-  this.getMetrics = options.getMetrics;
-  this.setMetrics = options.setMetrics;
-
-  Blockly.ConnectionDB.init(this);
-
-  /**
-   * Database of pre-loaded sounds.
-   * @private
-   * @const
-   */
-  this.SOUNDS_ = Object.create(null);
-};
-goog.inherits(Blockly.WorkspaceSvg, Blockly.Workspace);
+Blockly.BlockSvg.TOP_LEFT_CORNER_START =
+    'm 0,' + Blockly.BlockSvg.CORNER_RADIUS;
+/**
+ * SVG start point for drawing the top-left corner's highlight in RTL.
+ * @const
+ */
+Blockly.BlockSvg.TOP_LEFT_CORNER_START_HIGHLIGHT_RTL =
+    'm ' + Blockly.BlockSvg.DISTANCE_45_INSIDE + ',' +
+    Blockly.BlockSvg.DISTANCE_45_INSIDE;
+/**
+ * SVG start point for drawing the top-left corner's highlight in LTR.
+ * @const
+ */
+Blockly.BlockSvg.TOP_LEFT_CORNER_START_HIGHLIGHT_LTR =
+    'm 0.5,' + (Blockly.BlockSvg.CORNER_RADIUS - 0.5);
+/**
+ * SVG path for drawing the rounded top-left corner.
+ * @const
+ */
+Blockly.BlockSvg.TOP_LEFT_CORNER =
+    'A ' + Blockly.BlockSvg.CORNER_RADIUS + ',' +
+    Blockly.BlockSvg.CORNER_RADIUS + ' 0 0,1 ' +
+    Blockly.BlockSvg.CORNER_RADIUS + ',0';
+/**
+ * SVG path for drawing the highlight on the rounded top-left corner.
+ * @const
+ */
+Blockly.BlockSvg.TOP_LEFT_CORNER_HIGHLIGHT =
+    'A ' + (Blockly.BlockSvg.CORNER_RADIUS - 0.5) + ',' +
+    (Blockly.BlockSvg.CORNER_RADIUS - 0.5) + ' 0 0,1 ' +
+    Blockly.BlockSvg.CORNER_RADIUS + ',0.5';
+/**
+ * SVG path for drawing the top-left corner of a statement input.
+ * Includes the top notch, a horizontal space, and the rounded inside corner.
+ * @const
+ */
+Blockly.BlockSvg.INNER_TOP_LEFT_CORNER =
+    Blockly.BlockSvg.NOTCH_PATH_RIGHT + ' h -' +
+    (Blockly.BlockSvg.NOTCH_WIDTH - 15 - Blockly.BlockSvg.CORNER_RADIUS) +
+    ' a ' + Blockly.BlockSvg.CORNER_RADIUS + ',' +
+    Blockly.BlockSvg.CORNER_RADIUS + ' 0 0,0 -' +
+    Blockly.BlockSvg.CORNER_RADIUS + ',' +
+    Blockly.BlockSvg.CORNER_RADIUS;
+/**
+ * SVG path for drawing the bottom-left corner of a statement input.
+ * Includes the rounded inside corner.
+ * @const
+ */
+Blockly.BlockSvg.INNER_BOTTOM_LEFT_CORNER =
+    'a ' + Blockly.BlockSvg.CORNER_RADIUS + ',' +
+    Blockly.BlockSvg.CORNER_RADIUS + ' 0 0,0 ' +
+    Blockly.BlockSvg.CORNER_RADIUS + ',' +
+    Blockly.BlockSvg.CORNER_RADIUS;
+/**
+ * SVG path for drawing highlight on the top-left corner of a statement
+ * input in RTL.
+ * @const
+ */
+Blockly.BlockSvg.INNER_TOP_LEFT_CORNER_HIGHLIGHT_RTL =
+    'a ' + Blockly.BlockSvg.CORNER_RADIUS + ',' +
+    Blockly.BlockSvg.CORNER_RADIUS + ' 0 0,0 ' +
+    (-Blockly.BlockSvg.DISTANCE_45_OUTSIDE - 0.5) + ',' +
+    (Blockly.BlockSvg.CORNER_RADIUS -
+    Blockly.BlockSvg.DISTANCE_45_OUTSIDE);
+/**
+ * SVG path for drawing highlight on the bottom-left corner of a statement
+ * input in RTL.
+ * @const
+ */
+Blockly.BlockSvg.INNER_BOTTOM_LEFT_CORNER_HIGHLIGHT_RTL =
+    'a ' + (Blockly.BlockSvg.CORNER_RADIUS + 0.5) + ',' +
+    (Blockly.BlockSvg.CORNER_RADIUS + 0.5) + ' 0 0,0 ' +
+    (Blockly.BlockSvg.CORNER_RADIUS + 0.5) + ',' +
+    (Blockly.BlockSvg.CORNER_RADIUS + 0.5);
+/**
+ * SVG path for drawing highlight on the bottom-left corner of a statement
+ * input in LTR.
+ * @const
+ */
+Blockly.BlockSvg.INNER_BOTTOM_LEFT_CORNER_HIGHLIGHT_LTR =
+    'a ' + (Blockly.BlockSvg.CORNER_RADIUS + 0.5) + ',' +
+    (Blockly.BlockSvg.CORNER_RADIUS + 0.5) + ' 0 0,0 ' +
+    (Blockly.BlockSvg.CORNER_RADIUS -
+    Blockly.BlockSvg.DISTANCE_45_OUTSIDE) + ',' +
+    (Blockly.BlockSvg.DISTANCE_45_OUTSIDE + 0.5);
 
 /**
- * Svg workspaces are user-visible (as opposed to a headless workspace).
- * @type {boolean} True if visible.  False if headless.
+ * Render the block.
+ * Lays out and reflows a block based on its contents and settings.
+ * @param {boolean=} opt_bubble If false, just render this block.
+ *   If true, also render block's parent, grandparent, etc.  Defaults to true.
  */
-Blockly.WorkspaceSvg.prototype.rendered = true;
+Blockly.BlockSvg.prototype.render = function(opt_bubble) {
+  Blockly.Field.startCache();
+  this.rendered = true;
 
-/**
- * Is this workspace the surface for a flyout?
- * @type {boolean}
- */
-Blockly.WorkspaceSvg.prototype.isFlyout = false;
+  var cursorX = Blockly.BlockSvg.SEP_SPACE_X;
+  if (this.RTL) {
+    cursorX = -cursorX;
+  }
+  // Move the icons into position.
+  var icons = this.getIcons();
+  for (var i = 0; i < icons.length; i++) {
+    cursorX = icons[i].renderIcon(cursorX);
+  }
+  cursorX += this.RTL ?
+      Blockly.BlockSvg.SEP_SPACE_X : -Blockly.BlockSvg.SEP_SPACE_X;
+  // If there are no icons, cursorX will be 0, otherwise it will be the
+  // width that the first label needs to move over by.
 
-/**
- * Is this workspace currently being dragged around?
- * @type {boolean}
- */
-Blockly.WorkspaceSvg.prototype.isScrolling = false;
+  var inputRows = this.renderCompute_(cursorX);
+  this.renderDraw_(cursorX, inputRows);
 
-/**
- * Current horizontal scrolling offset.
- * @type {number}
- */
-Blockly.WorkspaceSvg.prototype.scrollX = 0;
-
-/**
- * Current vertical scrolling offset.
- * @type {number}
- */
-Blockly.WorkspaceSvg.prototype.scrollY = 0;
-
-/**
- * Horizontal scroll value when scrolling started.
- * @type {number}
- */
-Blockly.WorkspaceSvg.prototype.startScrollX = 0;
-
-/**
- * Vertical scroll value when scrolling started.
- * @type {number}
- */
-Blockly.WorkspaceSvg.prototype.startScrollY = 0;
-
-/**
- * Distance from mouse to object being dragged.
- * @type {goog.math.Coordinate}
- * @private
- */
-Blockly.WorkspaceSvg.prototype.dragDeltaXY_ = null;
-
-/**
- * Current scale.
- * @type {number}
- */
-Blockly.WorkspaceSvg.prototype.scale = 1;
-
-/**
- * The workspace's trashcan (if any).
- * @type {Blockly.Trashcan}
- */
-Blockly.WorkspaceSvg.prototype.trashcan = null;
-
-/**
- * This workspace's scrollbars, if they exist.
- * @type {Blockly.ScrollbarPair}
- */
-Blockly.WorkspaceSvg.prototype.scrollbar = null;
-
-/**
- * Create the workspace DOM elements.
- * @param {string=} opt_backgroundClass Either 'blocklyMainBackground' or
- *     'blocklyMutatorBackground'.
- * @return {!Element} The workspace's SVG group.
- */
-Blockly.WorkspaceSvg.prototype.createDom = function(opt_backgroundClass) {
-  /**
-   * <g class="blocklyWorkspace">
-   *   <rect class="blocklyMainBackground" height="100%" width="100%"></rect>
-   *   [Trashcan and/or flyout may go here]
-   *   <g class="blocklyBlockCanvas"></g>
-   *   <g class="blocklyBubbleCanvas"></g>
-   *   [Scrollbars may go here]
-   * </g>
-   * @type {SVGElement}
-   */
-  this.svgGroup_ = Blockly.createSvgElement('g',
-      {'class': 'blocklyWorkspace'}, null);
-  if (opt_backgroundClass) {
-    /** @type {SVGElement} */
-    this.svgBackground_ = Blockly.createSvgElement('rect',
-        {'height': '100%', 'width': '100%', 'class': opt_backgroundClass},
-        this.svgGroup_);
-    if (opt_backgroundClass == 'blocklyMainBackground') {
-      this.svgBackground_.style.fill =
-          'url(#' + this.options.gridPattern.id + ')';
+  if (opt_bubble !== false) {
+    // Render all blocks above this one (propagate a reflow).
+    var parentBlock = this.getParent();
+    if (parentBlock) {
+      parentBlock.render(true);
+    } else {
+      // Top-most block.  Fire an event to allow scrollbars to resize.
+      Blockly.asyncSvgResize(this.workspace);
     }
   }
-  /** @type {SVGElement} */
-  this.svgBlockCanvas_ = Blockly.createSvgElement('g',
-      {'class': 'blocklyBlockCanvas'}, this.svgGroup_, this);
-  /** @type {SVGElement} */
-  this.svgBubbleCanvas_ = Blockly.createSvgElement('g',
-      {'class': 'blocklyBubbleCanvas'}, this.svgGroup_, this);
-  var bottom = Blockly.Scrollbar.scrollbarThickness;
-  if (this.options.hasTrashcan) {
-    bottom = this.addTrashcan_(bottom);
-  }
-  if (this.options.zoomOptions && this.options.zoomOptions.controls) {
-    bottom = this.addZoomControls_(bottom);
-  }
-  Blockly.bindEvent_(this.svgGroup_, 'mousedown', this, this.onMouseDown_);
-  var thisWorkspace = this;
-  Blockly.bindEvent_(this.svgGroup_, 'touchstart', null,
-                     function(e) {Blockly.longStart_(e, thisWorkspace);});
-  if (this.options.zoomOptions && this.options.zoomOptions.wheel) {
-    // Mouse-wheel.
-    
-    Blockly.bindEvent_(this.svgGroup_, 'wheel', this, this.onMouseWheel_);
-  }
-  // Determine if there needs to be a category tree, or a simple list of
-  // blocks.  This cannot be changed later, since the UI is very different.
-  if (this.options.hasCategories) {
-    this.toolbox_ = new Blockly.Toolbox(this);
-  } else if (this.options.languageTree) {
-    this.addFlyout_();
-  }
-  this.updateGridPattern_();
-  return this.svgGroup_;
+  Blockly.Field.stopCache();
 };
 
 /**
- * Dispose of this workspace.
- * Unlink from all DOM elements to prevent memory leaks.
- */
-Blockly.WorkspaceSvg.prototype.dispose = function() {
-  // Stop rerendering.
-  this.rendered = false;
-  Blockly.WorkspaceSvg.superClass_.dispose.call(this);
-  if (this.svgGroup_) {
-    goog.dom.removeNode(this.svgGroup_);
-    this.svgGroup_ = null;
-  }
-  this.svgBlockCanvas_ = null;
-  this.svgBubbleCanvas_ = null;
-  if (this.toolbox_) {
-    this.toolbox_.dispose();
-    this.toolbox_ = null;
-  }
-  if (this.flyout_) {
-    this.flyout_.dispose();
-    this.flyout_ = null;
-  }
-  if (this.trashcan) {
-    this.trashcan.dispose();
-    this.trashcan = null;
-  }
-  if (this.scrollbar) {
-    this.scrollbar.dispose();
-    this.scrollbar = null;
-  }
-  if (this.zoomControls_) {
-    this.zoomControls_.dispose();
-    this.zoomControls_ = null;
-  }
-  if (!this.options.parentWorkspace) {
-    // Top-most workspace.  Dispose of the SVG too.
-    goog.dom.removeNode(this.getParentSvg());
-  }
-};
-
-/**
- * Obtain a newly created block.
- * @param {?string} prototypeName Name of the language object containing
- *     type-specific functions for this block.
- * @param {=string} opt_id Optional ID.  Use this ID if provided, otherwise
- *     create a new id.
- * @return {!Blockly.BlockSvg} The created block.
- */
-Blockly.WorkspaceSvg.prototype.newBlock = function(prototypeName, opt_id) {
-  return new Blockly.BlockSvg(this, prototypeName, opt_id);
-};
-
-/**
- * Add a trashcan.
- * @param {number} bottom Distance from workspace bottom to bottom of trashcan.
- * @return {number} Distance from workspace bottom to the top of trashcan.
+ * Render a list of fields starting at the specified location.
+ * @param {!Array.<!Blockly.Field>} fieldList List of fields.
+ * @param {number} cursorX X-coordinate to start the fields.
+ * @param {number} cursorY Y-coordinate to start the fields.
+ * @return {number} X-coordinate of the end of the field row (plus a gap).
  * @private
  */
-Blockly.WorkspaceSvg.prototype.addTrashcan_ = function(bottom) {
-  /** @type {Blockly.Trashcan} */
-  this.trashcan = new Blockly.Trashcan(this);
-  var svgTrashcan = this.trashcan.createDom();
-  this.svgGroup_.insertBefore(svgTrashcan, this.svgBlockCanvas_);
-  return this.trashcan.init(bottom);
-};
-
-/**
- * Add zoom controls.
- * @param {number} bottom Distance from workspace bottom to bottom of controls.
- * @return {number} Distance from workspace bottom to the top of controls.
- * @private
- */
-Blockly.WorkspaceSvg.prototype.addZoomControls_ = function(bottom) {
-  /** @type {Blockly.ZoomControls} */
-  this.zoomControls_ = new Blockly.ZoomControls(this);
-  var svgZoomControls = this.zoomControls_.createDom();
-  this.svgGroup_.appendChild(svgZoomControls);
-  return this.zoomControls_.init(bottom);
-};
-
-/**
- * Add a flyout.
- * @private
- */
-Blockly.WorkspaceSvg.prototype.addFlyout_ = function() {
-  var workspaceOptions = {
-    disabledPatternId: this.options.disabledPatternId,
-    parentWorkspace: this,
-    RTL: this.RTL,
-    horizontalLayout: this.horizontalLayout,
-    toolboxPosition: this.options.toolboxPosition,
-  };
-  /** @type {Blockly.Flyout} */
-  this.flyout_ = new Blockly.Flyout(workspaceOptions);
-  this.flyout_.autoClose = false;
-  var svgFlyout = this.flyout_.createDom();
-  this.svgGroup_.insertBefore(svgFlyout, this.svgBlockCanvas_);
-};
-
-/**
- * Resize this workspace and its containing objects.
- */
-Blockly.WorkspaceSvg.prototype.resize = function() {
-  if (this.toolbox_) {
-    this.toolbox_.position();
+Blockly.BlockSvg.prototype.renderFields_ =
+    function(fieldList, cursorX, cursorY) {
+  cursorY += Blockly.BlockSvg.INLINE_PADDING_Y;
+  if (this.RTL) {
+    cursorX = -cursorX;
   }
-  if (this.flyout_) {
-    this.flyout_.position();
-  }
-  if (this.trashcan) {
-    this.trashcan.position();
-  }
-  if (this.zoomControls_) {
-    this.zoomControls_.position();
-  }
-  if (this.scrollbar) {
-    this.scrollbar.resize();
-  }
-};
-
-/**
- * Get the SVG element that forms the drawing surface.
- * @return {!Element} SVG element.
- */
-Blockly.WorkspaceSvg.prototype.getCanvas = function() {
-  return this.svgBlockCanvas_;
-};
-
-/**
- * Get the SVG element that forms the bubble surface.
- * @return {!SVGGElement} SVG element.
- */
-Blockly.WorkspaceSvg.prototype.getBubbleCanvas = function() {
-  return this.svgBubbleCanvas_;
-};
-
-/**
- * Get the SVG element that contains this workspace.
- * @return {!Element} SVG element.
- */
-Blockly.WorkspaceSvg.prototype.getParentSvg = function() {
-  if (this.cachedParentSvg_) {
-    return this.cachedParentSvg_;
-  }
-  var element = this.svgGroup_;
-  while (element) {
-    if (element.tagName == 'svg') {
-      this.cachedParentSvg_ = element;
-      return element;
+  for (var t = 0, field; field = fieldList[t]; t++) {
+    var root = field.getSvgRoot();
+    if (!root) {
+      continue;
     }
-    element = element.parentNode;
-  }
-  return null;
-};
-
-/**
- * Translate this workspace to new coordinates.
- * @param {number} x Horizontal translation.
- * @param {number} y Vertical translation.
- */
-Blockly.WorkspaceSvg.prototype.translate = function(x, y) {
-  var translation = 'translate(' + x + ',' + y + ') ' +
-      'scale(' + this.scale + ')';
-  this.svgBlockCanvas_.setAttribute('transform', translation);
-  this.svgBubbleCanvas_.setAttribute('transform', translation);
-};
-
-/**
- * Returns the horizontal offset of the workspace.
- * Intended for LTR/RTL compatibility in XML.
- * @return {number} Width.
- */
-Blockly.WorkspaceSvg.prototype.getWidth = function() {
-  var metrics = this.getMetrics();
-  return metrics ? metrics.viewWidth / this.scale : 0;
-};
-
-/**
- * Toggles the visibility of the workspace.
- * Currently only intended for main workspace.
- * @param {boolean} isVisible True if workspace should be visible.
- */
-Blockly.WorkspaceSvg.prototype.setVisible = function(isVisible) {
-  this.getParentSvg().style.display = isVisible ? 'block' : 'none';
-  if (this.toolbox_) {
-    // Currently does not support toolboxes in mutators.
-    this.toolbox_.HtmlDiv.style.display = isVisible ? 'block' : 'none';
-  }
-  if (isVisible) {
-    this.render();
-    if (this.toolbox_) {
-      this.toolbox_.position();
-    }
-  } else {
-    Blockly.hideChaff(true);
-  }
-};
-
-/**
- * Render all blocks in workspace.
- */
-Blockly.WorkspaceSvg.prototype.render = function() {
-  // Generate list of all blocks.
-  var blocks = this.getAllBlocks();
-  // Render each block.
-  for (var i = blocks.length - 1; i >= 0; i--) {
-    blocks[i].render(false);
-  }
-};
-
-/**
- * Turn the visual trace functionality on or off.
- * @param {boolean} armed True if the trace should be on.
- */
-Blockly.WorkspaceSvg.prototype.traceOn = function(armed) {
-  this.traceOn_ = armed;
-  if (this.traceWrapper_) {
-    Blockly.unbindEvent_(this.traceWrapper_);
-    this.traceWrapper_ = null;
-  }
-  if (armed) {
-    this.traceWrapper_ = Blockly.bindEvent_(this.svgBlockCanvas_,
-        'blocklySelectChange', this, function() {this.traceOn_ = false;});
-  }
-};
-
-/**
- * Highlight a block in the workspace.
- * @param {?string} id ID of block to find.
- */
-Blockly.WorkspaceSvg.prototype.highlightBlock = function(id) {
-  if (this.traceOn_ && Blockly.dragMode_ != Blockly.DRAG_NONE) {
-    // The blocklySelectChange event normally prevents this, but sometimes
-    // there is a race condition on fast-executing apps.
-    this.traceOn(false);
-  }
-  if (!this.traceOn_) {
-    return;
-  }
-  var block = null;
-  if (id) {
-    block = this.getBlockById(id);
-    if (!block) {
-      return;
-    }
-  }
-  // Temporary turn off the listener for selection changes, so that we don't
-  // trip the monitor for detecting user activity.
-  this.traceOn(false);
-  // Select the current block.
-  if (block) {
-    block.select();
-  } else if (Blockly.selected) {
-    Blockly.selected.unselect();
-  }
-  // Restore the monitor for user activity after the selection event has fired.
-  var thisWorkspace = this;
-  setTimeout(function() {thisWorkspace.traceOn(true);}, 1);
-};
-
-/**
- * Paste the provided block onto the workspace.
- * @param {!Element} xmlBlock XML block element.
- */
-Blockly.WorkspaceSvg.prototype.paste = function(xmlBlock) {
-  if (!this.rendered || xmlBlock.getElementsByTagName('block').length >=
-      this.remainingCapacity()) {
-    return;
-  }
-  Blockly.terminateDrag_();  // Dragging while pasting?  No.
-  Blockly.Events.disable();
-  var block = Blockly.Xml.domToBlock(xmlBlock, this);
-  // Move the duplicate to original position.
-  var blockX = parseInt(xmlBlock.getAttribute('x'), 10);
-  var blockY = parseInt(xmlBlock.getAttribute('y'), 10);
-  if (!isNaN(blockX) && !isNaN(blockY)) {
     if (this.RTL) {
-      blockX = -blockX;
+      cursorX -= field.renderSep + field.renderWidth;
+      root.setAttribute('transform',
+          'translate(' + cursorX + ',' + cursorY + ')');
+      if (field.renderWidth) {
+        cursorX -= Blockly.BlockSvg.SEP_SPACE_X;
+      }
+    } else {
+      root.setAttribute('transform',
+          'translate(' + (cursorX + field.renderSep) + ',' + cursorY + ')');
+      if (field.renderWidth) {
+        cursorX += field.renderSep + field.renderWidth +
+            Blockly.BlockSvg.SEP_SPACE_X;
+      }
     }
-    // Offset block until not clobbering another block and not in connection
-    // distance with neighbouring blocks.
-    do {
-      var collide = false;
-      var allBlocks = this.getAllBlocks();
-      for (var i = 0, otherBlock; otherBlock = allBlocks[i]; i++) {
-        var otherXY = otherBlock.getRelativeToSurfaceXY();
-        if (Math.abs(blockX - otherXY.x) <= 1 &&
-            Math.abs(blockY - otherXY.y) <= 1) {
-          collide = true;
+  }
+  return this.RTL ? -cursorX : cursorX;
+};
+
+/**
+ * Computes the height and widths for each row and field.
+ * @param {number} iconWidth Offset of first row due to icons.
+ * @return {!Array.<!Array.<!Object>>} 2D array of objects, each containing
+ *     position information.
+ * @private
+ */
+Blockly.BlockSvg.prototype.renderCompute_ = function(iconWidth) {
+  var inputList = this.inputList;
+  var inputRows = [];
+  inputRows.rightEdge = iconWidth + Blockly.BlockSvg.SEP_SPACE_X * 2;
+  if (this.previousConnection || this.nextConnection) {
+    inputRows.rightEdge = Math.max(inputRows.rightEdge,
+        Blockly.BlockSvg.NOTCH_WIDTH + Blockly.BlockSvg.SEP_SPACE_X);
+  }
+  var fieldValueWidth = 0;  // Width of longest external value field.
+  var fieldStatementWidth = 0;  // Width of longest statement field.
+  var hasValue = false;
+  var hasStatement = false;
+  var hasDummy = false;
+  var lastType = undefined;
+  var isInline = this.getInputsInline() && !this.isCollapsed();
+  for (var i = 0, input; input = inputList[i]; i++) {
+    if (!input.isVisible()) {
+      continue;
+    }
+    var row;
+    if (!isInline || !lastType ||
+        lastType == Blockly.NEXT_STATEMENT ||
+        input.type == Blockly.NEXT_STATEMENT) {
+      // Create new row.
+      lastType = input.type;
+      row = [];
+      if (isInline && input.type != Blockly.NEXT_STATEMENT) {
+        row.type = Blockly.BlockSvg.INLINE;
+      } else {
+        row.type = input.type;
+      }
+      row.height = 0;
+      inputRows.push(row);
+    } else {
+      row = inputRows[inputRows.length - 1];
+    }
+    row.push(input);
+
+    // Compute minimum input size.
+    input.renderHeight = Blockly.BlockSvg.MIN_BLOCK_Y;
+    // The width is currently only needed for inline value inputs.
+    if (isInline && input.type == Blockly.INPUT_VALUE) {
+      input.renderWidth = Blockly.BlockSvg.TAB_WIDTH +
+          Blockly.BlockSvg.SEP_SPACE_X * 1.25;
+    } else {
+      input.renderWidth = 0;
+    }
+    // Expand input size if there is a connection.
+    if (input.connection && input.connection.isConnected()) {
+      var linkedBlock = input.connection.targetBlock();
+      var bBox = linkedBlock.getHeightWidth();
+      input.renderHeight = Math.max(input.renderHeight, bBox.height);
+      input.renderWidth = Math.max(input.renderWidth, bBox.width);
+    }
+    // Blocks have a one pixel shadow that should sometimes overhang.
+    if (!isInline && i == inputList.length - 1) {
+      // Last value input should overhang.
+      input.renderHeight--;
+    } else if (!isInline && input.type == Blockly.INPUT_VALUE &&
+        inputList[i + 1] && inputList[i + 1].type == Blockly.NEXT_STATEMENT) {
+      // Value input above statement input should overhang.
+      input.renderHeight--;
+    }
+
+    row.height = Math.max(row.height, input.renderHeight);
+    input.fieldWidth = 0;
+    if (inputRows.length == 1) {
+      // The first row gets shifted to accommodate any icons.
+      input.fieldWidth += this.RTL ? -iconWidth : iconWidth;
+    }
+    var previousFieldEditable = false;
+    for (var j = 0, field; field = input.fieldRow[j]; j++) {
+      if (j != 0) {
+        input.fieldWidth += Blockly.BlockSvg.SEP_SPACE_X;
+      }
+      // Get the dimensions of the field.
+      var fieldSize = field.getSize();
+      field.renderWidth = fieldSize.width;
+      field.renderSep = (previousFieldEditable && field.EDITABLE) ?
+          Blockly.BlockSvg.SEP_SPACE_X : 0;
+      input.fieldWidth += field.renderWidth + field.renderSep;
+      row.height = Math.max(row.height, fieldSize.height);
+      previousFieldEditable = field.EDITABLE;
+    }
+
+    if (row.type != Blockly.BlockSvg.INLINE) {
+      if (row.type == Blockly.NEXT_STATEMENT) {
+        hasStatement = true;
+        fieldStatementWidth = Math.max(fieldStatementWidth, input.fieldWidth);
+      } else {
+        if (row.type == Blockly.INPUT_VALUE) {
+          hasValue = true;
+        } else if (row.type == Blockly.DUMMY_INPUT) {
+          hasDummy = true;
+        }
+        fieldValueWidth = Math.max(fieldValueWidth, input.fieldWidth);
+      }
+    }
+  }
+
+  // Make inline rows a bit thicker in order to enclose the values.
+  for (var y = 0, row; row = inputRows[y]; y++) {
+    row.thicker = false;
+    if (row.type == Blockly.BlockSvg.INLINE) {
+      for (var z = 0, input; input = row[z]; z++) {
+        if (input.type == Blockly.INPUT_VALUE) {
+          row.height += 2 * Blockly.BlockSvg.INLINE_PADDING_Y;
+          row.thicker = true;
           break;
         }
       }
-      if (!collide) {
-        // Check for blocks in snap range to any of its connections.
-        var connections = block.getConnections_(false);
-        for (var i = 0, connection; connection = connections[i]; i++) {
-          var neighbour = connection.closest(Blockly.SNAP_RADIUS,
-              new goog.math.Coordinate(blockX, blockY));
-          if (neighbour.connection) {
-            collide = true;
-            break;
-          }
-        }
-      }
-      if (collide) {
-        if (this.RTL) {
-          blockX -= Blockly.SNAP_RADIUS;
-        } else {
-          blockX += Blockly.SNAP_RADIUS;
-        }
-        blockY += Blockly.SNAP_RADIUS * 2;
-      }
-    } while (collide);
-    block.moveBy(blockX, blockY);
+    }
   }
-  Blockly.Events.enable();
-  if (Blockly.Events.isEnabled() && !block.isShadow()) {
-    Blockly.Events.fire(new Blockly.Events.Create(block));
+
+  // Compute the statement edge.
+  // This is the width of a block where statements are nested.
+  inputRows.statementEdge = 2 * Blockly.BlockSvg.SEP_SPACE_X +
+      fieldStatementWidth;
+  // Compute the preferred right edge.  Inline blocks may extend beyond.
+  // This is the width of the block where external inputs connect.
+  if (hasStatement) {
+    inputRows.rightEdge = Math.max(inputRows.rightEdge,
+        inputRows.statementEdge + Blockly.BlockSvg.NOTCH_WIDTH);
   }
-  block.select();
+  if (hasValue) {
+    inputRows.rightEdge = Math.max(inputRows.rightEdge, fieldValueWidth +
+        Blockly.BlockSvg.SEP_SPACE_X * 2 + Blockly.BlockSvg.TAB_WIDTH);
+  } else if (hasDummy) {
+    inputRows.rightEdge = Math.max(inputRows.rightEdge, fieldValueWidth +
+        Blockly.BlockSvg.SEP_SPACE_X * 2);
+  }
+
+  inputRows.hasValue = hasValue;
+  inputRows.hasStatement = hasStatement;
+  inputRows.hasDummy = hasDummy;
+  return inputRows;
 };
 
+
 /**
- * Make a list of all the delete areas for this workspace.
+ * Draw the path of the block.
+ * Move the fields to the correct locations.
+ * @param {number} iconWidth Offset of first row due to icons.
+ * @param {!Array.<!Array.<!Object>>} inputRows 2D array of objects, each
+ *     containing position information.
+ * @private
  */
-Blockly.WorkspaceSvg.prototype.recordDeleteAreas = function() {
-  if (this.trashcan) {
-    this.deleteAreaTrash_ = this.trashcan.getClientRect();
+Blockly.BlockSvg.prototype.renderDraw_ = function(iconWidth, inputRows) {
+  this.startHat_ = false;
+  // Reset the height to zero and let the rendering process add in
+  // portions of the block height as it goes. (e.g. hats, inputs, etc.)
+  this.height = 0;
+  // Should the top and bottom left corners be rounded or square?
+  if (this.outputConnection) {
+    this.squareTopLeftCorner_ = true;
+    this.squareBottomLeftCorner_ = true;
   } else {
-    this.deleteAreaTrash_ = null;
+    this.squareTopLeftCorner_ = false;
+    this.squareBottomLeftCorner_ = false;
+    // If this block is in the middle of a stack, square the corners.
+    if (this.previousConnection) {
+      var prevBlock = this.previousConnection.targetBlock();
+      if (prevBlock && prevBlock.getNextBlock() == this) {
+        this.squareTopLeftCorner_ = true;
+       }
+    } else if (Blockly.BlockSvg.START_HAT) {
+      // No output or previous connection.
+      this.squareTopLeftCorner_ = true;
+      this.startHat_ = true;
+      this.height += Blockly.BlockSvg.START_HAT_HEIGHT;
+      inputRows.rightEdge = Math.max(inputRows.rightEdge, 100);
+    }
+    var nextBlock = this.getNextBlock();
+    if (nextBlock) {
+      this.squareBottomLeftCorner_ = true;
+    }
   }
-  if (this.flyout_) {
-    this.deleteAreaToolbox_ = this.flyout_.getClientRect();
-  } else if (this.toolbox_) {
-    this.deleteAreaToolbox_ = this.toolbox_.getClientRect();
+
+  // Fetch the block's coordinates on the surface for use in anchoring
+  // the connections.
+  var connectionsXY = this.getRelativeToSurfaceXY();
+
+  // Assemble the block's path.
+  var steps = [];
+  var inlineSteps = [];
+  // The highlighting applies to edges facing the upper-left corner.
+  // Since highlighting is a two-pixel wide border, it would normally overhang
+  // the edge of the block by a pixel. So undersize all measurements by a pixel.
+  var highlightSteps = [];
+  var highlightInlineSteps = [];
+
+  this.renderDrawTop_(steps, highlightSteps, connectionsXY,
+      inputRows.rightEdge);
+  var cursorY = this.renderDrawRight_(steps, highlightSteps, inlineSteps,
+      highlightInlineSteps, connectionsXY, inputRows, iconWidth);
+  this.renderDrawBottom_(steps, highlightSteps, connectionsXY, cursorY);
+  this.renderDrawLeft_(steps, highlightSteps, connectionsXY, cursorY);
+
+  var pathString = steps.join(' ') + '\n' + inlineSteps.join(' ');
+  this.svgPath_.setAttribute('d', pathString);
+  this.svgPathDark_.setAttribute('d', pathString);
+  pathString = highlightSteps.join(' ') + '\n' + highlightInlineSteps.join(' ');
+  this.svgPathLight_.setAttribute('d', pathString);
+  if (this.RTL) {
+    // Mirror the block's path.
+    this.svgPath_.setAttribute('transform', 'scale(-1 1)');
+    this.svgPathLight_.setAttribute('transform', 'scale(-1 1)');
+    this.svgPathDark_.setAttribute('transform', 'translate(1,1) scale(-1 1)');
+  }
+};
+
+/**
+ * Render the top edge of the block.
+ * @param {!Array.<string>} steps Path of block outline.
+ * @param {!Array.<string>} highlightSteps Path of block highlights.
+ * @param {!Object} connectionsXY Location of block.
+ * @param {number} rightEdge Minimum width of block.
+ * @private
+ */
+Blockly.BlockSvg.prototype.renderDrawTop_ =
+    function(steps, highlightSteps, connectionsXY, rightEdge) {
+  // Position the cursor at the top-left starting point.
+  if (this.squareTopLeftCorner_) {
+    steps.push('m 0,0');
+    highlightSteps.push('m 0.5,0.5');
+    if (this.startHat_) {
+      steps.push(Blockly.BlockSvg.START_HAT_PATH);
+      highlightSteps.push(this.RTL ?
+          Blockly.BlockSvg.START_HAT_HIGHLIGHT_RTL :
+          Blockly.BlockSvg.START_HAT_HIGHLIGHT_LTR);
+    }
   } else {
-    this.deleteAreaToolbox_ = null;
+    steps.push(Blockly.BlockSvg.TOP_LEFT_CORNER_START);
+    highlightSteps.push(this.RTL ?
+        Blockly.BlockSvg.TOP_LEFT_CORNER_START_HIGHLIGHT_RTL :
+        Blockly.BlockSvg.TOP_LEFT_CORNER_START_HIGHLIGHT_LTR);
+    // Top-left rounded corner.
+    steps.push(Blockly.BlockSvg.TOP_LEFT_CORNER);
+    highlightSteps.push(Blockly.BlockSvg.TOP_LEFT_CORNER_HIGHLIGHT);
   }
+
+  // Top edge.
+  if (this.previousConnection) {
+    steps.push('H', Blockly.BlockSvg.NOTCH_WIDTH - 15);
+    highlightSteps.push('H', Blockly.BlockSvg.NOTCH_WIDTH - 15);
+    steps.push(Blockly.BlockSvg.NOTCH_PATH_LEFT);
+    highlightSteps.push(Blockly.BlockSvg.NOTCH_PATH_LEFT_HIGHLIGHT);
+    // Create previous block connection.
+    var connectionX = connectionsXY.x + (this.RTL ?
+        -Blockly.BlockSvg.NOTCH_WIDTH : Blockly.BlockSvg.NOTCH_WIDTH);
+    var connectionY = connectionsXY.y;
+    this.previousConnection.moveTo(connectionX, connectionY);
+    // This connection will be tightened when the parent renders.
+  }
+  steps.push('H', rightEdge);
+  highlightSteps.push('H', rightEdge - 0.5);
+  this.width = rightEdge;
 };
 
 /**
- * Is the mouse event over a delete area (toolbox or non-closing flyout)?
- * Opens or closes the trashcan and sets the cursor as a side effect.
- * @param {!Event} e Mouse move event.
- * @return {boolean} True if event is in a delete area.
- */
-Blockly.WorkspaceSvg.prototype.isDeleteArea = function(e) {
-  var xy = new goog.math.Coordinate(e.clientX, e.clientY);
-  if (this.deleteAreaTrash_) {
-    if (this.deleteAreaTrash_.contains(xy)) {
-      this.trashcan.setOpen_(true);
-      Blockly.Css.setCursor(Blockly.Css.Cursor.DELETE);
-      return true;
-    }
-    this.trashcan.setOpen_(false);
-  }
-  if (this.deleteAreaToolbox_) {
-    if (this.deleteAreaToolbox_.contains(xy)) {
-      Blockly.Css.setCursor(Blockly.Css.Cursor.DELETE);
-      return true;
-    }
-  }
-  Blockly.Css.setCursor(Blockly.Css.Cursor.CLOSED);
-  return false;
-};
-
-/**
- * Handle a mouse-down on SVG drawing surface.
- * @param {!Event} e Mouse down event.
+ * Render the right edge of the block.
+ * @param {!Array.<string>} steps Path of block outline.
+ * @param {!Array.<string>} highlightSteps Path of block highlights.
+ * @param {!Array.<string>} inlineSteps Inline block outlines.
+ * @param {!Array.<string>} highlightInlineSteps Inline block highlights.
+ * @param {!Object} connectionsXY Location of block.
+ * @param {!Array.<!Array.<!Object>>} inputRows 2D array of objects, each
+ *     containing position information.
+ * @param {number} iconWidth Offset of first row due to icons.
+ * @return {number} Height of block.
  * @private
  */
-Blockly.WorkspaceSvg.prototype.onMouseDown_ = function(e) {
-  this.markFocused();
-  if (Blockly.isTargetInput_(e)) {
-    return;
-  }
-  Blockly.svgResize(this);
-  Blockly.terminateDrag_();  // In case mouse-up event was lost.
-  Blockly.hideChaff();
-  var isTargetWorkspace = e.target && e.target.nodeName &&
-      (e.target.nodeName.toLowerCase() == 'svg' ||
-       e.target == this.svgBackground_);
-  if (isTargetWorkspace && Blockly.selected && !this.options.readOnly) {
-    // Clicking on the document clears the selection.
-    Blockly.selected.unselect();
-  }
-  if (Blockly.isRightButton(e)) {
-    // Right-click.
-    this.showContextMenu_(e);
-  } else if (this.scrollbar) {
-    // If the workspace is editable, only allow scrolling when gripping empty
-    // space.  Otherwise, allow scrolling when gripping anywhere.
-    this.isScrolling = true;
-    // Record the current mouse position.
-    this.startDragMouseX = e.clientX;
-    this.startDragMouseY = e.clientY;
-    this.startDragMetrics = this.getMetrics();
-    this.startScrollX = this.scrollX;
-    this.startScrollY = this.scrollY;
-
-    // If this is a touch event then bind to the mouseup so workspace drag mode
-    // is turned off and double move events are not performed on a block.
-    // See comment in inject.js Blockly.init_ as to why mouseup events are
-    // bound to the document instead of the SVG's surface.
-    if ('mouseup' in Blockly.bindEvent_.TOUCH_MAP) {
-      Blockly.onTouchUpWrapper_ = Blockly.onTouchUpWrapper_ || [];
-      Blockly.onTouchUpWrapper_ = Blockly.onTouchUpWrapper_.concat(
-          Blockly.bindEvent_(document, 'mouseup', null, Blockly.onMouseUp_));
-    }
-    Blockly.onMouseMoveWrapper_ = Blockly.onMouseMoveWrapper_ || [];
-    Blockly.onMouseMoveWrapper_ = Blockly.onMouseMoveWrapper_.concat(
-        Blockly.bindEvent_(document, 'mousemove', null, Blockly.onMouseMove_));
-  }
-  // This event has been handled.  No need to bubble up to the document.
-  e.stopPropagation();
-  e.preventDefault();
-};
-
-/**
- * Start tracking a drag of an object on this workspace.
- * @param {!Event} e Mouse down event.
- * @param {!goog.math.Coordinate} xy Starting location of object.
- */
-Blockly.WorkspaceSvg.prototype.startDrag = function(e, xy) {
-  // Record the starting offset between the bubble's location and the mouse.
-  var point = Blockly.mouseToSvg(e, this.getParentSvg());
-  // Fix scale of mouse event.
-  point.x /= this.scale;
-  point.y /= this.scale;
-  this.dragDeltaXY_ = goog.math.Coordinate.difference(xy, point);
-};
-
-/**
- * Track a drag of an object on this workspace.
- * @param {!Event} e Mouse move event.
- * @return {!goog.math.Coordinate} New location of object.
- */
-Blockly.WorkspaceSvg.prototype.moveDrag = function(e) {
-  var point = Blockly.mouseToSvg(e, this.getParentSvg());
-  // Fix scale of mouse event.
-  point.x /= this.scale;
-  point.y /= this.scale;
-  return goog.math.Coordinate.sum(this.dragDeltaXY_, point);
-};
-
-/**
- * Handle a mouse-wheel on SVG drawing surface.
- * @param {!Event} e Mouse wheel event.
- * @private
- */
-Blockly.WorkspaceSvg.prototype.onMouseWheel_ = function(e) {
-  if(e.ctrlKey){
-  // TODO: Remove terminateDrag and compensate for coordinate skew during zoom.
-  Blockly.terminateDrag_();
-  var delta = e.deltaY > 0 ? -1 : 1;
-  var position = Blockly.mouseToSvg(e, this.getParentSvg());
-  this.zoom(position.x, position.y, delta);
-  e.preventDefault();
-  }
-  else{
-        //alert(e.shiftKey+','+this.scrollX+','+this.scrollY+','+e.wheelDelta);
-       if(e.shiftKey==false){
-        if(e.wheelDelta<0){
-           this.scrollY+=10;
-          this.translate(this.scrollX, this.scrollY);
-        }
-        else{
-          this.scrollY-=10;
-          this.translate(this.scrollX, this.scrollY);
-        }
-      }
-      else{
-        if(e.wheelDelta<0){
-          this.scrollX-=10;
-          this.translate(this.scrollX, this.scrollY);
-          }
-        else{
-          this.scrollX+=10;
-          this.translate(this.scrollX, this.scrollY);
-          }
-        }
-      }
-};
-
-/**
- * Calculate the bounding box for the blocks on the workspace.
- *
- * @return {Object} Contains the position and size of the bounding box
- *   containing the blocks on the workspace.
- */
-Blockly.WorkspaceSvg.prototype.getBlocksBoundingBox = function() {
-  var topBlocks = this.getTopBlocks();
-  // There are no blocks, return empty rectangle.
-  if (!topBlocks.length) {
-    return {x: 0, y: 0, width: 0, height: 0};
-  }
-
-  // Initialize boundary using the first block.
-  var boundary = topBlocks[0].getBoundingRectangle();
-
-  // Start at 1 since the 0th block was used for initialization
-  for (var i = 1; i < topBlocks.length; i++) {
-    var blockBoundary = topBlocks[i].getBoundingRectangle();
-    if (blockBoundary.topLeft.x < boundary.topLeft.x) {
-      boundary.topLeft.x = blockBoundary.topLeft.x;
-    }
-    if (blockBoundary.bottomRight.x > boundary.bottomRight.x) {
-      boundary.bottomRight.x = blockBoundary.bottomRight.x;
-    }
-    if (blockBoundary.topLeft.y < boundary.topLeft.y) {
-      boundary.topLeft.y = blockBoundary.topLeft.y;
-    }
-    if (blockBoundary.bottomRight.y > boundary.bottomRight.y) {
-      boundary.bottomRight.y = blockBoundary.bottomRight.y;
-    }
-  }
-  return {
-    x: boundary.topLeft.x,
-    y: boundary.topLeft.y,
-    width: boundary.bottomRight.x - boundary.topLeft.x,
-    height: boundary.bottomRight.y - boundary.topLeft.y
-  };
-};
-
-/**
- * Clean up the workspace by ordering all the blocks in a column.
- * @private
- */
-Blockly.WorkspaceSvg.prototype.cleanUp_ = function() {
-  Blockly.Events.setGroup(true);
-  var topBlocks = this.getTopBlocks(true);
+Blockly.BlockSvg.prototype.renderDrawRight_ = function(steps, highlightSteps,
+    inlineSteps, highlightInlineSteps, connectionsXY, inputRows, iconWidth) {
+  var cursorX;
   var cursorY = 0;
-  for (var i = 0, block; block = topBlocks[i]; i++) {
-    var xy = block.getRelativeToSurfaceXY();
-    block.moveBy(-xy.x, cursorY - xy.y);
-    block.snapToGrid();
-    cursorY = block.getRelativeToSurfaceXY().y +
-        block.getHeightWidth().height + Blockly.BlockSvg.MIN_BLOCK_Y;
-  }
-  Blockly.Events.setGroup(false);
-  // Fire an event to allow scrollbars to resize.
-  Blockly.asyncSvgResize(this);
-};
-
-/**
- * Show the context menu for the workspace.
- * @param {!Event} e Mouse event.
- * @private
- */
-Blockly.WorkspaceSvg.prototype.showContextMenu_ = function(e) {
-  if (this.options.readOnly || this.isFlyout) {
-    return;
-  }
-  var menuOptions = [];
-  var topBlocks = this.getTopBlocks(true);
-  var eventGroup = Blockly.genUid();
-
-  // Options to undo/redo previous action.
-  var undoOption = {};
-  undoOption.text = Blockly.Msg.UNDO;
-  undoOption.enabled = this.undoStack_.length > 0;
-  undoOption.callback = this.undo.bind(this, false);
-  menuOptions.push(undoOption);
-  var redoOption = {};
-  redoOption.text = Blockly.Msg.REDO;
-  redoOption.enabled = this.redoStack_.length > 0;
-  redoOption.callback = this.undo.bind(this, true);
-  menuOptions.push(redoOption);
-
-  // Option to clean up blocks.
-  if (this.scrollbar) {
-    var cleanOption = {};
-    cleanOption.text = Blockly.Msg.CLEAN_UP;
-    cleanOption.enabled = topBlocks.length > 1;
-    cleanOption.callback = this.cleanUp_.bind(this);
-    menuOptions.push(cleanOption);
-  }
-
-  // Add a little animation to collapsing and expanding.
-  var DELAY = 10;
-  if (this.options.collapse) {
-    var hasCollapsedBlocks = false;
-    var hasExpandedBlocks = false;
-    for (var i = 0; i < topBlocks.length; i++) {
-      var block = topBlocks[i];
-      while (block) {
-        if (block.isCollapsed()) {
-          hasCollapsedBlocks = true;
-        } else {
-          hasExpandedBlocks = true;
+  var connectionX, connectionY;
+  for (var y = 0, row; row = inputRows[y]; y++) {
+    cursorX = Blockly.BlockSvg.SEP_SPACE_X;
+    if (y == 0) {
+      cursorX += this.RTL ? -iconWidth : iconWidth;
+    }
+    highlightSteps.push('M', (inputRows.rightEdge - 0.5) + ',' +
+        (cursorY + 0.5));
+    if (this.isCollapsed()) {
+      // Jagged right edge.
+      var input = row[0];
+      var fieldX = cursorX;
+      var fieldY = cursorY;
+      this.renderFields_(input.fieldRow, fieldX, fieldY);
+      steps.push(Blockly.BlockSvg.JAGGED_TEETH);
+      highlightSteps.push('h 8');
+      var remainder = row.height - Blockly.BlockSvg.JAGGED_TEETH_HEIGHT;
+      steps.push('v', remainder);
+      if (this.RTL) {
+        highlightSteps.push('v 3.9 l 7.2,3.4 m -14.5,8.9 l 7.3,3.5');
+        highlightSteps.push('v', remainder - 0.7);
+      }
+      this.width += Blockly.BlockSvg.JAGGED_TEETH_WIDTH;
+    } else if (row.type == Blockly.BlockSvg.INLINE) {
+      // Inline inputs.
+      for (var x = 0, input; input = row[x]; x++) {
+        var fieldX = cursorX;
+        var fieldY = cursorY;
+        if (row.thicker) {
+          // Lower the field slightly.
+          fieldY += Blockly.BlockSvg.INLINE_PADDING_Y;
         }
-        block = block.getNextBlock();
-      }
-    }
-
-    /**
-     * Option to collapse or expand top blocks.
-     * @param {boolean} shouldCollapse Whether a block should collapse.
-     * @private
-     */
-    var toggleOption = function(shouldCollapse) {
-      var ms = 0;
-      for (var i = 0; i < topBlocks.length; i++) {
-        var block = topBlocks[i];
-        while (block) {
-          setTimeout(block.setCollapsed.bind(block, shouldCollapse), ms);
-          block = block.getNextBlock();
-          ms += DELAY;
+        // TODO: Align inline field rows (left/right/centre).
+        cursorX = this.renderFields_(input.fieldRow, fieldX, fieldY);
+        if (input.type != Blockly.DUMMY_INPUT) {
+          cursorX += input.renderWidth + Blockly.BlockSvg.SEP_SPACE_X;
+        }
+        if (input.type == Blockly.INPUT_VALUE) {
+          inlineSteps.push('M', (cursorX - Blockly.BlockSvg.SEP_SPACE_X) +
+                           ',' + (cursorY + Blockly.BlockSvg.INLINE_PADDING_Y));
+          inlineSteps.push('h', Blockly.BlockSvg.TAB_WIDTH - 2 -
+                           input.renderWidth);
+          inlineSteps.push(Blockly.BlockSvg.TAB_PATH_DOWN);
+          inlineSteps.push('v', input.renderHeight + 1 -
+                                Blockly.BlockSvg.TAB_HEIGHT);
+          inlineSteps.push('h', input.renderWidth + 2 -
+                           Blockly.BlockSvg.TAB_WIDTH);
+          inlineSteps.push('z');
+          if (this.RTL) {
+            // Highlight right edge, around back of tab, and bottom.
+            highlightInlineSteps.push('M',
+                (cursorX - Blockly.BlockSvg.SEP_SPACE_X - 2.5 +
+                 Blockly.BlockSvg.TAB_WIDTH - input.renderWidth) + ',' +
+                (cursorY + Blockly.BlockSvg.INLINE_PADDING_Y + 0.5));
+            highlightInlineSteps.push(
+                Blockly.BlockSvg.TAB_PATH_DOWN_HIGHLIGHT_RTL);
+            highlightInlineSteps.push('v',
+                input.renderHeight - Blockly.BlockSvg.TAB_HEIGHT + 2.5);
+            highlightInlineSteps.push('h',
+                input.renderWidth - Blockly.BlockSvg.TAB_WIDTH + 2);
+          } else {
+            // Highlight right edge, bottom.
+            highlightInlineSteps.push('M',
+                (cursorX - Blockly.BlockSvg.SEP_SPACE_X + 0.5) + ',' +
+                (cursorY + Blockly.BlockSvg.INLINE_PADDING_Y + 0.5));
+            highlightInlineSteps.push('v', input.renderHeight + 1);
+            highlightInlineSteps.push('h', Blockly.BlockSvg.TAB_WIDTH - 2 -
+                                           input.renderWidth);
+            // Short highlight glint at bottom of tab.
+            highlightInlineSteps.push('M',
+                (cursorX - input.renderWidth - Blockly.BlockSvg.SEP_SPACE_X +
+                 0.9) + ',' + (cursorY + Blockly.BlockSvg.INLINE_PADDING_Y +
+                 Blockly.BlockSvg.TAB_HEIGHT - 0.7));
+            highlightInlineSteps.push('l',
+                (Blockly.BlockSvg.TAB_WIDTH * 0.46) + ',-2.1');
+          }
+          // Create inline input connection.
+          if (this.RTL) {
+            connectionX = connectionsXY.x - cursorX -
+                Blockly.BlockSvg.TAB_WIDTH + Blockly.BlockSvg.SEP_SPACE_X +
+                input.renderWidth + 1;
+          } else {
+            connectionX = connectionsXY.x + cursorX +
+                Blockly.BlockSvg.TAB_WIDTH - Blockly.BlockSvg.SEP_SPACE_X -
+                input.renderWidth - 1;
+          }
+          connectionY = connectionsXY.y + cursorY +
+              Blockly.BlockSvg.INLINE_PADDING_Y + 1;
+          input.connection.moveTo(connectionX, connectionY);
+          if (input.connection.isConnected()) {
+            input.connection.tighten_();
+          }
         }
       }
-    };
 
-    // Option to collapse top blocks.
-    var collapseOption = {enabled: hasExpandedBlocks};
-    collapseOption.text = Blockly.Msg.COLLAPSE_ALL;
-    collapseOption.callback = function() {
-      toggleOption(true);
-    };
-    menuOptions.push(collapseOption);
-
-    // Option to expand top blocks.
-    var expandOption = {enabled: hasCollapsedBlocks};
-    expandOption.text = Blockly.Msg.EXPAND_ALL;
-    expandOption.callback = function() {
-      toggleOption(false);
-    };
-    menuOptions.push(expandOption);
-  }
-
-  // Option to delete all blocks.
-  // Count the number of blocks that are deletable.
-  var deleteList = [];
-  function addDeletableBlocks(block) {
-    if (block.isDeletable()) {
-      deleteList = deleteList.concat(block.getDescendants());
-    } else {
-      var children = block.getChildren();
-      for (var i = 0; i < children.length; i++) {
-        addDeletableBlocks(children[i]);
+      cursorX = Math.max(cursorX, inputRows.rightEdge);
+      this.width = Math.max(this.width, cursorX);
+      steps.push('H', cursorX);
+      highlightSteps.push('H', cursorX - 0.5);
+      steps.push('v', row.height);
+      if (this.RTL) {
+        highlightSteps.push('v', row.height - 1);
       }
-    }
-  }
-  for (var i = 0; i < topBlocks.length; i++) {
-    addDeletableBlocks(topBlocks[i]);
-  }
-  var deleteOption = {
-    text: deleteList.length == 1 ? Blockly.Msg.DELETE_BLOCK :
-        Blockly.Msg.DELETE_X_BLOCKS.replace('%1', String(deleteList.length)),
-    enabled: deleteList.length > 0,
-    callback: function() {
-      if (deleteList.length < 2 ||
-          window.confirm(Blockly.Msg.DELETE_ALL_BLOCKS.replace('%1',
-          String(deleteList.length)))) {
-        deleteNext();
+    } else if (row.type == Blockly.INPUT_VALUE) {
+      // External input.
+      var input = row[0];
+      var fieldX = cursorX;
+      var fieldY = cursorY;
+      if (input.align != Blockly.ALIGN_LEFT) {
+        var fieldRightX = inputRows.rightEdge - input.fieldWidth -
+            Blockly.BlockSvg.TAB_WIDTH - 2 * Blockly.BlockSvg.SEP_SPACE_X;
+        if (input.align == Blockly.ALIGN_RIGHT) {
+          fieldX += fieldRightX;
+        } else if (input.align == Blockly.ALIGN_CENTRE) {
+          fieldX += fieldRightX / 2;
+        }
       }
-    }
-  };
-  function deleteNext() {
-    Blockly.Events.setGroup(eventGroup);
-    var block = deleteList.shift();
-    if (block) {
-      if (block.workspace) {
-        block.dispose(false, true);
-        setTimeout(deleteNext, DELAY);
+      this.renderFields_(input.fieldRow, fieldX, fieldY);
+      steps.push(Blockly.BlockSvg.TAB_PATH_DOWN);
+      var v = row.height - Blockly.BlockSvg.TAB_HEIGHT;
+      steps.push('v', v);
+      if (this.RTL) {
+        // Highlight around back of tab.
+        highlightSteps.push(Blockly.BlockSvg.TAB_PATH_DOWN_HIGHLIGHT_RTL);
+        highlightSteps.push('v', v + 0.5);
       } else {
-        deleteNext();
+        // Short highlight glint at bottom of tab.
+        highlightSteps.push('M', (inputRows.rightEdge - 5) + ',' +
+            (cursorY + Blockly.BlockSvg.TAB_HEIGHT - 0.7));
+        highlightSteps.push('l', (Blockly.BlockSvg.TAB_WIDTH * 0.46) +
+            ',-2.1');
+      }
+      // Create external input connection.
+      connectionX = connectionsXY.x +
+          (this.RTL ? -inputRows.rightEdge - 1 : inputRows.rightEdge + 1);
+      connectionY = connectionsXY.y + cursorY;
+      input.connection.moveTo(connectionX, connectionY);
+      if (input.connection.isConnected()) {
+        input.connection.tighten_();
+        this.width = Math.max(this.width, inputRows.rightEdge +
+            input.connection.targetBlock().getHeightWidth().width -
+            Blockly.BlockSvg.TAB_WIDTH + 1);
+      }
+    } else if (row.type == Blockly.DUMMY_INPUT) {
+      // External naked field.
+      var input = row[0];
+      var fieldX = cursorX;
+      var fieldY = cursorY;
+      if (input.align != Blockly.ALIGN_LEFT) {
+        var fieldRightX = inputRows.rightEdge - input.fieldWidth -
+            2 * Blockly.BlockSvg.SEP_SPACE_X;
+        if (inputRows.hasValue) {
+          fieldRightX -= Blockly.BlockSvg.TAB_WIDTH;
+        }
+        if (input.align == Blockly.ALIGN_RIGHT) {
+          fieldX += fieldRightX;
+        } else if (input.align == Blockly.ALIGN_CENTRE) {
+          fieldX += fieldRightX / 2;
+        }
+      }
+      this.renderFields_(input.fieldRow, fieldX, fieldY);
+      steps.push('v', row.height);
+      if (this.RTL) {
+        highlightSteps.push('v', row.height - 1);
+      }
+    } else if (row.type == Blockly.NEXT_STATEMENT) {
+      // Nested statement.
+      var input = row[0];
+      if (y == 0) {
+        // If the first input is a statement stack, add a small row on top.
+        steps.push('v', Blockly.BlockSvg.SEP_SPACE_Y);
+        if (this.RTL) {
+          highlightSteps.push('v', Blockly.BlockSvg.SEP_SPACE_Y - 1);
+        }
+        cursorY += Blockly.BlockSvg.SEP_SPACE_Y;
+      }
+      var fieldX = cursorX;
+      var fieldY = cursorY;
+      if (input.align != Blockly.ALIGN_LEFT) {
+        var fieldRightX = inputRows.statementEdge - input.fieldWidth -
+            2 * Blockly.BlockSvg.SEP_SPACE_X;
+        if (input.align == Blockly.ALIGN_RIGHT) {
+          fieldX += fieldRightX;
+        } else if (input.align == Blockly.ALIGN_CENTRE) {
+          fieldX += fieldRightX / 2;
+        }
+      }
+      this.renderFields_(input.fieldRow, fieldX, fieldY);
+      cursorX = inputRows.statementEdge + Blockly.BlockSvg.NOTCH_WIDTH;
+      steps.push('H', cursorX);
+      steps.push(Blockly.BlockSvg.INNER_TOP_LEFT_CORNER);
+      steps.push('v', row.height - 2 * Blockly.BlockSvg.CORNER_RADIUS);
+      steps.push(Blockly.BlockSvg.INNER_BOTTOM_LEFT_CORNER);
+      steps.push('H', inputRows.rightEdge);
+      if (this.RTL) {
+        highlightSteps.push('M',
+            (cursorX - Blockly.BlockSvg.NOTCH_WIDTH +
+             Blockly.BlockSvg.DISTANCE_45_OUTSIDE) +
+            ',' + (cursorY + Blockly.BlockSvg.DISTANCE_45_OUTSIDE));
+        highlightSteps.push(
+            Blockly.BlockSvg.INNER_TOP_LEFT_CORNER_HIGHLIGHT_RTL);
+        highlightSteps.push('v',
+            row.height - 2 * Blockly.BlockSvg.CORNER_RADIUS);
+        highlightSteps.push(
+            Blockly.BlockSvg.INNER_BOTTOM_LEFT_CORNER_HIGHLIGHT_RTL);
+        highlightSteps.push('H', inputRows.rightEdge - 0.5);
+      } else {
+        highlightSteps.push('M',
+            (cursorX - Blockly.BlockSvg.NOTCH_WIDTH +
+             Blockly.BlockSvg.DISTANCE_45_OUTSIDE) + ',' +
+            (cursorY + row.height - Blockly.BlockSvg.DISTANCE_45_OUTSIDE));
+        highlightSteps.push(
+            Blockly.BlockSvg.INNER_BOTTOM_LEFT_CORNER_HIGHLIGHT_LTR);
+        highlightSteps.push('H', inputRows.rightEdge - 0.5);
+      }
+      // Create statement connection.
+      connectionX = connectionsXY.x + (this.RTL ? -cursorX : cursorX + 1);
+      connectionY = connectionsXY.y + cursorY + 1;
+      input.connection.moveTo(connectionX, connectionY);
+      if (input.connection.isConnected()) {
+        input.connection.tighten_();
+        this.width = Math.max(this.width, inputRows.statementEdge +
+            input.connection.targetBlock().getHeightWidth().width);
+      }
+      if (y == inputRows.length - 1 ||
+          inputRows[y + 1].type == Blockly.NEXT_STATEMENT) {
+        // If the final input is a statement stack, add a small row underneath.
+        // Consecutive statement stacks are also separated by a small divider.
+        steps.push('v', Blockly.BlockSvg.SEP_SPACE_Y);
+        if (this.RTL) {
+          highlightSteps.push('v', Blockly.BlockSvg.SEP_SPACE_Y - 1);
+        }
+        cursorY += Blockly.BlockSvg.SEP_SPACE_Y;
       }
     }
-    Blockly.Events.setGroup(false);
+    cursorY += row.height;
   }
-  menuOptions.push(deleteOption);
-
-  Blockly.ContextMenu.show(e, menuOptions, this.RTL);
-};
-
-/**
- * Load an audio file.  Cache it, ready for instantaneous playing.
- * @param {!Array.<string>} filenames List of file types in decreasing order of
- *   preference (i.e. increasing size).  E.g. ['media/go.mp3', 'media/go.wav']
- *   Filenames include path from Blockly's root.  File extensions matter.
- * @param {string} name Name of sound.
- * @private
- */
-Blockly.WorkspaceSvg.prototype.loadAudio_ = function(filenames, name) {
-  if (!filenames.length) {
-    return;
-  }
-  try {
-    var audioTest = new window['Audio']();
-  } catch (e) {
-    // No browser support for Audio.
-    // IE can throw an error even if the Audio object exists.
-    return;
-  }
-  var sound;
-  for (var i = 0; i < filenames.length; i++) {
-    var filename = filenames[i];
-    var ext = filename.match(/\.(\w+)$/);
-    if (ext && audioTest.canPlayType('audio/' + ext[1])) {
-      // Found an audio format we can play.
-      sound = new window['Audio'](filename);
-      break;
+  if (!inputRows.length) {
+    cursorY = Blockly.BlockSvg.MIN_BLOCK_Y;
+    steps.push('V', cursorY);
+    if (this.RTL) {
+      highlightSteps.push('V', cursorY - 1);
     }
   }
-  if (sound && sound.play) {
-    this.SOUNDS_[name] = sound;
-  }
+  return cursorY;
 };
 
 /**
- * Preload all the audio files so that they play quickly when asked for.
+ * Render the bottom edge of the block.
+ * @param {!Array.<string>} steps Path of block outline.
+ * @param {!Array.<string>} highlightSteps Path of block highlights.
+ * @param {!Object} connectionsXY Location of block.
+ * @param {number} cursorY Height of block.
  * @private
  */
-Blockly.WorkspaceSvg.prototype.preloadAudio_ = function() {
-  for (var name in this.SOUNDS_) {
-    var sound = this.SOUNDS_[name];
-    sound.volume = .01;
-    sound.play();
-    sound.pause();
-    // iOS can only process one sound at a time.  Trying to load more than one
-    // corrupts the earlier ones.  Just load one and leave the others uncached.
-    if (goog.userAgent.IPAD || goog.userAgent.IPHONE) {
-      break;
-    }
-  }
-};
-
-/**
- * Play an audio file at specified value.  If volume is not specified,
- * use full volume (1).
- * @param {string} name Name of sound.
- * @param {number=} opt_volume Volume of sound (0-1).
- */
-Blockly.WorkspaceSvg.prototype.playAudio = function(name, opt_volume) {
-  var sound = this.SOUNDS_[name];
-  if (sound) {
-    var mySound;
-    var ie9 = goog.userAgent.DOCUMENT_MODE &&
-              goog.userAgent.DOCUMENT_MODE === 9;
-    if (ie9 || goog.userAgent.IPAD || goog.userAgent.ANDROID) {
-      // Creating a new audio node causes lag in IE9, Android and iPad. Android
-      // and IE9 refetch the file from the server, iPad uses a singleton audio
-      // node which must be deleted and recreated for each new audio tag.
-      mySound = sound;
+Blockly.BlockSvg.prototype.renderDrawBottom_ =
+    function(steps, highlightSteps, connectionsXY, cursorY) {
+  this.height += cursorY + 1;  // Add one for the shadow.
+  if (this.nextConnection) {
+    steps.push('H', (Blockly.BlockSvg.NOTCH_WIDTH + (this.RTL ? 0.5 : - 0.5)) +
+        ' ' + Blockly.BlockSvg.NOTCH_PATH_RIGHT);
+    // Create next block connection.
+    var connectionX;
+    if (this.RTL) {
+      connectionX = connectionsXY.x - Blockly.BlockSvg.NOTCH_WIDTH;
     } else {
-      mySound = sound.cloneNode();
+      connectionX = connectionsXY.x + Blockly.BlockSvg.NOTCH_WIDTH;
     }
-    mySound.volume = (opt_volume === undefined ? 1 : opt_volume);
-    mySound.play();
-  } else if (this.options.parentWorkspace) {
-    // Maybe a workspace on a lower level knows about this sound.
-    this.options.parentWorkspace.playAudio(name, opt_volume);
+    var connectionY = connectionsXY.y + cursorY + 1;
+    this.nextConnection.moveTo(connectionX, connectionY);
+    if (this.nextConnection.isConnected()) {
+      this.nextConnection.tighten_();
+    }
+    this.height += 4;  // Height of tab.
   }
-};
 
-/**
- * Modify the block tree on the existing toolbox.
- * @param {Node|string} tree DOM tree of blocks, or text representation of same.
- */
-Blockly.WorkspaceSvg.prototype.updateToolbox = function(tree) {
-  tree = Blockly.Options.parseToolboxTree(tree);
-  if (!tree) {
-    if (this.options.languageTree) {
-      throw 'Can\'t nullify an existing toolbox.';
+  // Should the bottom-left corner be rounded or square?
+  if (this.squareBottomLeftCorner_) {
+    steps.push('H 0');
+    if (!this.RTL) {
+      highlightSteps.push('M', '0.5,' + (cursorY - 0.5));
     }
-    return;  // No change (null to null).
-  }
-  if (!this.options.languageTree) {
-    throw 'Existing toolbox is null.  Can\'t create new toolbox.';
-  }
-  if (tree.getElementsByTagName('category').length) {
-    if (!this.toolbox_) {
-      throw 'Existing toolbox has no categories.  Can\'t change mode.';
-    }
-    this.options.languageTree = tree;
-    this.toolbox_.populate_(tree);
-    this.toolbox_.addColour_();
   } else {
-    if (!this.flyout_) {
-      throw 'Existing toolbox has categories.  Can\'t change mode.';
+    steps.push('H', Blockly.BlockSvg.CORNER_RADIUS);
+    steps.push('a', Blockly.BlockSvg.CORNER_RADIUS + ',' +
+               Blockly.BlockSvg.CORNER_RADIUS + ' 0 0,1 -' +
+               Blockly.BlockSvg.CORNER_RADIUS + ',-' +
+               Blockly.BlockSvg.CORNER_RADIUS);
+    if (!this.RTL) {
+      highlightSteps.push('M', Blockly.BlockSvg.DISTANCE_45_INSIDE + ',' +
+          (cursorY - Blockly.BlockSvg.DISTANCE_45_INSIDE));
+      highlightSteps.push('A', (Blockly.BlockSvg.CORNER_RADIUS - 0.5) + ',' +
+          (Blockly.BlockSvg.CORNER_RADIUS - 0.5) + ' 0 0,1 ' +
+          '0.5,' + (cursorY - Blockly.BlockSvg.CORNER_RADIUS));
     }
-    this.options.languageTree = tree;
-    this.flyout_.show(tree.childNodes);
   }
 };
 
 /**
- * Mark this workspace as the currently focused main workspace.
- */
-Blockly.WorkspaceSvg.prototype.markFocused = function() {
-  if (this.options.parentWorkspace) {
-    this.options.parentWorkspace.markFocused();
-  } else {
-    Blockly.mainWorkspace = this;
-  }
-};
-
-/**
- * Zooming the blocks centered in (x, y) coordinate with zooming in or out.
- * @param {number} x X coordinate of center.
- * @param {number} y Y coordinate of center.
- * @param {number} type Type of zooming (-1 zooming out and 1 zooming in).
- */
-Blockly.WorkspaceSvg.prototype.zoom = function(x, y, type) {
-  var speed = this.options.zoomOptions.scaleSpeed;
-  var metrics = this.getMetrics();
-  var center = this.getParentSvg().createSVGPoint();
-  center.x = x;
-  center.y = y;
-  center = center.matrixTransform(this.getCanvas().getCTM().inverse());
-  x = center.x;
-  y = center.y;
-  var canvas = this.getCanvas();
-  // Scale factor.
-  var scaleChange = (type == 1) ? speed : 1 / speed;
-  // Clamp scale within valid range.
-  var newScale = this.scale * scaleChange;
-  if (newScale > this.options.zoomOptions.maxScale) {
-    scaleChange = this.options.zoomOptions.maxScale / this.scale;
-  } else if (newScale < this.options.zoomOptions.minScale) {
-    scaleChange = this.options.zoomOptions.minScale / this.scale;
-  }
-  if (this.scale == newScale) {
-    return;  // No change in zoom.
-  }
-  if (this.scrollbar) {
-    var matrix = canvas.getCTM()
-        .translate(x * (1 - scaleChange), y * (1 - scaleChange))
-        .scale(scaleChange);
-    // newScale and matrix.a should be identical (within a rounding error).
-    this.scrollX = matrix.e - metrics.absoluteLeft;
-    this.scrollY = matrix.f - metrics.absoluteTop;
-  }
-  this.setScale(newScale);
-};
-
-/**
- * Zooming the blocks centered in the center of view with zooming in or out.
- * @param {number} type Type of zooming (-1 zooming out and 1 zooming in).
- */
-Blockly.WorkspaceSvg.prototype.zoomCenter = function(type) {
-  var metrics = this.getMetrics();
-  var x = metrics.viewWidth / 2;
-  var y = metrics.viewHeight / 2;
-  this.zoom(x, y, type);
-};
-
-/**
- * Zoom the blocks to fit in the workspace if possible.
- */
-Blockly.WorkspaceSvg.prototype.zoomToFit = function() {
-  var metrics = this.getMetrics();
-  var blocksBox = this.getBlocksBoundingBox();
-  var blocksWidth = blocksBox.width;
-  var blocksHeight = blocksBox.height;
-  if (!blocksWidth) {
-    return;  // Prevents zooming to infinity.
-  }
-  var workspaceWidth = metrics.viewWidth;
-  var workspaceHeight = metrics.viewHeight;
-  if (this.flyout_) {
-    workspaceWidth -= this.flyout_.width_;
-  }
-  if (!this.scrollbar) {
-    // Orgin point of 0,0 is fixed, blocks will not scroll to center.
-    blocksWidth += metrics.contentLeft;
-    blocksHeight += metrics.contentTop;
-  }
-  var ratioX = workspaceWidth / blocksWidth;
-  var ratioY = workspaceHeight / blocksHeight;
-  this.setScale(Math.min(ratioX, ratioY));
-  this.scrollCenter();
-};
-
-/**
- * Center the workspace.
- */
-Blockly.WorkspaceSvg.prototype.scrollCenter = function() {
-  if (!this.scrollbar) {
-    // Can't center a non-scrolling workspace.
-    return;
-  }
-  var metrics = this.getMetrics();
-  var x = (metrics.contentWidth - metrics.viewWidth) / 2;
-  if (this.flyout_) {
-    x -= this.flyout_.width_ / 2;
-  }
-  var y = (metrics.contentHeight - metrics.viewHeight) / 2;
-  this.scrollbar.set(x, y);
-};
-
-/**
- * Set the workspace's zoom factor.
- * @param {number} newScale Zoom factor.
- */
-Blockly.WorkspaceSvg.prototype.setScale = function(newScale) {
-  if (this.options.zoomOptions.maxScale &&
-      newScale > this.options.zoomOptions.maxScale) {
-    newScale = this.options.zoomOptions.maxScale;
-  } else if (this.options.zoomOptions.minScale &&
-      newScale < this.options.zoomOptions.minScale) {
-    newScale = this.options.zoomOptions.minScale;
-  }
-  this.scale = newScale;
-  this.updateGridPattern_();
-  if (this.scrollbar) {
-    this.scrollbar.resize();
-  } else {
-    this.translate(this.scrollX, this.scrollY);
-  }
-  Blockly.hideChaff(false);
-  if (this.flyout_) {
-    // No toolbox, resize flyout.
-    this.flyout_.reflow();
-  }
-};
-
-/**
- * Updates the grid pattern.
+ * Render the left edge of the block.
+ * @param {!Array.<string>} steps Path of block outline.
+ * @param {!Array.<string>} highlightSteps Path of block highlights.
+ * @param {!Object} connectionsXY Location of block.
+ * @param {number} cursorY Height of block.
  * @private
  */
-Blockly.WorkspaceSvg.prototype.updateGridPattern_ = function() {
-  if (!this.options.gridPattern) {
-    return;  // No grid.
+Blockly.BlockSvg.prototype.renderDrawLeft_ =
+    function(steps, highlightSteps, connectionsXY, cursorY) {
+  if (this.outputConnection) {
+    // Create output connection.
+    this.outputConnection.moveTo(connectionsXY.x, connectionsXY.y);
+    // This connection will be tightened when the parent renders.
+    steps.push('V', Blockly.BlockSvg.TAB_HEIGHT);
+    steps.push('c 0,-10 -' + Blockly.BlockSvg.TAB_WIDTH + ',8 -' +
+        Blockly.BlockSvg.TAB_WIDTH + ',-7.5 s ' + Blockly.BlockSvg.TAB_WIDTH +
+        ',2.5 ' + Blockly.BlockSvg.TAB_WIDTH + ',-7.5');
+    if (this.RTL) {
+      highlightSteps.push('M', (Blockly.BlockSvg.TAB_WIDTH * -0.25) + ',8.4');
+      highlightSteps.push('l', (Blockly.BlockSvg.TAB_WIDTH * -0.45) + ',-2.1');
+    } else {
+      highlightSteps.push('V', Blockly.BlockSvg.TAB_HEIGHT - 1.5);
+      highlightSteps.push('m', (Blockly.BlockSvg.TAB_WIDTH * -0.92) +
+                          ',-0.5 q ' + (Blockly.BlockSvg.TAB_WIDTH * -0.19) +
+                          ',-5.5 0,-11');
+      highlightSteps.push('m', (Blockly.BlockSvg.TAB_WIDTH * 0.92) +
+                          ',1 V 0.5 H 1');
+    }
+    this.width += Blockly.BlockSvg.TAB_WIDTH;
+  } else if (!this.RTL) {
+    if (this.squareTopLeftCorner_) {
+      // Statement block in a stack.
+      highlightSteps.push('V', 0.5);
+    } else {
+      highlightSteps.push('V', Blockly.BlockSvg.CORNER_RADIUS);
+    }
   }
-  // MSIE freaks if it sees a 0x0 pattern, so set empty patterns to 100x100.
-  var safeSpacing = (this.options.gridOptions['spacing'] * this.scale) || 100;
-  this.options.gridPattern.setAttribute('width', safeSpacing);
-  this.options.gridPattern.setAttribute('height', safeSpacing);
-  var half = Math.floor(this.options.gridOptions['spacing'] / 2) + 0.5;
-  var start = half - this.options.gridOptions['length'] / 2;
-  var end = half + this.options.gridOptions['length'] / 2;
-  var line1 = this.options.gridPattern.firstChild;
-  var line2 = line1 && line1.nextSibling;
-  half *= this.scale;
-  start *= this.scale;
-  end *= this.scale;
-  if (line1) {
-    line1.setAttribute('stroke-width', this.scale);
-    line1.setAttribute('x1', start);
-    line1.setAttribute('y1', half);
-    line1.setAttribute('x2', end);
-    line1.setAttribute('y2', half);
-  }
-  if (line2) {
-    line2.setAttribute('stroke-width', this.scale);
-    line2.setAttribute('x1', half);
-    line2.setAttribute('y1', start);
-    line2.setAttribute('x2', half);
-    line2.setAttribute('y2', end);
-  }
+  steps.push('z');
 };
-
-// Export symbols that would otherwise be renamed by Closure compiler.
-Blockly.WorkspaceSvg.prototype['setVisible'] =
-    Blockly.WorkspaceSvg.prototype.setVisible;

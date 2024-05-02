@@ -1,4 +1,4 @@
-// Copyright 2013 The Closure Library Authors. All Rights Reserved.
+// Copyright 2007 The Closure Library Authors. All Rights Reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,1325 +12,1578 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-goog.provide('goog.Promise');
+/**
+ * @fileoverview Base class for UI controls such as buttons, menus, menu items,
+ * toolbar buttons, etc.  The implementation is based on a generalized version
+ * of {@link goog.ui.MenuItem}.
+ * TODO(attila):  If the renderer framework works well, pull it into Component.
+ *
+ * @author attila@google.com (Attila Bodis)
+ * @see ../demos/control.html
+ * @see http://code.google.com/p/closure-library/wiki/IntroToControls
+ */
 
-goog.require('goog.Thenable');
-goog.require('goog.asserts');
-goog.require('goog.async.FreeList');
-goog.require('goog.async.run');
-goog.require('goog.async.throwException');
-goog.require('goog.debug.Error');
-goog.require('goog.promise.Resolver');
+goog.provide('goog.ui.Control');
+
+goog.require('goog.Disposable');
+goog.require('goog.array');
+goog.require('goog.dom');
+goog.require('goog.events.BrowserEvent');
+goog.require('goog.events.Event');
+goog.require('goog.events.EventHandler');
+goog.require('goog.events.EventType');
+goog.require('goog.events.KeyCodes');
+goog.require('goog.events.KeyHandler');
+goog.require('goog.string');
+goog.require('goog.ui.Component');
+/** @suppress {extraRequire} */
+goog.require('goog.ui.ControlContent');
+goog.require('goog.ui.ControlRenderer');
+goog.require('goog.ui.decorate');
+goog.require('goog.ui.registry');
+goog.require('goog.userAgent');
 
 
 
 /**
- * Promises provide a result that may be resolved asynchronously. A Promise may
- * be resolved by being fulfilled with a fulfillment value, rejected with a
- * rejection reason, or blocked by another Promise. A Promise is said to be
- * settled if it is either fulfilled or rejected. Once settled, the Promise
- * result is immutable.
- *
- * Promises may represent results of any type, including undefined. Rejection
- * reasons are typically Errors, but may also be of any type. Closure Promises
- * allow for optional type annotations that enforce that fulfillment values are
- * of the appropriate types at compile time.
- *
- * The result of a Promise is accessible by calling {@code then} and registering
- * {@code onFulfilled} and {@code onRejected} callbacks. Once the Promise
- * is settled, the relevant callbacks are invoked with the fulfillment value or
- * rejection reason as argument. Callbacks are always invoked in the order they
- * were registered, even when additional {@code then} calls are made from inside
- * another callback. A callback is always run asynchronously sometime after the
- * scope containing the registering {@code then} invocation has returned.
- *
- * If a Promise is resolved with another Promise, the first Promise will block
- * until the second is settled, and then assumes the same result as the second
- * Promise. This allows Promises to depend on the results of other Promises,
- * linking together multiple asynchronous operations.
- *
- * This implementation is compatible with the Promises/A+ specification and
- * passes that specification's conformance test suite. A Closure Promise may be
- * resolved with a Promise instance (or sufficiently compatible Promise-like
- * object) created by other Promise implementations. From the specification,
- * Promise-like objects are known as "Thenables".
- *
- * @see http://promisesaplus.com/
- *
- * @param {function(
- *             this:RESOLVER_CONTEXT,
- *             function((TYPE|IThenable<TYPE>|Thenable)=),
- *             function(*=)): void} resolver
- *     Initialization function that is invoked immediately with {@code resolve}
- *     and {@code reject} functions as arguments. The Promise is resolved or
- *     rejected with the first argument passed to either function.
- * @param {RESOLVER_CONTEXT=} opt_context An optional context for executing the
- *     resolver function. If unspecified, the resolver function will be executed
- *     in the default scope.
+ * Base class for UI controls.  Extends {@link goog.ui.Component} by adding
+ * the following:
+ *  <ul>
+ *    <li>a {@link goog.events.KeyHandler}, to simplify keyboard handling,
+ *    <li>a pluggable <em>renderer</em> framework, to simplify the creation of
+ *        simple controls without the need to subclass this class,
+ *    <li>the notion of component <em>content</em>, like a text caption or DOM
+ *        structure displayed in the component (e.g. a button label),
+ *    <li>getter and setter for component content, as well as a getter and
+ *        setter specifically for caption text (for convenience),
+ *    <li>support for hiding/showing the component,
+      <li>fine-grained control over supported states and state transition
+          events, and
+ *    <li>default mouse and keyboard event handling.
+ *  </ul>
+ * This class has sufficient built-in functionality for most simple UI controls.
+ * All controls dispatch SHOW, HIDE, ENTER, LEAVE, and ACTION events on show,
+ * hide, mouseover, mouseout, and user action, respectively.  Additional states
+ * are also supported.  See closure/demos/control.html
+ * for example usage.
+ * @param {goog.ui.ControlContent=} opt_content Text caption or DOM structure
+ *     to display as the content of the control (if any).
+ * @param {goog.ui.ControlRenderer=} opt_renderer Renderer used to render or
+ *     decorate the component; defaults to {@link goog.ui.ControlRenderer}.
+ * @param {goog.dom.DomHelper=} opt_domHelper Optional DOM helper, used for
+ *     document interaction.
  * @constructor
- * @struct
- * @final
- * @implements {goog.Thenable<TYPE>}
- * @template TYPE,RESOLVER_CONTEXT
+ * @extends {goog.ui.Component}
  */
-goog.Promise = function(resolver, opt_context) {
-  /**
-   * The internal state of this Promise. Either PENDING, FULFILLED, REJECTED, or
-   * BLOCKED.
-   * @private {goog.Promise.State_}
-   */
-  this.state_ = goog.Promise.State_.PENDING;
+goog.ui.Control = function(opt_content, opt_renderer, opt_domHelper) {
+  goog.ui.Component.call(this, opt_domHelper);
+  this.renderer_ =
+      opt_renderer || goog.ui.registry.getDefaultRenderer(this.constructor);
+  this.setContentInternal(goog.isDef(opt_content) ? opt_content : null);
 
-  /**
-   * The settled result of the Promise. Immutable once set with either a
-   * fulfillment value or rejection reason.
-   * @private {*}
-   */
-  this.result_ = undefined;
+  /** @private {?string} The control's aria-label. */
+  this.ariaLabel_ = null;
 
-  /**
-   * For Promises created by calling {@code then()}, the originating parent.
-   * @private {goog.Promise}
-   */
-  this.parent_ = null;
-
-  /**
-   * The linked list of {@code onFulfilled} and {@code onRejected} callbacks
-   * added to this Promise by calls to {@code then()}.
-   * @private {?goog.Promise.CallbackEntry_}
-   */
-  this.callbackEntries_ = null;
-
-  /**
-   * The tail of the linked list of {@code onFulfilled} and {@code onRejected}
-   * callbacks added to this Promise by calls to {@code then()}.
-   * @private {?goog.Promise.CallbackEntry_}
-   */
-  this.callbackEntriesTail_ = null;
-
-  /**
-   * Whether the Promise is in the queue of Promises to execute.
-   * @private {boolean}
-   */
-  this.executing_ = false;
-
-  if (goog.Promise.UNHANDLED_REJECTION_DELAY > 0) {
-    /**
-     * A timeout ID used when the {@code UNHANDLED_REJECTION_DELAY} is greater
-     * than 0 milliseconds. The ID is set when the Promise is rejected, and
-     * cleared only if an {@code onRejected} callback is invoked for the
-     * Promise (or one of its descendants) before the delay is exceeded.
-     *
-     * If the rejection is not handled before the timeout completes, the
-     * rejection reason is passed to the unhandled rejection handler.
-     * @private {number}
-     */
-    this.unhandledRejectionId_ = 0;
-  } else if (goog.Promise.UNHANDLED_REJECTION_DELAY == 0) {
-    /**
-     * When the {@code UNHANDLED_REJECTION_DELAY} is set to 0 milliseconds, a
-     * boolean that is set if the Promise is rejected, and reset to false if an
-     * {@code onRejected} callback is invoked for the Promise (or one of its
-     * descendants). If the rejection is not handled before the next timestep,
-     * the rejection reason is passed to the unhandled rejection handler.
-     * @private {boolean}
-     */
-    this.hadUnhandledRejection_ = false;
-  }
-
-  if (goog.Promise.LONG_STACK_TRACES) {
-    /**
-     * A list of stack trace frames pointing to the locations where this Promise
-     * was created or had callbacks added to it. Saved to add additional context
-     * to stack traces when an exception is thrown.
-     * @private {!Array<string>}
-     */
-    this.stack_ = [];
-    this.addStackTrace_(new Error('created'));
-
-    /**
-     * Index of the most recently executed stack frame entry.
-     * @private {number}
-     */
-    this.currentStep_ = 0;
-  }
-
-  // As an optimization, we can skip this if resolver is goog.nullFunction.
-  // This value is passed internally when creating a promise which will be
-  // resolved through a more optimized path.
-  if (resolver != goog.nullFunction) {
-    try {
-      var self = this;
-      resolver.call(
-          opt_context,
-          function(value) {
-            self.resolve_(goog.Promise.State_.FULFILLED, value);
-          },
-          function(reason) {
-            if (goog.DEBUG &&
-                !(reason instanceof goog.Promise.CancellationError)) {
-              try {
-                // Promise was rejected. Step up one call frame to see why.
-                if (reason instanceof Error) {
-                  throw reason;
-                } else {
-                  throw new Error('Promise rejected.');
-                }
-              } catch (e) {
-                // Only thrown so browser dev tools can catch rejections of
-                // promises when the option to break on caught exceptions is
-                // activated.
-              }
-            }
-            self.resolve_(goog.Promise.State_.REJECTED, reason);
-          });
-    } catch (e) {
-      this.resolve_(goog.Promise.State_.REJECTED, e);
-    }
-  }
+  /** @private {goog.ui.Control.IeMouseEventSequenceSimulator_} */
+  this.ieMouseEventSequenceSimulator_;
 };
+goog.inherits(goog.ui.Control, goog.ui.Component);
+goog.tagUnsealableClass(goog.ui.Control);
+
+
+// Renderer registry.
+// TODO(attila): Refactor existing usages inside Google in a follow-up CL.
 
 
 /**
- * @define {boolean} Whether traces of {@code then} calls should be included in
- * exceptions thrown
+ * Maps a CSS class name to a function that returns a new instance of
+ * {@link goog.ui.Control} or a subclass thereof, suitable to decorate
+ * an element that has the specified CSS class.  UI components that extend
+ * {@link goog.ui.Control} and want {@link goog.ui.Container}s to be able
+ * to discover and decorate elements using them should register a factory
+ * function via this API.
+ * @param {string} className CSS class name.
+ * @param {Function} decoratorFunction Function that takes no arguments and
+ *     returns a new instance of a control to decorate an element with the
+ *     given class.
+ * @deprecated Use {@link goog.ui.registry.setDecoratorByClassName} instead.
  */
-goog.define('goog.Promise.LONG_STACK_TRACES', false);
+goog.ui.Control.registerDecorator = goog.ui.registry.setDecoratorByClassName;
 
 
 /**
- * @define {number} The delay in milliseconds before a rejected Promise's reason
- * is passed to the rejection handler. By default, the rejection handler
- * rethrows the rejection reason so that it appears in the developer console or
- * {@code window.onerror} handler.
- *
- * Rejections are rethrown as quickly as possible by default. A negative value
- * disables rejection handling entirely.
+ * Takes an element and returns a new instance of {@link goog.ui.Control}
+ * or a subclass, suitable to decorate it (based on the element's CSS class).
+ * @param {Element} element Element to decorate.
+ * @return {goog.ui.Control?} New control instance to decorate the element
+ *     (null if none).
+ * @deprecated Use {@link goog.ui.registry.getDecorator} instead.
  */
-goog.define('goog.Promise.UNHANDLED_REJECTION_DELAY', 0);
+goog.ui.Control.getDecorator =
+    /** @type {function(Element): goog.ui.Control} */ (
+        goog.ui.registry.getDecorator);
 
 
 /**
- * The possible internal states for a Promise. These states are not directly
- * observable to external callers.
- * @enum {number}
+ * Takes an element, and decorates it with a {@link goog.ui.Control} instance
+ * if a suitable decorator is found.
+ * @param {Element} element Element to decorate.
+ * @return {goog.ui.Control?} New control instance that decorates the element
+ *     (null if none).
+ * @deprecated Use {@link goog.ui.decorate} instead.
+ */
+goog.ui.Control.decorate =
+    /** @type {function(Element): goog.ui.Control} */ (goog.ui.decorate);
+
+
+/**
+ * Renderer associated with the component.
+ * @type {goog.ui.ControlRenderer|undefined}
  * @private
  */
-goog.Promise.State_ = {
-  /** The Promise is waiting for resolution. */
-  PENDING: 0,
-
-  /** The Promise is blocked waiting for the result of another Thenable. */
-  BLOCKED: 1,
-
-  /** The Promise has been resolved with a fulfillment value. */
-  FULFILLED: 2,
-
-  /** The Promise has been resolved with a rejection reason. */
-  REJECTED: 3
-};
-
+goog.ui.Control.prototype.renderer_;
 
 
 /**
- * Entries in the callback chain. Each call to {@code then},
- * {@code thenCatch}, or {@code thenAlways} creates an entry containing the
- * functions that may be invoked once the Promise is settled.
- *
- * @private @final @struct @constructor
- */
-goog.Promise.CallbackEntry_ = function() {
-  /** @type {?goog.Promise} */
-  this.child = null;
-  /** @type {Function} */
-  this.onFulfilled = null;
-  /** @type {Function} */
-  this.onRejected = null;
-  /** @type {?} */
-  this.context = null;
-  /** @type {?goog.Promise.CallbackEntry_} */
-  this.next = null;
-
-  /**
-   * A boolean value to indicate this is a "thenAlways" callback entry.
-   * Unlike a normal "then/thenVoid" a "thenAlways doesn't participate
-   * in "cancel" considerations but is simply an observer and requires
-   * special handling.
-   * @type {boolean}
-   */
-  this.always = false;
-};
-
-
-/** clear the object prior to reuse */
-goog.Promise.CallbackEntry_.prototype.reset = function() {
-  this.child = null;
-  this.onFulfilled = null;
-  this.onRejected = null;
-  this.context = null;
-  this.always = false;
-};
-
-
-/**
- * @define {number} The number of currently unused objects to keep around for
- *    reuse.
- */
-goog.define('goog.Promise.DEFAULT_MAX_UNUSED', 100);
-
-
-/** @const @private {goog.async.FreeList<!goog.Promise.CallbackEntry_>} */
-goog.Promise.freelist_ = new goog.async.FreeList(
-    function() { return new goog.Promise.CallbackEntry_(); },
-    function(item) { item.reset(); }, goog.Promise.DEFAULT_MAX_UNUSED);
-
-
-/**
- * @param {Function} onFulfilled
- * @param {Function} onRejected
- * @param {?} context
- * @return {!goog.Promise.CallbackEntry_}
+ * Text caption or DOM structure displayed in the component.
+ * @type {goog.ui.ControlContent}
  * @private
  */
-goog.Promise.getCallbackEntry_ = function(onFulfilled, onRejected, context) {
-  var entry = goog.Promise.freelist_.get();
-  entry.onFulfilled = onFulfilled;
-  entry.onRejected = onRejected;
-  entry.context = context;
-  return entry;
-};
+goog.ui.Control.prototype.content_ = null;
 
 
 /**
- * @param {!goog.Promise.CallbackEntry_} entry
+ * Current component state; a bit mask of {@link goog.ui.Component.State}s.
+ * @type {number}
  * @private
  */
-goog.Promise.returnEntry_ = function(entry) {
-  goog.Promise.freelist_.put(entry);
-};
-
-
-// NOTE: this is the same template expression as is used for
-// goog.IThenable.prototype.then
+goog.ui.Control.prototype.state_ = 0x00;
 
 
 /**
- * @param {VALUE=} opt_value
- * @return {RESULT} A new Promise that is immediately resolved
- *     with the given value. If the input value is already a goog.Promise, it
- *     will be returned immediately without creating a new instance.
- * @template VALUE
- * @template RESULT := type('goog.Promise',
- *     cond(isUnknown(VALUE), unknown(),
- *       mapunion(VALUE, (V) =>
- *         cond(isTemplatized(V) && sub(rawTypeOf(V), 'IThenable'),
- *           templateTypeOf(V, 0),
- *           cond(sub(V, 'Thenable'),
- *              unknown(),
- *              V)))))
- * =:
+ * A bit mask of {@link goog.ui.Component.State}s this component supports.
+ * @type {number}
+ * @private
  */
-goog.Promise.resolve = function(opt_value) {
-  if (opt_value instanceof goog.Promise) {
-    // Avoid creating a new object if we already have a promise object
-    // of the correct type.
-    return opt_value;
+goog.ui.Control.prototype.supportedStates_ = goog.ui.Component.State.DISABLED |
+    goog.ui.Component.State.HOVER | goog.ui.Component.State.ACTIVE |
+    goog.ui.Component.State.FOCUSED;
+
+
+/**
+ * A bit mask of {@link goog.ui.Component.State}s for which this component
+ * provides default event handling.  For example, a component that handles
+ * the HOVER state automatically will highlight itself on mouseover, whereas
+ * a component that doesn't handle HOVER automatically will only dispatch
+ * ENTER and LEAVE events but not call {@link setHighlighted} on itself.
+ * By default, components provide default event handling for all states.
+ * Controls hosted in containers (e.g. menu items in a menu, or buttons in a
+ * toolbar) will typically want to have their container manage their highlight
+ * state.  Selectable controls managed by a selection model will also typically
+ * want their selection state to be managed by the model.
+ * @type {number}
+ * @private
+ */
+goog.ui.Control.prototype.autoStates_ = goog.ui.Component.State.ALL;
+
+
+/**
+ * A bit mask of {@link goog.ui.Component.State}s for which this component
+ * dispatches state transition events.  Because events are expensive, the
+ * default behavior is to not dispatch any state transition events at all.
+ * Use the {@link #setDispatchTransitionEvents} API to request transition
+ * events  as needed.  Subclasses may enable transition events by default.
+ * Controls hosted in containers or managed by a selection model will typically
+ * want to dispatch transition events.
+ * @type {number}
+ * @private
+ */
+goog.ui.Control.prototype.statesWithTransitionEvents_ = 0x00;
+
+
+/**
+ * Component visibility.
+ * @type {boolean}
+ * @private
+ */
+goog.ui.Control.prototype.visible_ = true;
+
+
+/**
+ * Keyboard event handler.
+ * @type {goog.events.KeyHandler}
+ * @private
+ */
+goog.ui.Control.prototype.keyHandler_;
+
+
+/**
+ * Additional class name(s) to apply to the control's root element, if any.
+ * @type {Array<string>?}
+ * @private
+ */
+goog.ui.Control.prototype.extraClassNames_ = null;
+
+
+/**
+ * Whether the control should listen for and handle mouse events; defaults to
+ * true.
+ * @type {boolean}
+ * @private
+ */
+goog.ui.Control.prototype.handleMouseEvents_ = true;
+
+
+/**
+ * Whether the control allows text selection within its DOM.  Defaults to false.
+ * @type {boolean}
+ * @private
+ */
+goog.ui.Control.prototype.allowTextSelection_ = false;
+
+
+/**
+ * The control's preferred ARIA role.
+ * @type {?goog.a11y.aria.Role}
+ * @private
+ */
+goog.ui.Control.prototype.preferredAriaRole_ = null;
+
+
+// Event handler and renderer management.
+
+
+/**
+ * Returns true if the control is configured to handle its own mouse events,
+ * false otherwise.  Controls not hosted in {@link goog.ui.Container}s have
+ * to handle their own mouse events, but controls hosted in containers may
+ * allow their parent to handle mouse events on their behalf.  Considered
+ * protected; should only be used within this package and by subclasses.
+ * @return {boolean} Whether the control handles its own mouse events.
+ */
+goog.ui.Control.prototype.isHandleMouseEvents = function() {
+  return this.handleMouseEvents_;
+};
+
+
+/**
+ * Enables or disables mouse event handling for the control.  Containers may
+ * use this method to disable mouse event handling in their child controls.
+ * Considered protected; should only be used within this package and by
+ * subclasses.
+ * @param {boolean} enable Whether to enable or disable mouse event handling.
+ */
+goog.ui.Control.prototype.setHandleMouseEvents = function(enable) {
+  if (this.isInDocument() && enable != this.handleMouseEvents_) {
+    // Already in the document; need to update event handler.
+    this.enableMouseEventHandling_(enable);
+  }
+  this.handleMouseEvents_ = enable;
+};
+
+
+/**
+ * Returns the DOM element on which the control is listening for keyboard
+ * events (null if none).
+ * @return {Element} Element on which the control is listening for key
+ *     events.
+ */
+goog.ui.Control.prototype.getKeyEventTarget = function() {
+  // Delegate to renderer.
+  return this.renderer_.getKeyEventTarget(this);
+};
+
+
+/**
+ * Returns the keyboard event handler for this component, lazily created the
+ * first time this method is called.  Considered protected; should only be
+ * used within this package and by subclasses.
+ * @return {!goog.events.KeyHandler} Keyboard event handler for this component.
+ * @protected
+ */
+goog.ui.Control.prototype.getKeyHandler = function() {
+  return this.keyHandler_ || (this.keyHandler_ = new goog.events.KeyHandler());
+};
+
+
+/**
+ * Returns the renderer used by this component to render itself or to decorate
+ * an existing element.
+ * @return {goog.ui.ControlRenderer|undefined} Renderer used by the component
+ *     (undefined if none).
+ */
+goog.ui.Control.prototype.getRenderer = function() {
+  return this.renderer_;
+};
+
+
+/**
+ * Registers the given renderer with the component.  Changing renderers after
+ * the component has entered the document is an error.
+ * @param {goog.ui.ControlRenderer} renderer Renderer used by the component.
+ * @throws {Error} If the control is already in the document.
+ */
+goog.ui.Control.prototype.setRenderer = function(renderer) {
+  if (this.isInDocument()) {
+    // Too late.
+    throw Error(goog.ui.Component.Error.ALREADY_RENDERED);
   }
 
-  // Passing goog.nullFunction will cause the constructor to take an optimized
-  // path that skips calling the resolver function.
-  var promise = new goog.Promise(goog.nullFunction);
-  promise.resolve_(goog.Promise.State_.FULFILLED, opt_value);
-  return promise;
-};
-
-
-/**
- * @param {*=} opt_reason
- * @return {!goog.Promise} A new Promise that is immediately rejected with the
- *     given reason.
- */
-goog.Promise.reject = function(opt_reason) {
-  return new goog.Promise(function(resolve, reject) { reject(opt_reason); });
-};
-
-
-/**
- * This is identical to
- * {@code goog.Promise.resolve(value).then(onFulfilled, onRejected)}, but it
- * avoids creating an unnecessary wrapper Promise when {@code value} is already
- * thenable.
- *
- * @param {?(goog.Thenable<TYPE>|Thenable|TYPE)} value
- * @param {function(TYPE): ?} onFulfilled
- * @param {function(*): *} onRejected
- * @template TYPE
- * @private
- */
-goog.Promise.resolveThen_ = function(value, onFulfilled, onRejected) {
-  var isThenable =
-      goog.Promise.maybeThen_(value, onFulfilled, onRejected, null);
-  if (!isThenable) {
-    goog.async.run(goog.partial(onFulfilled, value));
+  if (this.getElement()) {
+    // The component has already been rendered, but isn't yet in the document.
+    // Replace the renderer and delete the current DOM, so it can be re-rendered
+    // using the new renderer the next time someone calls render().
+    this.setElementInternal(null);
   }
+
+  this.renderer_ = renderer;
+};
+
+
+// Support for additional styling.
+
+
+/**
+ * Returns any additional class name(s) to be applied to the component's
+ * root element, or null if no extra class names are needed.
+ * @return {Array<string>?} Additional class names to be applied to
+ *     the component's root element (null if none).
+ */
+goog.ui.Control.prototype.getExtraClassNames = function() {
+  return this.extraClassNames_;
 };
 
 
 /**
- * @param {!Array<?(goog.Promise<TYPE>|goog.Thenable<TYPE>|Thenable|*)>}
- *     promises
- * @return {!goog.Promise<TYPE>} A Promise that receives the result of the
- *     first Promise (or Promise-like) input to settle immediately after it
- *     settles.
- * @template TYPE
+ * Adds the given class name to the list of classes to be applied to the
+ * component's root element.
+ * @param {string} className Additional class name to be applied to the
+ *     component's root element.
  */
-goog.Promise.race = function(promises) {
-  return new goog.Promise(function(resolve, reject) {
-    if (!promises.length) {
-      resolve(undefined);
-    }
-    for (var i = 0, promise; i < promises.length; i++) {
-      promise = promises[i];
-      goog.Promise.resolveThen_(promise, resolve, reject);
-    }
-  });
-};
-
-
-/**
- * @param {!Array<?(goog.Promise<TYPE>|goog.Thenable<TYPE>|Thenable|*)>}
- *     promises
- * @return {!goog.Promise<!Array<TYPE>>} A Promise that receives a list of
- *     every fulfilled value once every input Promise (or Promise-like) is
- *     successfully fulfilled, or is rejected with the first rejection reason
- *     immediately after it is rejected.
- * @template TYPE
- */
-goog.Promise.all = function(promises) {
-  return new goog.Promise(function(resolve, reject) {
-    var toFulfill = promises.length;
-    var values = [];
-
-    if (!toFulfill) {
-      resolve(values);
-      return;
-    }
-
-    var onFulfill = function(index, value) {
-      toFulfill--;
-      values[index] = value;
-      if (toFulfill == 0) {
-        resolve(values);
+goog.ui.Control.prototype.addClassName = function(className) {
+  if (className) {
+    if (this.extraClassNames_) {
+      if (!goog.array.contains(this.extraClassNames_, className)) {
+        this.extraClassNames_.push(className);
       }
-    };
-
-    var onReject = function(reason) { reject(reason); };
-
-    for (var i = 0, promise; i < promises.length; i++) {
-      promise = promises[i];
-      goog.Promise.resolveThen_(promise, goog.partial(onFulfill, i), onReject);
+    } else {
+      this.extraClassNames_ = [className];
     }
-  });
+    this.renderer_.enableExtraClassName(this, className, true);
+  }
 };
 
 
 /**
- * @param {!Array<?(goog.Promise<TYPE>|goog.Thenable<TYPE>|Thenable|*)>}
- *     promises
- * @return {!goog.Promise<!Array<{
- *     fulfilled: boolean,
- *     value: (TYPE|undefined),
- *     reason: (*|undefined)}>>} A Promise that resolves with a list of
- *         result objects once all input Promises (or Promise-like) have
- *         settled. Each result object contains a 'fulfilled' boolean indicating
- *         whether an input Promise was fulfilled or rejected. For fulfilled
- *         Promises, the resulting value is stored in the 'value' field. For
- *         rejected Promises, the rejection reason is stored in the 'reason'
- *         field.
- * @template TYPE
+ * Removes the given class name from the list of classes to be applied to
+ * the component's root element.
+ * @param {string} className Class name to be removed from the component's root
+ *     element.
  */
-goog.Promise.allSettled = function(promises) {
-  return new goog.Promise(function(resolve, reject) {
-    var toSettle = promises.length;
-    var results = [];
-
-    if (!toSettle) {
-      resolve(results);
-      return;
+goog.ui.Control.prototype.removeClassName = function(className) {
+  if (className && this.extraClassNames_ &&
+      goog.array.remove(this.extraClassNames_, className)) {
+    if (this.extraClassNames_.length == 0) {
+      this.extraClassNames_ = null;
     }
-
-    var onSettled = function(index, fulfilled, result) {
-      toSettle--;
-      results[index] = fulfilled ? {fulfilled: true, value: result} :
-                                   {fulfilled: false, reason: result};
-      if (toSettle == 0) {
-        resolve(results);
-      }
-    };
-
-    for (var i = 0, promise; i < promises.length; i++) {
-      promise = promises[i];
-      goog.Promise.resolveThen_(
-          promise, goog.partial(onSettled, i, true /* fulfilled */),
-          goog.partial(onSettled, i, false /* fulfilled */));
-    }
-  });
+    this.renderer_.enableExtraClassName(this, className, false);
+  }
 };
 
 
 /**
- * @param {!Array<?(goog.Promise<TYPE>|goog.Thenable<TYPE>|Thenable|*)>}
- *     promises
- * @return {!goog.Promise<TYPE>} A Promise that receives the value of the first
- *     input to be fulfilled, or is rejected with a list of every rejection
- *     reason if all inputs are rejected.
- * @template TYPE
+ * Adds or removes the given class name to/from the list of classes to be
+ * applied to the component's root element.
+ * @param {string} className CSS class name to add or remove.
+ * @param {boolean} enable Whether to add or remove the class name.
  */
-goog.Promise.firstFulfilled = function(promises) {
-  return new goog.Promise(function(resolve, reject) {
-    var toReject = promises.length;
-    var reasons = [];
-
-    if (!toReject) {
-      resolve(undefined);
-      return;
-    }
-
-    var onFulfill = function(value) { resolve(value); };
-
-    var onReject = function(index, reason) {
-      toReject--;
-      reasons[index] = reason;
-      if (toReject == 0) {
-        reject(reasons);
-      }
-    };
-
-    for (var i = 0, promise; i < promises.length; i++) {
-      promise = promises[i];
-      goog.Promise.resolveThen_(promise, onFulfill, goog.partial(onReject, i));
-    }
-  });
+goog.ui.Control.prototype.enableClassName = function(className, enable) {
+  if (enable) {
+    this.addClassName(className);
+  } else {
+    this.removeClassName(className);
+  }
 };
 
 
-/**
- * @return {!goog.promise.Resolver<TYPE>} Resolver wrapping the promise and its
- *     resolve / reject functions. Resolving or rejecting the resolver
- *     resolves or rejects the promise.
- * @template TYPE
- */
-goog.Promise.withResolver = function() {
-  var resolve, reject;
-  var promise = new goog.Promise(function(rs, rj) {
-    resolve = rs;
-    reject = rj;
-  });
-  return new goog.Promise.Resolver_(promise, resolve, reject);
-};
+// Standard goog.ui.Component implementation.
 
 
 /**
- * Adds callbacks that will operate on the result of the Promise, returning a
- * new child Promise.
- *
- * If the Promise is fulfilled, the {@code onFulfilled} callback will be invoked
- * with the fulfillment value as argument, and the child Promise will be
- * fulfilled with the return value of the callback. If the callback throws an
- * exception, the child Promise will be rejected with the thrown value instead.
- *
- * If the Promise is rejected, the {@code onRejected} callback will be invoked
- * with the rejection reason as argument, and the child Promise will be resolved
- * with the return value or rejected with the thrown value of the callback.
- *
+ * Creates the control's DOM.  Overrides {@link goog.ui.Component#createDom} by
+ * delegating DOM manipulation to the control's renderer.
  * @override
  */
-goog.Promise.prototype.then = function(
-    opt_onFulfilled, opt_onRejected, opt_context) {
+goog.ui.Control.prototype.createDom = function() {
+  var element = this.renderer_.createDom(this);
+  this.setElementInternal(element);
 
-  if (opt_onFulfilled != null) {
-    goog.asserts.assertFunction(
-        opt_onFulfilled, 'opt_onFulfilled should be a function.');
-  }
-  if (opt_onRejected != null) {
-    goog.asserts.assertFunction(
-        opt_onRejected,
-        'opt_onRejected should be a function. Did you pass opt_context ' +
-            'as the second argument instead of the third?');
-  }
+  // Initialize ARIA role.
+  this.renderer_.setAriaRole(element, this.getPreferredAriaRole());
 
-  if (goog.Promise.LONG_STACK_TRACES) {
-    this.addStackTrace_(new Error('then'));
+  // Initialize text selection.
+  if (!this.isAllowTextSelection()) {
+    // The renderer is assumed to create selectable elements.  Since making
+    // elements unselectable is expensive, only do it if needed (bug 1037090).
+    this.renderer_.setAllowTextSelection(element, false);
   }
 
-  return this.addChildPromise_(
-      goog.isFunction(opt_onFulfilled) ? opt_onFulfilled : null,
-      goog.isFunction(opt_onRejected) ? opt_onRejected : null, opt_context);
-};
-goog.Thenable.addImplementation(goog.Promise);
-
-
-/**
- * Adds callbacks that will operate on the result of the Promise without
- * returning a child Promise (unlike "then").
- *
- * If the Promise is fulfilled, the {@code onFulfilled} callback will be invoked
- * with the fulfillment value as argument.
- *
- * If the Promise is rejected, the {@code onRejected} callback will be invoked
- * with the rejection reason as argument.
- *
- * @param {?(function(this:THIS, TYPE):?)=} opt_onFulfilled A
- *     function that will be invoked with the fulfillment value if the Promise
- *     is fulfilled.
- * @param {?(function(this:THIS, *): *)=} opt_onRejected A function that will
- *     be invoked with the rejection reason if the Promise is rejected.
- * @param {THIS=} opt_context An optional context object that will be the
- *     execution context for the callbacks. By default, functions are executed
- *     with the default this.
- * @package
- * @template THIS
- */
-goog.Promise.prototype.thenVoid = function(
-    opt_onFulfilled, opt_onRejected, opt_context) {
-
-  if (opt_onFulfilled != null) {
-    goog.asserts.assertFunction(
-        opt_onFulfilled, 'opt_onFulfilled should be a function.');
-  }
-  if (opt_onRejected != null) {
-    goog.asserts.assertFunction(
-        opt_onRejected,
-        'opt_onRejected should be a function. Did you pass opt_context ' +
-            'as the second argument instead of the third?');
-  }
-
-  if (goog.Promise.LONG_STACK_TRACES) {
-    this.addStackTrace_(new Error('then'));
-  }
-
-  // Note: no default rejection handler is provided here as we need to
-  // distinguish unhandled rejections.
-  this.addCallbackEntry_(
-      goog.Promise.getCallbackEntry_(
-          opt_onFulfilled || goog.nullFunction, opt_onRejected || null,
-          opt_context));
-};
-
-
-/**
- * Adds a callback that will be invoked when the Promise is settled (fulfilled
- * or rejected). The callback receives no argument, and no new child Promise is
- * created. This is useful for ensuring that cleanup takes place after certain
- * asynchronous operations. Callbacks added with {@code thenAlways} will be
- * executed in the same order with other calls to {@code then},
- * {@code thenAlways}, or {@code thenCatch}.
- *
- * Since it does not produce a new child Promise, cancellation propagation is
- * not prevented by adding callbacks with {@code thenAlways}. A Promise that has
- * a cleanup handler added with {@code thenAlways} will be canceled if all of
- * its children created by {@code then} (or {@code thenCatch}) are canceled.
- * Additionally, since any rejections are not passed to the callback, it does
- * not stop the unhandled rejection handler from running.
- *
- * @param {function(this:THIS): void} onSettled A function that will be invoked
- *     when the Promise is settled (fulfilled or rejected).
- * @param {THIS=} opt_context An optional context object that will be the
- *     execution context for the callbacks. By default, functions are executed
- *     in the global scope.
- * @return {!goog.Promise<TYPE>} This Promise, for chaining additional calls.
- * @template THIS
- */
-goog.Promise.prototype.thenAlways = function(onSettled, opt_context) {
-  if (goog.Promise.LONG_STACK_TRACES) {
-    this.addStackTrace_(new Error('thenAlways'));
-  }
-
-  var entry = goog.Promise.getCallbackEntry_(onSettled, onSettled, opt_context);
-  entry.always = true;
-  this.addCallbackEntry_(entry);
-  return this;
-};
-
-
-/**
- * Adds a callback that will be invoked only if the Promise is rejected. This
- * is equivalent to {@code then(null, onRejected)}.
- *
- * @param {!function(this:THIS, *): *} onRejected A function that will be
- *     invoked with the rejection reason if the Promise is rejected.
- * @param {THIS=} opt_context An optional context object that will be the
- *     execution context for the callbacks. By default, functions are executed
- *     in the global scope.
- * @return {!goog.Promise} A new Promise that will receive the result of the
- *     callback.
- * @template THIS
- */
-goog.Promise.prototype.thenCatch = function(onRejected, opt_context) {
-  if (goog.Promise.LONG_STACK_TRACES) {
-    this.addStackTrace_(new Error('thenCatch'));
-  }
-  return this.addChildPromise_(null, onRejected, opt_context);
-};
-
-
-/**
- * Cancels the Promise if it is still pending by rejecting it with a cancel
- * Error. No action is performed if the Promise is already resolved.
- *
- * All child Promises of the canceled Promise will be rejected with the same
- * cancel error, as with normal Promise rejection. If the Promise to be canceled
- * is the only child of a pending Promise, the parent Promise will also be
- * canceled. Cancellation may propagate upward through multiple generations.
- *
- * @param {string=} opt_message An optional debugging message for describing the
- *     cancellation reason.
- */
-goog.Promise.prototype.cancel = function(opt_message) {
-  if (this.state_ == goog.Promise.State_.PENDING) {
-    goog.async.run(function() {
-      var err = new goog.Promise.CancellationError(opt_message);
-      this.cancelInternal_(err);
-    }, this);
+  // Initialize visibility.
+  if (!this.isVisible()) {
+    // The renderer is assumed to create visible elements. Since hiding
+    // elements can be expensive, only do it if needed (bug 1037105).
+    this.renderer_.setVisible(element, false);
   }
 };
 
 
 /**
- * Cancels this Promise with the given error.
- *
- * @param {!Error} err The cancellation error.
- * @private
+ * Returns the control's preferred ARIA role. This can be used by a control to
+ * override the role that would be assigned by the renderer.  This is useful in
+ * cases where a different ARIA role is appropriate for a control because of the
+ * context in which it's used.  E.g., a {@link goog.ui.MenuButton} added to a
+ * {@link goog.ui.Select} should have an ARIA role of LISTBOX and not MENUITEM.
+ * @return {?goog.a11y.aria.Role} This control's preferred ARIA role or null if
+ *     no preferred ARIA role is set.
  */
-goog.Promise.prototype.cancelInternal_ = function(err) {
-  if (this.state_ == goog.Promise.State_.PENDING) {
-    if (this.parent_) {
-      // Cancel the Promise and remove it from the parent's child list.
-      this.parent_.cancelChild_(this, err);
-      this.parent_ = null;
-    } else {
-      this.resolve_(goog.Promise.State_.REJECTED, err);
+goog.ui.Control.prototype.getPreferredAriaRole = function() {
+  return this.preferredAriaRole_;
+};
+
+
+/**
+ * Sets the control's preferred ARIA role. This can be used to override the role
+ * that would be assigned by the renderer.  This is useful in cases where a
+ * different ARIA role is appropriate for a control because of the
+ * context in which it's used.  E.g., a {@link goog.ui.MenuButton} added to a
+ * {@link goog.ui.Select} should have an ARIA role of LISTBOX and not MENUITEM.
+ * @param {goog.a11y.aria.Role} role This control's preferred ARIA role.
+ */
+goog.ui.Control.prototype.setPreferredAriaRole = function(role) {
+  this.preferredAriaRole_ = role;
+};
+
+
+/**
+ * Gets the control's aria label.
+ * @return {?string} This control's aria label.
+ */
+goog.ui.Control.prototype.getAriaLabel = function() {
+  return this.ariaLabel_;
+};
+
+
+/**
+ * Sets the control's aria label. This can be used to assign aria label to the
+ * element after it is rendered.
+ * @param {string} label The string to set as the aria label for this control.
+ *     No escaping is done on this value.
+ */
+goog.ui.Control.prototype.setAriaLabel = function(label) {
+  this.ariaLabel_ = label;
+  var element = this.getElement();
+  if (element) {
+    this.renderer_.setAriaLabel(element, label);
+  }
+};
+
+
+/**
+ * Returns the DOM element into which child components are to be rendered,
+ * or null if the control itself hasn't been rendered yet.  Overrides
+ * {@link goog.ui.Component#getContentElement} by delegating to the renderer.
+ * @return {Element} Element to contain child elements (null if none).
+ * @override
+ */
+goog.ui.Control.prototype.getContentElement = function() {
+  // Delegate to renderer.
+  return this.renderer_.getContentElement(this.getElement());
+};
+
+
+/**
+ * Returns true if the given element can be decorated by this component.
+ * Overrides {@link goog.ui.Component#canDecorate}.
+ * @param {Element} element Element to decorate.
+ * @return {boolean} Whether the element can be decorated by this component.
+ * @override
+ */
+goog.ui.Control.prototype.canDecorate = function(element) {
+  // Controls support pluggable renderers; delegate to the renderer.
+  return this.renderer_.canDecorate(element);
+};
+
+
+/**
+ * Decorates the given element with this component. Overrides {@link
+ * goog.ui.Component#decorateInternal} by delegating DOM manipulation
+ * to the control's renderer.
+ * @param {Element} element Element to decorate.
+ * @protected
+ * @override
+ */
+goog.ui.Control.prototype.decorateInternal = function(element) {
+  element = this.renderer_.decorate(this, element);
+  this.setElementInternal(element);
+
+  // Initialize ARIA role.
+  this.renderer_.setAriaRole(element, this.getPreferredAriaRole());
+
+  // Initialize text selection.
+  if (!this.isAllowTextSelection()) {
+    // Decorated elements are assumed to be selectable.  Since making elements
+    // unselectable is expensive, only do it if needed (bug 1037090).
+    this.renderer_.setAllowTextSelection(element, false);
+  }
+
+  // Initialize visibility based on the decorated element's styling.
+  this.visible_ = element.style.display != 'none';
+};
+
+
+/**
+ * Configures the component after its DOM has been rendered, and sets up event
+ * handling.  Overrides {@link goog.ui.Component#enterDocument}.
+ * @override
+ */
+goog.ui.Control.prototype.enterDocument = function() {
+  goog.ui.Control.superClass_.enterDocument.call(this);
+
+  // Call the renderer's setAriaStates method to set element's aria attributes.
+  this.renderer_.setAriaStates(this, this.getElementStrict());
+
+  // Call the renderer's initializeDom method to configure properties of the
+  // control's DOM that can only be done once it's in the document.
+  this.renderer_.initializeDom(this);
+
+  // Initialize event handling if at least one state other than DISABLED is
+  // supported.
+  if (this.supportedStates_ & ~goog.ui.Component.State.DISABLED) {
+    // Initialize mouse event handling if the control is configured to handle
+    // its own mouse events.  (Controls hosted in containers don't need to
+    // handle their own mouse events.)
+    if (this.isHandleMouseEvents()) {
+      this.enableMouseEventHandling_(true);
+    }
+
+    // Initialize keyboard event handling if the control is focusable and has
+    // a key event target.  (Controls hosted in containers typically aren't
+    // focusable, allowing their container to handle keyboard events for them.)
+    if (this.isSupportedState(goog.ui.Component.State.FOCUSED)) {
+      var keyTarget = this.getKeyEventTarget();
+      if (keyTarget) {
+        var keyHandler = this.getKeyHandler();
+        keyHandler.attach(keyTarget);
+        this.getHandler()
+            .listen(
+                keyHandler, goog.events.KeyHandler.EventType.KEY,
+                this.handleKeyEvent)
+            .listen(keyTarget, goog.events.EventType.FOCUS, this.handleFocus)
+            .listen(keyTarget, goog.events.EventType.BLUR, this.handleBlur);
+      }
     }
   }
 };
 
 
 /**
- * Cancels a child Promise from the list of callback entries. If the Promise has
- * not already been resolved, reject it with a cancel error. If there are no
- * other children in the list of callback entries, propagate the cancellation
- * by canceling this Promise as well.
- *
- * @param {!goog.Promise} childPromise The Promise to cancel.
- * @param {!Error} err The cancel error to use for rejecting the Promise.
+ * Enables or disables mouse event handling on the control.
+ * @param {boolean} enable Whether to enable mouse event handling.
  * @private
  */
-goog.Promise.prototype.cancelChild_ = function(childPromise, err) {
-  if (!this.callbackEntries_) {
-    return;
-  }
-  var childCount = 0;
-  var childEntry = null;
-  var beforeChildEntry = null;
-
-  // Find the callback entry for the childPromise, and count whether there are
-  // additional child Promises.
-  for (var entry = this.callbackEntries_; entry; entry = entry.next) {
-    if (!entry.always) {
-      childCount++;
-      if (entry.child == childPromise) {
-        childEntry = entry;
-      }
-      if (childEntry && childCount > 1) {
-        break;
+goog.ui.Control.prototype.enableMouseEventHandling_ = function(enable) {
+  var handler = this.getHandler();
+  var element = this.getElement();
+  if (enable) {
+    handler
+        .listen(element, goog.events.EventType.MOUSEOVER, this.handleMouseOver)
+        .listen(element, goog.events.EventType.MOUSEDOWN, this.handleMouseDown)
+        .listen(element, goog.events.EventType.MOUSEUP, this.handleMouseUp)
+        .listen(element, goog.events.EventType.MOUSEOUT, this.handleMouseOut);
+    if (this.handleContextMenu != goog.nullFunction) {
+      handler.listen(
+          element, goog.events.EventType.CONTEXTMENU, this.handleContextMenu);
+    }
+    if (goog.userAgent.IE) {
+      handler.listen(
+          element, goog.events.EventType.DBLCLICK, this.handleDblClick);
+      if (!this.ieMouseEventSequenceSimulator_) {
+        this.ieMouseEventSequenceSimulator_ =
+            new goog.ui.Control.IeMouseEventSequenceSimulator_(this);
+        this.registerDisposable(this.ieMouseEventSequenceSimulator_);
       }
     }
-    if (!childEntry) {
-      beforeChildEntry = entry;
+  } else {
+    handler
+        .unlisten(
+            element, goog.events.EventType.MOUSEOVER, this.handleMouseOver)
+        .unlisten(
+            element, goog.events.EventType.MOUSEDOWN, this.handleMouseDown)
+        .unlisten(element, goog.events.EventType.MOUSEUP, this.handleMouseUp)
+        .unlisten(element, goog.events.EventType.MOUSEOUT, this.handleMouseOut);
+    if (this.handleContextMenu != goog.nullFunction) {
+      handler.unlisten(
+          element, goog.events.EventType.CONTEXTMENU, this.handleContextMenu);
     }
-  }
-
-  // Can a child entry be missing?
-
-  // If the child Promise was the only child, cancel this Promise as well.
-  // Otherwise, reject only the child Promise with the cancel error.
-  if (childEntry) {
-    if (this.state_ == goog.Promise.State_.PENDING && childCount == 1) {
-      this.cancelInternal_(err);
-    } else {
-      if (beforeChildEntry) {
-        this.removeEntryAfter_(beforeChildEntry);
-      } else {
-        this.popEntry_();
-      }
-
-      this.executeCallback_(childEntry, goog.Promise.State_.REJECTED, err);
+    if (goog.userAgent.IE) {
+      handler.unlisten(
+          element, goog.events.EventType.DBLCLICK, this.handleDblClick);
+      goog.dispose(this.ieMouseEventSequenceSimulator_);
+      this.ieMouseEventSequenceSimulator_ = null;
     }
   }
 };
 
 
 /**
- * Adds a callback entry to the current Promise, and schedules callback
- * execution if the Promise has already been settled.
- *
- * @param {goog.Promise.CallbackEntry_} callbackEntry Record containing
- *     {@code onFulfilled} and {@code onRejected} callbacks to execute after
- *     the Promise is settled.
- * @private
+ * Cleans up the component before its DOM is removed from the document, and
+ * removes event handlers.  Overrides {@link goog.ui.Component#exitDocument}
+ * by making sure that components that are removed from the document aren't
+ * focusable (i.e. have no tab index).
+ * @override
  */
-goog.Promise.prototype.addCallbackEntry_ = function(callbackEntry) {
-  if (!this.hasEntry_() && (this.state_ == goog.Promise.State_.FULFILLED ||
-                            this.state_ == goog.Promise.State_.REJECTED)) {
-    this.scheduleCallbacks_();
+goog.ui.Control.prototype.exitDocument = function() {
+  goog.ui.Control.superClass_.exitDocument.call(this);
+  if (this.keyHandler_) {
+    this.keyHandler_.detach();
   }
-  this.queueEntry_(callbackEntry);
+  if (this.isVisible() && this.isEnabled()) {
+    this.renderer_.setFocusable(this, false);
+  }
+};
+
+
+/** @override */
+goog.ui.Control.prototype.disposeInternal = function() {
+  goog.ui.Control.superClass_.disposeInternal.call(this);
+  if (this.keyHandler_) {
+    this.keyHandler_.dispose();
+    delete this.keyHandler_;
+  }
+  delete this.renderer_;
+  this.content_ = null;
+  this.extraClassNames_ = null;
+  this.ieMouseEventSequenceSimulator_ = null;
+};
+
+
+// Component content management.
+
+
+/**
+ * Returns the text caption or DOM structure displayed in the component.
+ * @return {goog.ui.ControlContent} Text caption or DOM structure
+ *     comprising the component's contents.
+ */
+goog.ui.Control.prototype.getContent = function() {
+  return this.content_;
 };
 
 
 /**
- * Creates a child Promise and adds it to the callback entry list. The result of
- * the child Promise is determined by the state of the parent Promise and the
- * result of the {@code onFulfilled} or {@code onRejected} callbacks as
- * specified in the Promise resolution procedure.
- *
- * @see http://promisesaplus.com/#the__method
- *
- * @param {?function(this:THIS, TYPE):
- *          (RESULT|goog.Promise<RESULT>|Thenable)} onFulfilled A callback that
- *     will be invoked if the Promise is fullfilled, or null.
- * @param {?function(this:THIS, *): *} onRejected A callback that will be
- *     invoked if the Promise is rejected, or null.
- * @param {THIS=} opt_context An optional execution context for the callbacks.
- *     in the default calling context.
- * @return {!goog.Promise} The child Promise.
- * @template RESULT,THIS
- * @private
+ * Sets the component's content to the given text caption, element, or array of
+ * nodes.  (If the argument is an array of nodes, it must be an actual array,
+ * not an array-like object.)
+ * @param {goog.ui.ControlContent} content Text caption or DOM
+ *     structure to set as the component's contents.
  */
-goog.Promise.prototype.addChildPromise_ = function(
-    onFulfilled, onRejected, opt_context) {
+goog.ui.Control.prototype.setContent = function(content) {
+  // Controls support pluggable renderers; delegate to the renderer.
+  this.renderer_.setContent(this.getElement(), content);
 
-  /** @type {goog.Promise.CallbackEntry_} */
-  var callbackEntry = goog.Promise.getCallbackEntry_(null, null, null);
-
-  callbackEntry.child = new goog.Promise(function(resolve, reject) {
-    // Invoke onFulfilled, or resolve with the parent's value if absent.
-    callbackEntry.onFulfilled = onFulfilled ? function(value) {
-      try {
-        var result = onFulfilled.call(opt_context, value);
-        resolve(result);
-      } catch (err) {
-        reject(err);
-      }
-    } : resolve;
-
-    // Invoke onRejected, or reject with the parent's reason if absent.
-    callbackEntry.onRejected = onRejected ? function(reason) {
-      try {
-        var result = onRejected.call(opt_context, reason);
-        if (!goog.isDef(result) &&
-            reason instanceof goog.Promise.CancellationError) {
-          // Propagate cancellation to children if no other result is returned.
-          reject(reason);
-        } else {
-          resolve(result);
-        }
-      } catch (err) {
-        reject(err);
-      }
-    } : reject;
-  });
-
-  callbackEntry.child.parent_ = this;
-  this.addCallbackEntry_(callbackEntry);
-  return callbackEntry.child;
+  // setContentInternal needs to be after the renderer, since the implementation
+  // may depend on the content being in the DOM.
+  this.setContentInternal(content);
 };
 
 
 /**
- * Unblocks the Promise and fulfills it with the given value.
+ * Sets the component's content to the given text caption, element, or array
+ * of nodes.  Unlike {@link #setContent}, doesn't modify the component's DOM.
+ * Called by renderers during element decoration.
  *
- * @param {TYPE} value
- * @private
+ * This should only be used by subclasses and its associated renderers.
+ *
+ * @param {goog.ui.ControlContent} content Text caption or DOM structure
+ *     to set as the component's contents.
  */
-goog.Promise.prototype.unblockAndFulfill_ = function(value) {
-  goog.asserts.assert(this.state_ == goog.Promise.State_.BLOCKED);
-  this.state_ = goog.Promise.State_.PENDING;
-  this.resolve_(goog.Promise.State_.FULFILLED, value);
+goog.ui.Control.prototype.setContentInternal = function(content) {
+  this.content_ = content;
 };
 
 
 /**
- * Unblocks the Promise and rejects it with the given rejection reason.
- *
- * @param {*} reason
- * @private
+ * @return {string} Text caption of the control or empty string if none.
  */
-goog.Promise.prototype.unblockAndReject_ = function(reason) {
-  goog.asserts.assert(this.state_ == goog.Promise.State_.BLOCKED);
-  this.state_ = goog.Promise.State_.PENDING;
-  this.resolve_(goog.Promise.State_.REJECTED, reason);
+goog.ui.Control.prototype.getCaption = function() {
+  var content = this.getContent();
+  if (!content) {
+    return '';
+  }
+  var caption = goog.isString(content) ?
+      content :
+      goog.isArray(content) ?
+      goog.array.map(content, goog.dom.getRawTextContent).join('') :
+      goog.dom.getTextContent(/** @type {!Node} */ (content));
+  return goog.string.collapseBreakingSpaces(caption);
 };
 
 
 /**
- * Attempts to resolve a Promise with a given resolution state and value. This
- * is a no-op if the given Promise has already been resolved.
- *
- * If the given result is a Thenable (such as another Promise), the Promise will
- * be settled with the same state and result as the Thenable once it is itself
- * settled.
- *
- * If the given result is not a Thenable, the Promise will be settled (fulfilled
- * or rejected) with that result based on the given state.
- *
- * @see http://promisesaplus.com/#the_promise_resolution_procedure
- *
- * @param {goog.Promise.State_} state
- * @param {*} x The result to apply to the Promise.
- * @private
+ * Sets the text caption of the component.
+ * @param {string} caption Text caption of the component.
  */
-goog.Promise.prototype.resolve_ = function(state, x) {
-  if (this.state_ != goog.Promise.State_.PENDING) {
-    return;
-  }
+goog.ui.Control.prototype.setCaption = function(caption) {
+  this.setContent(caption);
+};
 
-  if (this == x) {
-    state = goog.Promise.State_.REJECTED;
-    x = new TypeError('Promise cannot resolve to itself');
-  }
 
-  this.state_ = goog.Promise.State_.BLOCKED;
-  var isThenable = goog.Promise.maybeThen_(
-      x, this.unblockAndFulfill_, this.unblockAndReject_, this);
-  if (isThenable) {
-    return;
-  }
+// Component state management.
 
-  this.result_ = x;
-  this.state_ = state;
-  // Since we can no longer be canceled, remove link to parent, so that the
-  // child promise does not keep the parent promise alive.
-  this.parent_ = null;
-  this.scheduleCallbacks_();
 
-  if (state == goog.Promise.State_.REJECTED &&
-      !(x instanceof goog.Promise.CancellationError)) {
-    goog.Promise.addUnhandledRejection_(this, x);
+/** @override */
+goog.ui.Control.prototype.setRightToLeft = function(rightToLeft) {
+  // The superclass implementation ensures the control isn't in the document.
+  goog.ui.Control.superClass_.setRightToLeft.call(this, rightToLeft);
+
+  var element = this.getElement();
+  if (element) {
+    this.renderer_.setRightToLeft(element, rightToLeft);
   }
 };
 
 
 /**
- * Invokes the "then" method of an input value if that value is a Thenable. This
- * is a no-op if the value is not thenable.
- *
- * @param {?} value A potentially thenable value.
- * @param {!Function} onFulfilled
- * @param {!Function} onRejected
- * @param {?} context
- * @return {boolean} Whether the input value was thenable.
- * @private
+ * Returns true if the control allows text selection within its DOM, false
+ * otherwise.  Controls that disallow text selection have the appropriate
+ * unselectable styling applied to their elements.  Note that controls hosted
+ * in containers will report that they allow text selection even if their
+ * container disallows text selection.
+ * @return {boolean} Whether the control allows text selection.
  */
-goog.Promise.maybeThen_ = function(value, onFulfilled, onRejected, context) {
-  if (value instanceof goog.Promise) {
-    value.thenVoid(onFulfilled, onRejected, context);
+goog.ui.Control.prototype.isAllowTextSelection = function() {
+  return this.allowTextSelection_;
+};
+
+
+/**
+ * Allows or disallows text selection within the control's DOM.
+ * @param {boolean} allow Whether the control should allow text selection.
+ */
+goog.ui.Control.prototype.setAllowTextSelection = function(allow) {
+  this.allowTextSelection_ = allow;
+
+  var element = this.getElement();
+  if (element) {
+    this.renderer_.setAllowTextSelection(element, allow);
+  }
+};
+
+
+/**
+ * Returns true if the component's visibility is set to visible, false if
+ * it is set to hidden.  A component that is set to hidden is guaranteed
+ * to be hidden from the user, but the reverse isn't necessarily true.
+ * A component may be set to visible but can otherwise be obscured by another
+ * element, rendered off-screen, or hidden using direct CSS manipulation.
+ * @return {boolean} Whether the component is visible.
+ */
+goog.ui.Control.prototype.isVisible = function() {
+  return this.visible_;
+};
+
+
+/**
+ * Shows or hides the component.  Does nothing if the component already has
+ * the requested visibility.  Otherwise, dispatches a SHOW or HIDE event as
+ * appropriate, giving listeners a chance to prevent the visibility change.
+ * When showing a component that is both enabled and focusable, ensures that
+ * its key target has a tab index.  When hiding a component that is enabled
+ * and focusable, blurs its key target and removes its tab index.
+ * @param {boolean} visible Whether to show or hide the component.
+ * @param {boolean=} opt_force If true, doesn't check whether the component
+ *     already has the requested visibility, and doesn't dispatch any events.
+ * @return {boolean} Whether the visibility was changed.
+ */
+goog.ui.Control.prototype.setVisible = function(visible, opt_force) {
+  if (opt_force || (this.visible_ != visible &&
+                    this.dispatchEvent(
+                        visible ? goog.ui.Component.EventType.SHOW :
+                                  goog.ui.Component.EventType.HIDE))) {
+    var element = this.getElement();
+    if (element) {
+      this.renderer_.setVisible(element, visible);
+    }
+    if (this.isEnabled()) {
+      this.renderer_.setFocusable(this, visible);
+    }
+    this.visible_ = visible;
     return true;
-  } else if (goog.Thenable.isImplementedBy(value)) {
-    value = /** @type {!goog.Thenable} */ (value);
-    value.then(onFulfilled, onRejected, context);
-    return true;
-  } else if (goog.isObject(value)) {
-    try {
-      var then = value['then'];
-      if (goog.isFunction(then)) {
-        goog.Promise.tryThen_(value, then, onFulfilled, onRejected, context);
-        return true;
-      }
-    } catch (e) {
-      onRejected.call(context, e);
-      return true;
-    }
   }
-
   return false;
 };
 
 
 /**
- * Attempts to call the {@code then} method on an object in the hopes that it is
- * a Promise-compatible instance. This allows interoperation between different
- * Promise implementations, however a non-compliant object may cause a Promise
- * to hang indefinitely. If the {@code then} method throws an exception, the
- * dependent Promise will be rejected with the thrown value.
- *
- * @see http://promisesaplus.com/#point-70
- *
- * @param {Thenable} thenable An object with a {@code then} method that may be
- *     compatible with the Promise/A+ specification.
- * @param {!Function} then The {@code then} method of the Thenable object.
- * @param {!Function} onFulfilled
- * @param {!Function} onRejected
- * @param {*} context
+ * Returns true if the component is enabled, false otherwise.
+ * @return {boolean} Whether the component is enabled.
+ */
+goog.ui.Control.prototype.isEnabled = function() {
+  return !this.hasState(goog.ui.Component.State.DISABLED);
+};
+
+
+/**
+ * Returns true if the control has a parent that is itself disabled, false
+ * otherwise.
+ * @return {boolean} Whether the component is hosted in a disabled container.
  * @private
  */
-goog.Promise.tryThen_ = function(
-    thenable, then, onFulfilled, onRejected, context) {
+goog.ui.Control.prototype.isParentDisabled_ = function() {
+  var parent = this.getParent();
+  return !!parent && typeof parent.isEnabled == 'function' &&
+      !parent.isEnabled();
+};
 
-  var called = false;
-  var resolve = function(value) {
-    if (!called) {
-      called = true;
-      onFulfilled.call(context, value);
+
+/**
+ * Enables or disables the component.  Does nothing if this state transition
+ * is disallowed.  If the component is both visible and focusable, updates its
+ * focused state and tab index as needed.  If the component is being disabled,
+ * ensures that it is also deactivated and un-highlighted first.  Note that the
+ * component's enabled/disabled state is "locked" as long as it is hosted in a
+ * {@link goog.ui.Container} that is itself disabled; this is to prevent clients
+ * from accidentally re-enabling a control that is in a disabled container.
+ * @param {boolean} enable Whether to enable or disable the component.
+ * @see #isTransitionAllowed
+ */
+goog.ui.Control.prototype.setEnabled = function(enable) {
+  if (!this.isParentDisabled_() &&
+      this.isTransitionAllowed(goog.ui.Component.State.DISABLED, !enable)) {
+    if (!enable) {
+      this.setActive(false);
+      this.setHighlighted(false);
     }
-  };
-
-  var reject = function(reason) {
-    if (!called) {
-      called = true;
-      onRejected.call(context, reason);
+    if (this.isVisible()) {
+      this.renderer_.setFocusable(this, enable);
     }
-  };
-
-  try {
-    then.call(thenable, resolve, reject);
-  } catch (e) {
-    reject(e);
+    this.setState(goog.ui.Component.State.DISABLED, !enable, true);
   }
 };
 
 
 /**
- * Executes the pending callbacks of a settled Promise after a timeout.
+ * Returns true if the component is currently highlighted, false otherwise.
+ * @return {boolean} Whether the component is highlighted.
+ */
+goog.ui.Control.prototype.isHighlighted = function() {
+  return this.hasState(goog.ui.Component.State.HOVER);
+};
+
+
+/**
+ * Highlights or unhighlights the component.  Does nothing if this state
+ * transition is disallowed.
+ * @param {boolean} highlight Whether to highlight or unhighlight the component.
+ * @see #isTransitionAllowed
+ */
+goog.ui.Control.prototype.setHighlighted = function(highlight) {
+  if (this.isTransitionAllowed(goog.ui.Component.State.HOVER, highlight)) {
+    this.setState(goog.ui.Component.State.HOVER, highlight);
+  }
+};
+
+
+/**
+ * Returns true if the component is active (pressed), false otherwise.
+ * @return {boolean} Whether the component is active.
+ */
+goog.ui.Control.prototype.isActive = function() {
+  return this.hasState(goog.ui.Component.State.ACTIVE);
+};
+
+
+/**
+ * Activates or deactivates the component.  Does nothing if this state
+ * transition is disallowed.
+ * @param {boolean} active Whether to activate or deactivate the component.
+ * @see #isTransitionAllowed
+ */
+goog.ui.Control.prototype.setActive = function(active) {
+  if (this.isTransitionAllowed(goog.ui.Component.State.ACTIVE, active)) {
+    this.setState(goog.ui.Component.State.ACTIVE, active);
+  }
+};
+
+
+/**
+ * Returns true if the component is selected, false otherwise.
+ * @return {boolean} Whether the component is selected.
+ */
+goog.ui.Control.prototype.isSelected = function() {
+  return this.hasState(goog.ui.Component.State.SELECTED);
+};
+
+
+/**
+ * Selects or unselects the component.  Does nothing if this state transition
+ * is disallowed.
+ * @param {boolean} select Whether to select or unselect the component.
+ * @see #isTransitionAllowed
+ */
+goog.ui.Control.prototype.setSelected = function(select) {
+  if (this.isTransitionAllowed(goog.ui.Component.State.SELECTED, select)) {
+    this.setState(goog.ui.Component.State.SELECTED, select);
+  }
+};
+
+
+/**
+ * Returns true if the component is checked, false otherwise.
+ * @return {boolean} Whether the component is checked.
+ */
+goog.ui.Control.prototype.isChecked = function() {
+  return this.hasState(goog.ui.Component.State.CHECKED);
+};
+
+
+/**
+ * Checks or unchecks the component.  Does nothing if this state transition
+ * is disallowed.
+ * @param {boolean} check Whether to check or uncheck the component.
+ * @see #isTransitionAllowed
+ */
+goog.ui.Control.prototype.setChecked = function(check) {
+  if (this.isTransitionAllowed(goog.ui.Component.State.CHECKED, check)) {
+    this.setState(goog.ui.Component.State.CHECKED, check);
+  }
+};
+
+
+/**
+ * Returns true if the component is styled to indicate that it has keyboard
+ * focus, false otherwise.  Note that {@code isFocused()} returning true
+ * doesn't guarantee that the component's key event target has keyborad focus,
+ * only that it is styled as such.
+ * @return {boolean} Whether the component is styled to indicate as having
+ *     keyboard focus.
+ */
+goog.ui.Control.prototype.isFocused = function() {
+  return this.hasState(goog.ui.Component.State.FOCUSED);
+};
+
+
+/**
+ * Applies or removes styling indicating that the component has keyboard focus.
+ * Note that unlike the other "set" methods, this method is called as a result
+ * of the component's element having received or lost keyboard focus, not the
+ * other way around, so calling {@code setFocused(true)} doesn't guarantee that
+ * the component's key event target has keyboard focus, only that it is styled
+ * as such.
+ * @param {boolean} focused Whether to apply or remove styling to indicate that
+ *     the component's element has keyboard focus.
+ */
+goog.ui.Control.prototype.setFocused = function(focused) {
+  if (this.isTransitionAllowed(goog.ui.Component.State.FOCUSED, focused)) {
+    this.setState(goog.ui.Component.State.FOCUSED, focused);
+  }
+};
+
+
+/**
+ * Returns true if the component is open (expanded), false otherwise.
+ * @return {boolean} Whether the component is open.
+ */
+goog.ui.Control.prototype.isOpen = function() {
+  return this.hasState(goog.ui.Component.State.OPENED);
+};
+
+
+/**
+ * Opens (expands) or closes (collapses) the component.  Does nothing if this
+ * state transition is disallowed.
+ * @param {boolean} open Whether to open or close the component.
+ * @see #isTransitionAllowed
+ */
+goog.ui.Control.prototype.setOpen = function(open) {
+  if (this.isTransitionAllowed(goog.ui.Component.State.OPENED, open)) {
+    this.setState(goog.ui.Component.State.OPENED, open);
+  }
+};
+
+
+/**
+ * Returns the component's state as a bit mask of {@link
+ * goog.ui.Component.State}s.
+ * @return {number} Bit mask representing component state.
+ */
+goog.ui.Control.prototype.getState = function() {
+  return this.state_;
+};
+
+
+/**
+ * Returns true if the component is in the specified state, false otherwise.
+ * @param {goog.ui.Component.State} state State to check.
+ * @return {boolean} Whether the component is in the given state.
+ */
+goog.ui.Control.prototype.hasState = function(state) {
+  return !!(this.state_ & state);
+};
+
+
+/**
+ * Sets or clears the given state on the component, and updates its styling
+ * accordingly.  Does nothing if the component is already in the correct state
+ * or if it doesn't support the specified state.  Doesn't dispatch any state
+ * transition events; use advisedly.
+ * @param {goog.ui.Component.State} state State to set or clear.
+ * @param {boolean} enable Whether to set or clear the state (if supported).
+ * @param {boolean=} opt_calledFrom Prevents looping with setEnabled.
+ */
+goog.ui.Control.prototype.setState = function(state, enable, opt_calledFrom) {
+  if (!opt_calledFrom && state == goog.ui.Component.State.DISABLED) {
+    this.setEnabled(!enable);
+    return;
+  }
+  if (this.isSupportedState(state) && enable != this.hasState(state)) {
+    // Delegate actual styling to the renderer, since it is DOM-specific.
+    this.renderer_.setState(this, state, enable);
+    this.state_ = enable ? this.state_ | state : this.state_ & ~state;
+  }
+};
+
+
+/**
+ * Sets the component's state to the state represented by a bit mask of
+ * {@link goog.ui.Component.State}s.  Unlike {@link #setState}, doesn't
+ * update the component's styling, and doesn't reject unsupported states.
+ * Called by renderers during element decoration.  Considered protected;
+ * should only be used within this package and by subclasses.
  *
- * Section 2.2.4 of the Promises/A+ specification requires that Promise
- * callbacks must only be invoked from a call stack that only contains Promise
- * implementation code, which we accomplish by invoking callback execution after
- * a timeout. If {@code startExecution_} is called multiple times for the same
- * Promise, the callback chain will be evaluated only once. Additional callbacks
- * may be added during the evaluation phase, and will be executed in the same
- * event loop.
+ * This should only be used by subclasses and its associated renderers.
  *
- * All Promises added to the waiting list during the same browser event loop
- * will be executed in one batch to avoid using a separate timeout per Promise.
- *
- * @private
+ * @param {number} state Bit mask representing component state.
  */
-goog.Promise.prototype.scheduleCallbacks_ = function() {
-  if (!this.executing_) {
-    this.executing_ = true;
-    goog.async.run(this.executeCallbacks_, this);
+goog.ui.Control.prototype.setStateInternal = function(state) {
+  this.state_ = state;
+};
+
+
+/**
+ * Returns true if the component supports the specified state, false otherwise.
+ * @param {goog.ui.Component.State} state State to check.
+ * @return {boolean} Whether the component supports the given state.
+ */
+goog.ui.Control.prototype.isSupportedState = function(state) {
+  return !!(this.supportedStates_ & state);
+};
+
+
+/**
+ * Enables or disables support for the given state. Disabling support
+ * for a state while the component is in that state is an error.
+ * @param {goog.ui.Component.State} state State to support or de-support.
+ * @param {boolean} support Whether the component should support the state.
+ * @throws {Error} If disabling support for a state the control is currently in.
+ */
+goog.ui.Control.prototype.setSupportedState = function(state, support) {
+  if (this.isInDocument() && this.hasState(state) && !support) {
+    // Since we hook up event handlers in enterDocument(), this is an error.
+    throw Error(goog.ui.Component.Error.ALREADY_RENDERED);
+  }
+
+  if (!support && this.hasState(state)) {
+    // We are removing support for a state that the component is currently in.
+    this.setState(state, false);
+  }
+
+  this.supportedStates_ =
+      support ? this.supportedStates_ | state : this.supportedStates_ & ~state;
+};
+
+
+/**
+ * Returns true if the component provides default event handling for the state,
+ * false otherwise.
+ * @param {goog.ui.Component.State} state State to check.
+ * @return {boolean} Whether the component provides default event handling for
+ *     the state.
+ */
+goog.ui.Control.prototype.isAutoState = function(state) {
+  return !!(this.autoStates_ & state) && this.isSupportedState(state);
+};
+
+
+/**
+ * Enables or disables automatic event handling for the given state(s).
+ * @param {number} states Bit mask of {@link goog.ui.Component.State}s for which
+ *     default event handling is to be enabled or disabled.
+ * @param {boolean} enable Whether the component should provide default event
+ *     handling for the state(s).
+ */
+goog.ui.Control.prototype.setAutoStates = function(states, enable) {
+  this.autoStates_ =
+      enable ? this.autoStates_ | states : this.autoStates_ & ~states;
+};
+
+
+/**
+ * Returns true if the component is set to dispatch transition events for the
+ * given state, false otherwise.
+ * @param {goog.ui.Component.State} state State to check.
+ * @return {boolean} Whether the component dispatches transition events for
+ *     the state.
+ */
+goog.ui.Control.prototype.isDispatchTransitionEvents = function(state) {
+  return !!(this.statesWithTransitionEvents_ & state) &&
+      this.isSupportedState(state);
+};
+
+
+/**
+ * Enables or disables transition events for the given state(s).  Controls
+ * handle state transitions internally by default, and only dispatch state
+ * transition events if explicitly requested to do so by calling this method.
+ * @param {number} states Bit mask of {@link goog.ui.Component.State}s for
+ *     which transition events should be enabled or disabled.
+ * @param {boolean} enable Whether transition events should be enabled.
+ */
+goog.ui.Control.prototype.setDispatchTransitionEvents = function(
+    states, enable) {
+  this.statesWithTransitionEvents_ = enable ?
+      this.statesWithTransitionEvents_ | states :
+      this.statesWithTransitionEvents_ & ~states;
+};
+
+
+/**
+ * Returns true if the transition into or out of the given state is allowed to
+ * proceed, false otherwise.  A state transition is allowed under the following
+ * conditions:
+ * <ul>
+ *   <li>the component supports the state,
+ *   <li>the component isn't already in the target state,
+ *   <li>either the component is configured not to dispatch events for this
+ *       state transition, or a transition event was dispatched and wasn't
+ *       canceled by any event listener, and
+ *   <li>the component hasn't been disposed of
+ * </ul>
+ * Considered protected; should only be used within this package and by
+ * subclasses.
+ * @param {goog.ui.Component.State} state State to/from which the control is
+ *     transitioning.
+ * @param {boolean} enable Whether the control is entering or leaving the state.
+ * @return {boolean} Whether the state transition is allowed to proceed.
+ * @protected
+ */
+goog.ui.Control.prototype.isTransitionAllowed = function(state, enable) {
+  return this.isSupportedState(state) && this.hasState(state) != enable &&
+      (!(this.statesWithTransitionEvents_ & state) ||
+       this.dispatchEvent(
+           goog.ui.Component.getStateTransitionEvent(state, enable))) &&
+      !this.isDisposed();
+};
+
+
+// Default event handlers, to be overridden in subclasses.
+
+
+/**
+ * Handles mouseover events.  Dispatches an ENTER event; if the event isn't
+ * canceled, the component is enabled, and it supports auto-highlighting,
+ * highlights the component.  Considered protected; should only be used
+ * within this package and by subclasses.
+ * @param {goog.events.BrowserEvent} e Mouse event to handle.
+ */
+goog.ui.Control.prototype.handleMouseOver = function(e) {
+  // Ignore mouse moves between descendants.
+  if (!goog.ui.Control.isMouseEventWithinElement_(e, this.getElement()) &&
+      this.dispatchEvent(goog.ui.Component.EventType.ENTER) &&
+      this.isEnabled() && this.isAutoState(goog.ui.Component.State.HOVER)) {
+    this.setHighlighted(true);
   }
 };
 
 
 /**
- * @return {boolean} Whether there are any pending callbacks queued.
- * @private
+ * Handles mouseout events.  Dispatches a LEAVE event; if the event isn't
+ * canceled, and the component supports auto-highlighting, deactivates and
+ * un-highlights the component.  Considered protected; should only be used
+ * within this package and by subclasses.
+ * @param {goog.events.BrowserEvent} e Mouse event to handle.
  */
-goog.Promise.prototype.hasEntry_ = function() {
-  return !!this.callbackEntries_;
-};
-
-
-/**
- * @param {goog.Promise.CallbackEntry_} entry
- * @private
- */
-goog.Promise.prototype.queueEntry_ = function(entry) {
-  goog.asserts.assert(entry.onFulfilled != null);
-
-  if (this.callbackEntriesTail_) {
-    this.callbackEntriesTail_.next = entry;
-    this.callbackEntriesTail_ = entry;
-  } else {
-    // It the work queue was empty set the head too.
-    this.callbackEntries_ = entry;
-    this.callbackEntriesTail_ = entry;
-  }
-};
-
-
-/**
- * @return {goog.Promise.CallbackEntry_} entry
- * @private
- */
-goog.Promise.prototype.popEntry_ = function() {
-  var entry = null;
-  if (this.callbackEntries_) {
-    entry = this.callbackEntries_;
-    this.callbackEntries_ = entry.next;
-    entry.next = null;
-  }
-  // It the work queue is empty clear the tail too.
-  if (!this.callbackEntries_) {
-    this.callbackEntriesTail_ = null;
-  }
-
-  if (entry != null) {
-    goog.asserts.assert(entry.onFulfilled != null);
-  }
-  return entry;
-};
-
-
-/**
- * @param {goog.Promise.CallbackEntry_} previous
- * @private
- */
-goog.Promise.prototype.removeEntryAfter_ = function(previous) {
-  goog.asserts.assert(this.callbackEntries_);
-  goog.asserts.assert(previous != null);
-  // If the last entry is being removed, update the tail
-  if (previous.next == this.callbackEntriesTail_) {
-    this.callbackEntriesTail_ = previous;
-  }
-
-  previous.next = previous.next.next;
-};
-
-
-/**
- * Executes all pending callbacks for this Promise.
- *
- * @private
- */
-goog.Promise.prototype.executeCallbacks_ = function() {
-  var entry = null;
-  while (entry = this.popEntry_()) {
-    if (goog.Promise.LONG_STACK_TRACES) {
-      this.currentStep_++;
+goog.ui.Control.prototype.handleMouseOut = function(e) {
+  if (!goog.ui.Control.isMouseEventWithinElement_(e, this.getElement()) &&
+      this.dispatchEvent(goog.ui.Component.EventType.LEAVE)) {
+    if (this.isAutoState(goog.ui.Component.State.ACTIVE)) {
+      // Deactivate on mouseout; otherwise we lose track of the mouse button.
+      this.setActive(false);
     }
-    this.executeCallback_(entry, this.state_, this.result_);
-  }
-  this.executing_ = false;
-};
-
-
-/**
- * Executes a pending callback for this Promise. Invokes an {@code onFulfilled}
- * or {@code onRejected} callback based on the settled state of the Promise.
- *
- * @param {!goog.Promise.CallbackEntry_} callbackEntry An entry containing the
- *     onFulfilled and/or onRejected callbacks for this step.
- * @param {goog.Promise.State_} state The resolution status of the Promise,
- *     either FULFILLED or REJECTED.
- * @param {*} result The settled result of the Promise.
- * @private
- */
-goog.Promise.prototype.executeCallback_ = function(
-    callbackEntry, state, result) {
-  // Cancel an unhandled rejection if the then/thenVoid call had an onRejected.
-  if (state == goog.Promise.State_.REJECTED && callbackEntry.onRejected &&
-      !callbackEntry.always) {
-    this.removeUnhandledRejection_();
-  }
-
-  if (callbackEntry.child) {
-    // When the parent is settled, the child no longer needs to hold on to it,
-    // as the parent can no longer be canceled.
-    callbackEntry.child.parent_ = null;
-    goog.Promise.invokeCallback_(callbackEntry, state, result);
-  } else {
-    // Callbacks created with thenAlways or thenVoid do not have the rejection
-    // handling code normally set up in the child Promise.
-    try {
-      callbackEntry.always ?
-          callbackEntry.onFulfilled.call(callbackEntry.context) :
-          goog.Promise.invokeCallback_(callbackEntry, state, result);
-    } catch (err) {
-      goog.Promise.handleRejection_.call(null, err);
+    if (this.isAutoState(goog.ui.Component.State.HOVER)) {
+      this.setHighlighted(false);
     }
   }
-  goog.Promise.returnEntry_(callbackEntry);
 };
 
 
 /**
- * Executes the onFulfilled or onRejected callback for a callbackEntry.
- *
- * @param {!goog.Promise.CallbackEntry_} callbackEntry
- * @param {goog.Promise.State_} state
- * @param {*} result
+ * Handles contextmenu events.
+ * @param {goog.events.BrowserEvent} e Event to handle.
+ */
+goog.ui.Control.prototype.handleContextMenu = goog.nullFunction;
+
+
+/**
+ * Checks if a mouse event (mouseover or mouseout) occured below an element.
+ * @param {goog.events.BrowserEvent} e Mouse event (should be mouseover or
+ *     mouseout).
+ * @param {Element} elem The ancestor element.
+ * @return {boolean} Whether the event has a relatedTarget (the element the
+ *     mouse is coming from) and it's a descendent of elem.
  * @private
  */
-goog.Promise.invokeCallback_ = function(callbackEntry, state, result) {
-  if (state == goog.Promise.State_.FULFILLED) {
-    callbackEntry.onFulfilled.call(callbackEntry.context, result);
-  } else if (callbackEntry.onRejected) {
-    callbackEntry.onRejected.call(callbackEntry.context, result);
-  }
+goog.ui.Control.isMouseEventWithinElement_ = function(e, elem) {
+  // If relatedTarget is null, it means there was no previous element (e.g.
+  // the mouse moved out of the window).  Assume this means that the mouse
+  // event was not within the element.
+  return !!e.relatedTarget && goog.dom.contains(elem, e.relatedTarget);
 };
 
 
 /**
- * Records a stack trace entry for functions that call {@code then} or the
- * Promise constructor. May be disabled by unsetting {@code LONG_STACK_TRACES}.
- *
- * @param {!Error} err An Error object created by the calling function for
- *     providing a stack trace.
- * @private
+ * Handles mousedown events.  If the component is enabled, highlights and
+ * activates it.  If the component isn't configured for keyboard access,
+ * prevents it from receiving keyboard focus.  Considered protected; should
+ * only be used within this package and by subclasses.
+ * @param {goog.events.Event} e Mouse event to handle.
  */
-goog.Promise.prototype.addStackTrace_ = function(err) {
-  if (goog.Promise.LONG_STACK_TRACES && goog.isString(err.stack)) {
-    // Extract the third line of the stack trace, which is the entry for the
-    // user function that called into Promise code.
-    var trace = err.stack.split('\n', 4)[3];
-    var message = err.message;
+goog.ui.Control.prototype.handleMouseDown = function(e) {
+  if (this.isEnabled()) {
+    // Highlight enabled control on mousedown, regardless of the mouse button.
+    if (this.isAutoState(goog.ui.Component.State.HOVER)) {
+      this.setHighlighted(true);
+    }
 
-    // Pad the message to align the traces.
-    message += Array(11 - message.length).join(' ');
-    this.stack_.push(message + trace);
-  }
-};
-
-
-/**
- * Adds extra stack trace information to an exception for the list of
- * asynchronous {@code then} calls that have been run for this Promise. Stack
- * trace information is recorded in {@see #addStackTrace_}, and appended to
- * rethrown errors when {@code LONG_STACK_TRACES} is enabled.
- *
- * @param {*} err An unhandled exception captured during callback execution.
- * @private
- */
-goog.Promise.prototype.appendLongStack_ = function(err) {
-  if (goog.Promise.LONG_STACK_TRACES && err && goog.isString(err.stack) &&
-      this.stack_.length) {
-    var longTrace = ['Promise trace:'];
-
-    for (var promise = this; promise; promise = promise.parent_) {
-      for (var i = this.currentStep_; i >= 0; i--) {
-        longTrace.push(promise.stack_[i]);
+    // For the left button only, activate the control, and focus its key event
+    // target (if supported).
+    if (e.isMouseActionButton()) {
+      if (this.isAutoState(goog.ui.Component.State.ACTIVE)) {
+        this.setActive(true);
       }
-      longTrace.push(
-          'Value: ' +
-          '[' + (promise.state_ == goog.Promise.State_.REJECTED ? 'REJECTED' :
-                                                                  'FULFILLED') +
-          '] ' +
-          '<' + String(promise.result_) + '>');
-    }
-    err.stack += '\n\n' + longTrace.join('\n');
-  }
-};
-
-
-/**
- * Marks this rejected Promise as having being handled. Also marks any parent
- * Promises in the rejected state as handled. The rejection handler will no
- * longer be invoked for this Promise (if it has not been called already).
- *
- * @private
- */
-goog.Promise.prototype.removeUnhandledRejection_ = function() {
-  if (goog.Promise.UNHANDLED_REJECTION_DELAY > 0) {
-    for (var p = this; p && p.unhandledRejectionId_; p = p.parent_) {
-      goog.global.clearTimeout(p.unhandledRejectionId_);
-      p.unhandledRejectionId_ = 0;
-    }
-  } else if (goog.Promise.UNHANDLED_REJECTION_DELAY == 0) {
-    for (var p = this; p && p.hadUnhandledRejection_; p = p.parent_) {
-      p.hadUnhandledRejection_ = false;
-    }
-  }
-};
-
-
-/**
- * Marks this rejected Promise as unhandled. If no {@code onRejected} callback
- * is called for this Promise before the {@code UNHANDLED_REJECTION_DELAY}
- * expires, the reason will be passed to the unhandled rejection handler. The
- * handler typically rethrows the rejection reason so that it becomes visible in
- * the developer console.
- *
- * @param {!goog.Promise} promise The rejected Promise.
- * @param {*} reason The Promise rejection reason.
- * @private
- */
-goog.Promise.addUnhandledRejection_ = function(promise, reason) {
-  if (goog.Promise.UNHANDLED_REJECTION_DELAY > 0) {
-    promise.unhandledRejectionId_ = goog.global.setTimeout(function() {
-      promise.appendLongStack_(reason);
-      goog.Promise.handleRejection_.call(null, reason);
-    }, goog.Promise.UNHANDLED_REJECTION_DELAY);
-
-  } else if (goog.Promise.UNHANDLED_REJECTION_DELAY == 0) {
-    promise.hadUnhandledRejection_ = true;
-    goog.async.run(function() {
-      if (promise.hadUnhandledRejection_) {
-        promise.appendLongStack_(reason);
-        goog.Promise.handleRejection_.call(null, reason);
+      if (this.renderer_ && this.renderer_.isFocusable(this)) {
+        this.getKeyEventTarget().focus();
       }
-    });
+    }
+  }
+
+  // Cancel the default action unless the control allows text selection.
+  if (!this.isAllowTextSelection() && e.isMouseActionButton()) {
+    e.preventDefault();
   }
 };
 
 
 /**
- * A method that is invoked with the rejection reasons for Promises that are
- * rejected but have no {@code onRejected} callbacks registered yet.
- * @type {function(*)}
- * @private
+ * Handles mouseup events.  If the component is enabled, highlights it.  If
+ * the component has previously been activated, performs its associated action
+ * by calling {@link performActionInternal}, then deactivates it.  Considered
+ * protected; should only be used within this package and by subclasses.
+ * @param {goog.events.Event} e Mouse event to handle.
  */
-goog.Promise.handleRejection_ = goog.async.throwException;
-
-
-/**
- * Sets a handler that will be called with reasons from unhandled rejected
- * Promises. If the rejected Promise (or one of its descendants) has an
- * {@code onRejected} callback registered, the rejection will be considered
- * handled, and the rejection handler will not be called.
- *
- * By default, unhandled rejections are rethrown so that the error may be
- * captured by the developer console or a {@code window.onerror} handler.
- *
- * @param {function(*)} handler A function that will be called with reasons from
- *     rejected Promises. Defaults to {@code goog.async.throwException}.
- */
-goog.Promise.setUnhandledRejectionHandler = function(handler) {
-  goog.Promise.handleRejection_ = handler;
+goog.ui.Control.prototype.handleMouseUp = function(e) {
+  if (this.isEnabled()) {
+    if (this.isAutoState(goog.ui.Component.State.HOVER)) {
+      this.setHighlighted(true);
+    }
+    if (this.isActive() && this.performActionInternal(e) &&
+        this.isAutoState(goog.ui.Component.State.ACTIVE)) {
+      this.setActive(false);
+    }
+  }
 };
 
 
+/**
+ * Handles dblclick events.  Should only be registered if the user agent is
+ * IE.  If the component is enabled, performs its associated action by calling
+ * {@link performActionInternal}.  This is used to allow more performant
+ * buttons in IE.  In IE, no mousedown event is fired when that mousedown will
+ * trigger a dblclick event.  Because of this, a user clicking quickly will
+ * only cause ACTION events to fire on every other click.  This is a workaround
+ * to generate ACTION events for every click.  Unfortunately, this workaround
+ * won't ever trigger the ACTIVE state.  This is roughly the same behaviour as
+ * if this were a 'button' element with a listener on mouseup.  Considered
+ * protected; should only be used within this package and by subclasses.
+ * @param {goog.events.Event} e Mouse event to handle.
+ */
+goog.ui.Control.prototype.handleDblClick = function(e) {
+  if (this.isEnabled()) {
+    this.performActionInternal(e);
+  }
+};
+
 
 /**
- * Error used as a rejection reason for canceled Promises.
+ * Performs the appropriate action when the control is activated by the user.
+ * The default implementation first updates the checked and selected state of
+ * controls that support them, then dispatches an ACTION event.  Considered
+ * protected; should only be used within this package and by subclasses.
+ * @param {goog.events.Event} e Event that triggered the action.
+ * @return {boolean} Whether the action is allowed to proceed.
+ * @protected
+ */
+goog.ui.Control.prototype.performActionInternal = function(e) {
+  if (this.isAutoState(goog.ui.Component.State.CHECKED)) {
+    this.setChecked(!this.isChecked());
+  }
+  if (this.isAutoState(goog.ui.Component.State.SELECTED)) {
+    this.setSelected(true);
+  }
+  if (this.isAutoState(goog.ui.Component.State.OPENED)) {
+    this.setOpen(!this.isOpen());
+  }
+
+  var actionEvent =
+      new goog.events.Event(goog.ui.Component.EventType.ACTION, this);
+  if (e) {
+    actionEvent.altKey = e.altKey;
+    actionEvent.ctrlKey = e.ctrlKey;
+    actionEvent.metaKey = e.metaKey;
+    actionEvent.shiftKey = e.shiftKey;
+    actionEvent.platformModifierKey = e.platformModifierKey;
+  }
+  return this.dispatchEvent(actionEvent);
+};
+
+
+/**
+ * Handles focus events on the component's key event target element.  If the
+ * component is focusable, updates its state and styling to indicate that it
+ * now has keyboard focus.  Considered protected; should only be used within
+ * this package and by subclasses.  <b>Warning:</b> IE dispatches focus and
+ * blur events asynchronously!
+ * @param {goog.events.Event} e Focus event to handle.
+ */
+goog.ui.Control.prototype.handleFocus = function(e) {
+  if (this.isAutoState(goog.ui.Component.State.FOCUSED)) {
+    this.setFocused(true);
+  }
+};
+
+
+/**
+ * Handles blur events on the component's key event target element.  Always
+ * deactivates the component.  In addition, if the component is focusable,
+ * updates its state and styling to indicate that it no longer has keyboard
+ * focus.  Considered protected; should only be used within this package and
+ * by subclasses.  <b>Warning:</b> IE dispatches focus and blur events
+ * asynchronously!
+ * @param {goog.events.Event} e Blur event to handle.
+ */
+goog.ui.Control.prototype.handleBlur = function(e) {
+  if (this.isAutoState(goog.ui.Component.State.ACTIVE)) {
+    this.setActive(false);
+  }
+  if (this.isAutoState(goog.ui.Component.State.FOCUSED)) {
+    this.setFocused(false);
+  }
+};
+
+
+/**
+ * Attempts to handle a keyboard event, if the component is enabled and visible,
+ * by calling {@link handleKeyEventInternal}.  Considered protected; should only
+ * be used within this package and by subclasses.
+ * @param {goog.events.KeyEvent} e Key event to handle.
+ * @return {boolean} Whether the key event was handled.
+ */
+goog.ui.Control.prototype.handleKeyEvent = function(e) {
+  if (this.isVisible() && this.isEnabled() && this.handleKeyEventInternal(e)) {
+    e.preventDefault();
+    e.stopPropagation();
+    return true;
+  }
+  return false;
+};
+
+
+/**
+ * Attempts to handle a keyboard event; returns true if the event was handled,
+ * false otherwise.  Considered protected; should only be used within this
+ * package and by subclasses.
+ * @param {goog.events.KeyEvent} e Key event to handle.
+ * @return {boolean} Whether the key event was handled.
+ * @protected
+ */
+goog.ui.Control.prototype.handleKeyEventInternal = function(e) {
+  return e.keyCode == goog.events.KeyCodes.ENTER &&
+      this.performActionInternal(e);
+};
+
+
+// Register the default renderer for goog.ui.Controls.
+goog.ui.registry.setDefaultRenderer(goog.ui.Control, goog.ui.ControlRenderer);
+
+
+// Register a decorator factory function for goog.ui.Controls.
+goog.ui.registry.setDecoratorByClassName(
+    goog.ui.ControlRenderer.CSS_CLASS,
+    function() { return new goog.ui.Control(null); });
+
+
+
+/**
+ * A singleton that helps goog.ui.Control instances play well with screen
+ * readers.  It necessitated by shortcomings in IE, and need not be
+ * instantiated in any other browser.
  *
- * @param {string=} opt_message
+ * In most cases, a click on a goog.ui.Control results in a sequence of events:
+ * MOUSEDOWN, MOUSEUP and CLICK.  UI controls rely on this sequence since most
+ * behavior is trigged by MOUSEDOWN and MOUSEUP.  But when IE is used with some
+ * traditional screen readers (JAWS, NVDA and perhaps others), IE only sends
+ * the CLICK event, resulting in the control being unresponsive.  This class
+ * monitors the sequence of these events, and if it detects a CLICK event not
+ * not preceded by a MOUSEUP event, directly calls the control's event handlers
+ * for MOUSEDOWN, then MOUSEUP.  While the resulting sequence is different from
+ * the norm (the CLICK comes first instead of last), testing thus far shows
+ * the resulting behavior to be correct.
+ *
+ * See http://goo.gl/qvQR4C for more details.
+ *
+ * @param {!goog.ui.Control} control
  * @constructor
- * @extends {goog.debug.Error}
- * @final
+ * @extends {goog.Disposable}
+ * @private
  */
-goog.Promise.CancellationError = function(opt_message) {
-  goog.Promise.CancellationError.base(this, 'constructor', opt_message);
+goog.ui.Control.IeMouseEventSequenceSimulator_ = function(control) {
+  goog.ui.Control.IeMouseEventSequenceSimulator_.base(this, 'constructor');
+
+  /** @private {goog.ui.Control}*/
+  this.control_ = control;
+
+  /** @private {boolean} */
+  this.clickExpected_ = false;
+
+  /** @private @const */
+  this.handler_ = new goog.events.EventHandler(this);
+  this.registerDisposable(this.handler_);
+
+  var element = this.control_.getElementStrict();
+  this.handler_
+      .listen(element, goog.events.EventType.MOUSEDOWN, this.handleMouseDown_)
+      .listen(element, goog.events.EventType.MOUSEUP, this.handleMouseUp_)
+      .listen(element, goog.events.EventType.CLICK, this.handleClick_);
 };
-goog.inherits(goog.Promise.CancellationError, goog.debug.Error);
+goog.inherits(goog.ui.Control.IeMouseEventSequenceSimulator_, goog.Disposable);
+
+
+/**
+ * Whether this browser supports synthetic MouseEvents.
+ *
+ * See https://msdn.microsoft.com/library/dn905219(v=vs.85).aspx for details.
+ *
+ * @private {boolean}
+ * @const
+ */
+goog.ui.Control.IeMouseEventSequenceSimulator_.SYNTHETIC_EVENTS_ =
+    !goog.userAgent.IE || goog.userAgent.isDocumentModeOrHigher(9);
+
+
+/** @private */
+goog.ui.Control.IeMouseEventSequenceSimulator_.prototype.handleMouseDown_ =
+    function() {
+  this.clickExpected_ = false;
+};
+
+
+/** @private */
+goog.ui.Control.IeMouseEventSequenceSimulator_.prototype.handleMouseUp_ =
+    function() {
+  this.clickExpected_ = true;
+};
+
+
+/**
+ * @param {!MouseEvent} e
+ * @param {goog.events.EventType} typeArg
+ * @return {!MouseEvent}
+ * @private
+ */
+goog.ui.Control.IeMouseEventSequenceSimulator_.makeLeftMouseEvent_ = function(
+    e, typeArg) {
+  'use strict';
+
+  if (!goog.ui.Control.IeMouseEventSequenceSimulator_.SYNTHETIC_EVENTS_) {
+    // IE < 9 does not support synthetic mouse events. Therefore, reuse the
+    // existing MouseEvent by overwriting the read only button and type
+    // properties. As IE < 9 does not support ES5 strict mode this will not
+    // generate an exception even when the script specifies "use strict".
+    e.button = goog.events.BrowserEvent.MouseButton.LEFT;
+    e.type = typeArg;
+    return e;
+  }
+
+  var event = /** @type {!MouseEvent} */ (document.createEvent('MouseEvents'));
+  event.initMouseEvent(
+      typeArg, e.bubbles, e.cancelable,
+      e.view || null,  // IE9 errors if view is undefined
+      e.detail, e.screenX, e.screenY, e.clientX, e.clientY, e.ctrlKey, e.altKey,
+      e.shiftKey, e.metaKey, goog.events.BrowserEvent.MouseButton.LEFT,
+      e.relatedTarget || null);  // IE9 errors if relatedTarget is undefined
+  return event;
+};
+
+
+/**
+ * @param {!goog.events.Event} e
+ * @private
+ */
+goog.ui.Control.IeMouseEventSequenceSimulator_.prototype.handleClick_ =
+    function(e) {
+  if (this.clickExpected_) {
+    // This is the end of a normal click sequence: mouse-down, mouse-up, click.
+    // Assume appropriate actions have already been performed.
+    this.clickExpected_ = false;
+    return;
+  }
+
+  // For click events not part of a normal sequence, similate the mouse-down and
+  // mouse-up events by creating synthetic events for each and directly invoke
+  // the corresponding event listeners in order.
+
+  var browserEvent = /** @type {goog.events.BrowserEvent} */ (e);
+
+  var event = /** @type {!MouseEvent} */ (browserEvent.getBrowserEvent());
+  var origEventButton = event.button;
+  var origEventType = event.type;
+
+  var down = goog.ui.Control.IeMouseEventSequenceSimulator_.makeLeftMouseEvent_(
+      event, goog.events.EventType.MOUSEDOWN);
+  this.control_.handleMouseDown(
+      new goog.events.BrowserEvent(down, browserEvent.currentTarget));
+
+  var up = goog.ui.Control.IeMouseEventSequenceSimulator_.makeLeftMouseEvent_(
+      event, goog.events.EventType.MOUSEUP);
+  this.control_.handleMouseUp(
+      new goog.events.BrowserEvent(up, browserEvent.currentTarget));
+
+  if (goog.ui.Control.IeMouseEventSequenceSimulator_.SYNTHETIC_EVENTS_) {
+    // This browser supports synthetic events. Avoid resetting the read only
+    // properties (type, button) as they were not overwritten and writing them
+    // results in an exception when running in ES5 strict mode.
+    return;
+  }
+
+  // Restore original values for click handlers that have not yet been invoked.
+  event.button = origEventButton;
+  event.type = origEventType;
+};
 
 
 /** @override */
-goog.Promise.CancellationError.prototype.name = 'cancel';
-
-
-
-/**
- * Internal implementation of the resolver interface.
- *
- * @param {!goog.Promise<TYPE>} promise
- * @param {function((TYPE|goog.Promise<TYPE>|Thenable)=)} resolve
- * @param {function(*=): void} reject
- * @implements {goog.promise.Resolver<TYPE>}
- * @final @struct
- * @constructor
- * @private
- * @template TYPE
- */
-goog.Promise.Resolver_ = function(promise, resolve, reject) {
-  /** @const */
-  this.promise = promise;
-
-  /** @const */
-  this.resolve = resolve;
-
-  /** @const */
-  this.reject = reject;
+goog.ui.Control.IeMouseEventSequenceSimulator_.prototype.disposeInternal =
+    function() {
+  this.control_ = null;
+  goog.ui.Control.IeMouseEventSequenceSimulator_.base(this, 'disposeInternal');
 };

@@ -876,7 +876,35 @@ Blockly.Blocks['SetTimeDS3231'] = {
 Blockly.Blocks['GetDateTimeDS3231']={
   init: function() {
     this.appendDummyInput()
+        .appendField(Blockly.Msg.GetDateTimeDS3231)
         .appendField("Ngày - giờ hiện tại ");
+    this.setPreviousStatement(true, null);
+    this.setNextStatement(true, null);
+    this.setColour('#00abd6');
+ this.setTooltip("");
+ this.setHelpUrl("");
+}
+};
+Blockly.Blocks['ConnectMQTT']={
+  init: function() {
+    this.appendDummyInput()
+        .appendField(Blockly.Msg.SendDataMQTT)
+        .appendField("Kết nối MQTT Client ")
+        .appendField("Wifi ID")
+        .appendField(new Blockly.FieldTextInput(""), "ID")
+        .appendField("PassWord")
+        .appendField(new Blockly.FieldTextInput(""), "PassWord");
+    this.setPreviousStatement(true, null);
+    this.setNextStatement(true, null);
+    this.setColour('#00abd6');
+ this.setTooltip("");
+ this.setHelpUrl("");
+}
+};
+Blockly.Blocks['SendDataMQTT']={
+  init: function() {
+    this.appendDummyInput()
+        .appendField("Gửi dữ liệu thông qua MQTT ");
     this.setPreviousStatement(true, null);
     this.setNextStatement(true, null);
     this.setColour('#00abd6');

@@ -53,7 +53,10 @@ var Airsense_toolbox =
         '</block>'+
         '<block type="GetDateTimeDS3231">'+
         '</block>'+
-
+        '<block type="ConnectMQTT">'+
+        '</block>'+
+        '<block type="SendDataMQTT">'+
+        '</block>'+
 
 
             

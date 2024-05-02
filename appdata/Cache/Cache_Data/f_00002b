@@ -1,1136 +1,1746 @@
+// Copyright 2006 The Closure Library Authors. All Rights Reserved.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//      http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS-IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 /**
- * @license
- * Visual Blocks Editor
+ * @fileoverview Functions and objects for date representation and manipulation.
  *
- * Copyright 2011 Google Inc.
- * https://developers.google.com/blockly/
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *   http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * @author eae@google.com (Emil A Eklund)
  */
 
+goog.provide('goog.date');
+goog.provide('goog.date.Date');
+goog.provide('goog.date.DateTime');
+goog.provide('goog.date.Interval');
+goog.provide('goog.date.month');
+goog.provide('goog.date.weekDay');
+
+goog.require('goog.asserts');
+/** @suppress {extraRequire} */
+goog.require('goog.date.DateLike');
+goog.require('goog.i18n.DateTimeSymbols');
+goog.require('goog.string');
+
+
 /**
- * @fileoverview Flyout tray containing blocks which may be created.
- * @author fraser@google.com (Neil Fraser)
+ * Constants for weekdays.
+ * @enum {number}
  */
-'use strict';
-
-goog.provide('Blockly.Flyout');
-
-goog.require('Blockly.Block');
-goog.require('Blockly.Comment');
-goog.require('Blockly.Events');
-goog.require('Blockly.WorkspaceSvg');
-goog.require('goog.dom');
-goog.require('goog.events');
-goog.require('goog.math.Rect');
-goog.require('goog.userAgent');
+goog.date.weekDay = {
+  MON: 0,
+  TUE: 1,
+  WED: 2,
+  THU: 3,
+  FRI: 4,
+  SAT: 5,
+  SUN: 6
+};
 
 
 /**
- * Class for a flyout.
- * @param {!Object} workspaceOptions Dictionary of options for the workspace.
+ * Constants for months.
+ * @enum {number}
+ */
+goog.date.month = {
+  JAN: 0,
+  FEB: 1,
+  MAR: 2,
+  APR: 3,
+  MAY: 4,
+  JUN: 5,
+  JUL: 6,
+  AUG: 7,
+  SEP: 8,
+  OCT: 9,
+  NOV: 10,
+  DEC: 11
+};
+
+
+/**
+ * Formats a month/year string.
+ * Example: "January 2008"
+ *
+ * @param {string} monthName The month name to use in the result.
+ * @param {number} yearNum The numeric year to use in the result.
+ * @return {string} A formatted month/year string.
+ */
+goog.date.formatMonthAndYear = function(monthName, yearNum) {
+  /** @desc Month/year format given the month name and the numeric year. */
+  var MSG_MONTH_AND_YEAR = goog.getMsg(
+      '{$monthName} {$yearNum}', {'monthName': monthName, 'yearNum': yearNum});
+  return MSG_MONTH_AND_YEAR;
+};
+
+
+/**
+ * Regular expression for splitting date parts from ISO 8601 styled string.
+ * Examples: '20060210' or '2005-02-22' or '20050222' or '2005-08'
+ * or '2005-W22' or '2005W22' or '2005-W22-4', etc.
+ * For explanation and more examples, see:
+ * {@link http://en.wikipedia.org/wiki/ISO_8601}
+ *
+ * @type {RegExp}
+ * @private
+ */
+goog.date.splitDateStringRegex_ = new RegExp(
+    '^(\\d{4})(?:(?:-?(\\d{2})(?:-?(\\d{2}))?)|' +
+    '(?:-?(\\d{3}))|(?:-?W(\\d{2})(?:-?([1-7]))?))?$');
+
+
+/**
+ * Regular expression for splitting time parts from ISO 8601 styled string.
+ * Examples: '18:46:39.994' or '184639.994'
+ *
+ * @type {RegExp}
+ * @private
+ */
+goog.date.splitTimeStringRegex_ =
+    /^(\d{2})(?::?(\d{2})(?::?(\d{2})(\.\d+)?)?)?$/;
+
+
+/**
+ * Regular expression for splitting timezone parts from ISO 8601 styled string.
+ * Example: The part after the '+' in '18:46:39+07:00'.  Or '09:30Z' (UTC).
+ *
+ * @type {RegExp}
+ * @private
+ */
+goog.date.splitTimezoneStringRegex_ = /Z|(?:([-+])(\d{2})(?::?(\d{2}))?)$/;
+
+
+/**
+ * Regular expression for splitting duration parts from ISO 8601 styled string.
+ * Example: '-P1Y2M3DT4H5M6.7S'
+ *
+ * @type {RegExp}
+ * @private
+ */
+goog.date.splitDurationRegex_ = new RegExp(
+    '^(-)?P(?:(\\d+)Y)?(?:(\\d+)M)?(?:(\\d+)D)?' +
+    '(T(?:(\\d+)H)?(?:(\\d+)M)?(?:(\\d+(?:\\.\\d+)?)S)?)?$');
+
+
+/**
+ * Number of milliseconds in a day.
+ * @type {number}
+ */
+goog.date.MS_PER_DAY = 24 * 60 * 60 * 1000;
+
+
+/**
+ * Returns whether the given year is a leap year.
+ *
+ * @param {number} year Year part of date.
+ * @return {boolean} Whether the given year is a leap year.
+ */
+goog.date.isLeapYear = function(year) {
+  // Leap year logic; the 4-100-400 rule
+  return year % 4 == 0 && (year % 100 != 0 || year % 400 == 0);
+};
+
+
+/**
+ * Returns whether the given year is a long ISO year.
+ * See {@link http://www.phys.uu.nl/~vgent/calendar/isocalendar_text3.htm}.
+ *
+ * @param {number} year Full year part of date.
+ * @return {boolean} Whether the given year is a long ISO year.
+ */
+goog.date.isLongIsoYear = function(year) {
+  var n = 5 * year + 12 - 4 * (Math.floor(year / 100) - Math.floor(year / 400));
+  n += Math.floor((year - 100) / 400) - Math.floor((year - 102) / 400);
+  n += Math.floor((year - 200) / 400) - Math.floor((year - 199) / 400);
+
+  return n % 28 < 5;
+};
+
+
+/**
+ * Returns the number of days for a given month.
+ *
+ * @param {number} year Year part of date.
+ * @param {number} month Month part of date.
+ * @return {number} The number of days for the given month.
+ */
+goog.date.getNumberOfDaysInMonth = function(year, month) {
+  switch (month) {
+    case goog.date.month.FEB:
+      return goog.date.isLeapYear(year) ? 29 : 28;
+    case goog.date.month.JUN:
+    case goog.date.month.SEP:
+    case goog.date.month.NOV:
+    case goog.date.month.APR:
+      return 30;
+  }
+  return 31;
+};
+
+
+/**
+ * Returns true if the 2 dates are in the same day.
+ * @param {goog.date.DateLike} date The time to check.
+ * @param {goog.date.DateLike=} opt_now The current time.
+ * @return {boolean} Whether the dates are on the same day.
+ */
+goog.date.isSameDay = function(date, opt_now) {
+  var now = opt_now || new Date(goog.now());
+  return date.getDate() == now.getDate() && goog.date.isSameMonth(date, now);
+};
+
+
+/**
+ * Returns true if the 2 dates are in the same month.
+ * @param {goog.date.DateLike} date The time to check.
+ * @param {goog.date.DateLike=} opt_now The current time.
+ * @return {boolean} Whether the dates are in the same calendar month.
+ */
+goog.date.isSameMonth = function(date, opt_now) {
+  var now = opt_now || new Date(goog.now());
+  return date.getMonth() == now.getMonth() && goog.date.isSameYear(date, now);
+};
+
+
+/**
+ * Returns true if the 2 dates are in the same year.
+ * @param {goog.date.DateLike} date The time to check.
+ * @param {goog.date.DateLike=} opt_now The current time.
+ * @return {boolean} Whether the dates are in the same calendar year.
+ */
+goog.date.isSameYear = function(date, opt_now) {
+  var now = opt_now || new Date(goog.now());
+  return date.getFullYear() == now.getFullYear();
+};
+
+
+/**
+ * Static function for week number calculation. ISO 8601 implementation.
+ *
+ * @param {number} year Year part of date.
+ * @param {number} month Month part of date (0-11).
+ * @param {number} date Day part of date (1-31).
+ * @param {number=} opt_weekDay Cut off weekday, defaults to Thursday.
+ * @param {number=} opt_firstDayOfWeek First day of the week, defaults to
+ *     Monday.
+ *     Monday=0, Sunday=6.
+ * @return {number} The week number (1-53).
+ */
+goog.date.getWeekNumber = function(
+    year, month, date, opt_weekDay, opt_firstDayOfWeek) {
+  var d = new Date(year, month, date);
+
+  // Default to Thursday for cut off as per ISO 8601.
+  var cutoff = goog.isDef(opt_weekDay) ? opt_weekDay : goog.date.weekDay.THU;
+
+  // Default to Monday for first day of the week as per ISO 8601.
+  var firstday = opt_firstDayOfWeek || goog.date.weekDay.MON;
+
+  // The d.getDay() has to be converted first to ISO weekday (Monday=0).
+  var isoday = (d.getDay() + 6) % 7;
+
+  // Position of given day in the picker grid w.r.t. first day of week
+  var daypos = (isoday - firstday + 7) % 7;
+
+  // Position of cut off day in the picker grid w.r.t. first day of week
+  var cutoffpos = (cutoff - firstday + 7) % 7;
+
+  // Unix timestamp of the midnight of the cutoff day in the week of 'd'.
+  // There might be +-1 hour shift in the result due to the daylight saving,
+  // but it doesn't affect the year.
+  var cutoffSameWeek =
+      d.valueOf() + (cutoffpos - daypos) * goog.date.MS_PER_DAY;
+
+  // Unix timestamp of January 1 in the year of 'cutoffSameWeek'.
+  var jan1 = new Date(new Date(cutoffSameWeek).getFullYear(), 0, 1).valueOf();
+
+  // Number of week. The round() eliminates the effect of daylight saving.
+  return Math.floor(
+             Math.round((cutoffSameWeek - jan1) / goog.date.MS_PER_DAY) / 7) +
+      1;
+};
+
+
+/**
+ * @param {T} date1 A datelike object.
+ * @param {S} date2 Another datelike object.
+ * @return {T|S} The earlier of them in time.
+ * @template T,S
+ */
+goog.date.min = function(date1, date2) {
+  return date1 < date2 ? date1 : date2;
+};
+
+
+/**
+ * @param {T} date1 A datelike object.
+ * @param {S} date2 Another datelike object.
+ * @return {T|S} The later of them in time.
+ * @template T,S
+ */
+goog.date.max = function(date1, date2) {
+  return date1 > date2 ? date1 : date2;
+};
+
+
+/**
+ * Creates a DateTime from a datetime string expressed in ISO 8601 format.
+ *
+ * @param {string} formatted A date or datetime expressed in ISO 8601 format.
+ * @return {goog.date.DateTime} Parsed date or null if parse fails.
+ */
+goog.date.fromIsoString = function(formatted) {
+  var ret = new goog.date.DateTime(2000);
+  return goog.date.setIso8601DateTime(ret, formatted) ? ret : null;
+};
+
+
+/**
+ * Parses a datetime string expressed in ISO 8601 format. Overwrites the date
+ * and optionally the time part of the given object with the parsed values.
+ *
+ * @param {!goog.date.DateTime} dateTime Object whose fields will be set.
+ * @param {string} formatted A date or datetime expressed in ISO 8601 format.
+ * @return {boolean} Whether the parsing succeeded.
+ */
+goog.date.setIso8601DateTime = function(dateTime, formatted) {
+  formatted = goog.string.trim(formatted);
+  var delim = formatted.indexOf('T') == -1 ? ' ' : 'T';
+  var parts = formatted.split(delim);
+  return goog.date.setIso8601DateOnly_(dateTime, parts[0]) &&
+      (parts.length < 2 || goog.date.setIso8601TimeOnly_(dateTime, parts[1]));
+};
+
+
+/**
+ * Sets date fields based on an ISO 8601 format string.
+ *
+ * @param {!goog.date.DateTime} d Object whose fields will be set.
+ * @param {string} formatted A date expressed in ISO 8601 format.
+ * @return {boolean} Whether the parsing succeeded.
+ * @private
+ */
+goog.date.setIso8601DateOnly_ = function(d, formatted) {
+  // split the formatted ISO date string into its date fields
+  var parts = formatted.match(goog.date.splitDateStringRegex_);
+  if (!parts) {
+    return false;
+  }
+
+  var year = Number(parts[1]);
+  var month = Number(parts[2]);
+  var date = Number(parts[3]);
+  var dayOfYear = Number(parts[4]);
+  var week = Number(parts[5]);
+  // ISO weekdays start with 1, native getDay() values start with 0
+  var dayOfWeek = Number(parts[6]) || 1;
+
+  d.setFullYear(year);
+
+  if (dayOfYear) {
+    d.setDate(1);
+    d.setMonth(0);
+    var offset = dayOfYear - 1;  // offset, so 1-indexed, i.e., skip day 1
+    d.add(new goog.date.Interval(goog.date.Interval.DAYS, offset));
+  } else if (week) {
+    goog.date.setDateFromIso8601Week_(d, week, dayOfWeek);
+  } else {
+    if (month) {
+      d.setDate(1);
+      d.setMonth(month - 1);
+    }
+    if (date) {
+      d.setDate(date);
+    }
+  }
+
+  return true;
+};
+
+
+/**
+ * Sets date fields based on an ISO 8601 week string.
+ * See {@link http://en.wikipedia.org/wiki/ISO_week_date}, "Relation with the
+ * Gregorian Calendar".  The first week of a new ISO year is the week with the
+ * majority of its days in the new Gregorian year.  I.e., ISO Week 1's Thursday
+ * is in that year.  ISO weeks always start on Monday. So ISO Week 1 can
+ * contain a few days from the previous Gregorian year.  And ISO weeks always
+ * end on Sunday, so the last ISO week (Week 52 or 53) can have a few days from
+ * the following Gregorian year.
+ * Example: '1997-W01' lasts from 1996-12-30 to 1997-01-05.  January 1, 1997 is
+ * a Wednesday. So W01's Monday is Dec.30, 1996, and Sunday is January 5, 1997.
+ *
+ * @param {goog.date.DateTime} d Object whose fields will be set.
+ * @param {number} week ISO week number.
+ * @param {number} dayOfWeek ISO day of week.
+ * @private
+ */
+goog.date.setDateFromIso8601Week_ = function(d, week, dayOfWeek) {
+  // calculate offset for first week
+  d.setMonth(0);
+  d.setDate(1);
+  var jsDay = d.getDay();
+  // switch Sunday (0) to index 7; ISO days are 1-indexed
+  var jan1WeekDay = jsDay || 7;
+
+  var THURSDAY = 4;
+  if (jan1WeekDay <= THURSDAY) {
+    // was extended back to Monday
+    var startDelta = 1 - jan1WeekDay;  // e.g., Thu(4) ==> -3
+  } else {
+    // was extended forward to Monday
+    startDelta = 8 - jan1WeekDay;  // e.g., Fri(5) ==> +3
+  }
+
+  // find the absolute number of days to offset from the start of year
+  // to arrive close to the Gregorian equivalent (pending adjustments above)
+  // Note: decrement week multiplier by one because 1st week is
+  // represented by dayOfWeek value
+  var absoluteDays = Number(dayOfWeek) + (7 * (Number(week) - 1));
+
+  // convert from ISO weekday format to Gregorian calendar date
+  // note: subtract 1 because 1-indexed; offset should not include 1st of month
+  var delta = startDelta + absoluteDays - 1;
+  var interval = new goog.date.Interval(goog.date.Interval.DAYS, delta);
+  d.add(interval);
+};
+
+
+/**
+ * Sets time fields based on an ISO 8601 format string.
+ * Note: only time fields, not date fields.
+ *
+ * @param {!goog.date.DateTime} d Object whose fields will be set.
+ * @param {string} formatted A time expressed in ISO 8601 format.
+ * @return {boolean} Whether the parsing succeeded.
+ * @private
+ */
+goog.date.setIso8601TimeOnly_ = function(d, formatted) {
+  // first strip timezone info from the end
+  var parts = formatted.match(goog.date.splitTimezoneStringRegex_);
+
+  var offset = 0;  // local time if no timezone info
+  if (parts) {
+    if (parts[0] != 'Z') {
+      offset = Number(parts[2]) * 60 + Number(parts[3]);
+      offset *= parts[1] == '-' ? 1 : -1;
+    }
+    offset -= d.getTimezoneOffset();
+    formatted = formatted.substr(0, formatted.length - parts[0].length);
+  }
+
+  // then work out the time
+  parts = formatted.match(goog.date.splitTimeStringRegex_);
+  if (!parts) {
+    return false;
+  }
+
+  d.setHours(Number(parts[1]));
+  d.setMinutes(Number(parts[2]) || 0);
+  d.setSeconds(Number(parts[3]) || 0);
+  d.setMilliseconds(parts[4] ? Number(parts[4]) * 1000 : 0);
+
+  if (offset != 0) {
+    // adjust the date and time according to the specified timezone
+    d.setTime(d.getTime() + offset * 60000);
+  }
+
+  return true;
+};
+
+
+
+/**
+ * Class representing a date/time interval. Used for date calculations.
+ * <pre>
+ * new goog.date.Interval(0, 1) // One month
+ * new goog.date.Interval(0, 0, 3, 1) // Three days and one hour
+ * new goog.date.Interval(goog.date.Interval.DAYS, 1) // One day
+ * </pre>
+ *
+ * @param {number|string=} opt_years Years or string representing date part.
+ * @param {number=} opt_months Months or number of whatever date part specified
+ *     by first parameter.
+ * @param {number=} opt_days Days.
+ * @param {number=} opt_hours Hours.
+ * @param {number=} opt_minutes Minutes.
+ * @param {number=} opt_seconds Seconds.
  * @constructor
+ * @struct
+ * @final
  */
-Blockly.Flyout = function(workspaceOptions) {
-  workspaceOptions.getMetrics = this.getMetrics_.bind(this);
-  workspaceOptions.setMetrics = this.setMetrics_.bind(this);
-  /**
-   * @type {!Blockly.Workspace}
-   * @private
-   */
-  this.workspace_ = new Blockly.WorkspaceSvg(workspaceOptions);
-  this.workspace_.isFlyout = true;
-
-  /**
-   * Is RTL vs LTR.
-   * @type {boolean}
-   */
-  this.RTL = !!workspaceOptions.RTL;
-
-  /**
-   * Flyout should be laid out horizontally vs vertically.
-   * @type {boolean}
-   * @private
-   */
-  this.horizontalLayout_ = workspaceOptions.horizontalLayout;
-
-  /**
-   * Position of the toolbox and flyout relative to the workspace.
-   * @type {number}
-   * @private
-   */
-  this.toolboxPosition_ = workspaceOptions.toolboxPosition;
-
-  /**
-   * Opaque data that can be passed to Blockly.unbindEvent_.
-   * @type {!Array.<!Array>}
-   * @private
-   */
-  this.eventWrappers_ = [];
-
-  /**
-   * List of background buttons that lurk behind each block to catch clicks
-   * landing in the blocks' lakes and bays.
-   * @type {!Array.<!Element>}
-   * @private
-   */
-  this.buttons_ = [];
-
-  /**
-   * List of event listeners.
-   * @type {!Array.<!Array>}
-   * @private
-   */
-  this.listeners_ = [];
-
-  /**
-   * List of blocks that should always be disabled.
-   * @type {!Array.<!Blockly.Block>}
-   * @private
-   */
-  this.permanentlyDisabled_ = [];
-};
-
-/**
- * Does the flyout automatically close when a block is created?
- * @type {boolean}
- */
-Blockly.Flyout.prototype.autoClose = true;
-
-/**
- * Corner radius of the flyout background.
- * @type {number}
- * @const
- */
-Blockly.Flyout.prototype.CORNER_RADIUS = 8;
-
-/**
- * Margin around the edges of the blocks in the flyout.
- * @type {number}
- * @const
- */
-Blockly.Flyout.prototype.MARGIN = Blockly.Flyout.prototype.CORNER_RADIUS;
-
-/**
- * Top/bottom padding between scrollbar and edge of flyout background.
- * @type {number}
- * @const
- */
-Blockly.Flyout.prototype.SCROLLBAR_PADDING = 2;
-
-/**
- * Width of flyout.
- * @type {number}
- * @private
- */
-Blockly.Flyout.prototype.width_ = 0;
-
-/**
- * Height of flyout.
- * @type {number}
- * @private
- */
-Blockly.Flyout.prototype.height_ = 0;
-
-/**
- * Creates the flyout's DOM.  Only needs to be called once.
- * @return {!Element} The flyout's SVG group.
- */
-Blockly.Flyout.prototype.createDom = function() {
-  /*
-  <g>
-    <path class="blocklyFlyoutBackground"/>
-    <g class="blocklyFlyout"></g>
-  </g>
-  */
-  this.svgGroup_ = Blockly.createSvgElement('g',
-      {'class': 'blocklyFlyout'}, null);
-  this.svgBackground_ = Blockly.createSvgElement('path',
-      {'class': 'blocklyFlyoutBackground'}, this.svgGroup_);
-  this.svgGroup_.appendChild(this.workspace_.createDom());
-  return this.svgGroup_;
-};
-
-/**
- * Initializes the flyout.
- * @param {!Blockly.Workspace} targetWorkspace The workspace in which to create
- *     new blocks.
- */
-Blockly.Flyout.prototype.init = function(targetWorkspace) {
-  this.targetWorkspace_ = targetWorkspace;
-  this.workspace_.targetWorkspace = targetWorkspace;
-  // Add scrollbar.
-  this.scrollbar_ = new Blockly.Scrollbar(this.workspace_,
-      this.horizontalLayout_, false);
-
-  this.hide();
-
-  Array.prototype.push.apply(this.eventWrappers_,
-      Blockly.bindEvent_(this.svgGroup_, 'wheel', this, this.wheel_));
-  if (!this.autoClose) {
-    this.filterWrapper_ = this.filterForCapacity_.bind(this);
-    this.targetWorkspace_.addChangeListener(this.filterWrapper_);
+goog.date.Interval = function(
+    opt_years, opt_months, opt_days, opt_hours, opt_minutes, opt_seconds) {
+  if (goog.isString(opt_years)) {
+    var type = opt_years;
+    var interval = /** @type {number} */ (opt_months);
+    this.years = type == goog.date.Interval.YEARS ? interval : 0;
+    this.months = type == goog.date.Interval.MONTHS ? interval : 0;
+    this.days = type == goog.date.Interval.DAYS ? interval : 0;
+    this.hours = type == goog.date.Interval.HOURS ? interval : 0;
+    this.minutes = type == goog.date.Interval.MINUTES ? interval : 0;
+    this.seconds = type == goog.date.Interval.SECONDS ? interval : 0;
+  } else {
+    this.years = /** @type {number} */ (opt_years) || 0;
+    this.months = opt_months || 0;
+    this.days = opt_days || 0;
+    this.hours = opt_hours || 0;
+    this.minutes = opt_minutes || 0;
+    this.seconds = opt_seconds || 0;
   }
-  // Dragging the flyout up and down.
-  Array.prototype.push.apply(this.eventWrappers_,
-      Blockly.bindEvent_(this.svgGroup_, 'mousedown', this, this.onMouseDown_));
 };
 
-/**
- * Dispose of this flyout.
- * Unlink from all DOM elements to prevent memory leaks.
- */
-Blockly.Flyout.prototype.dispose = function() {
-  this.hide();
-  Blockly.unbindEvent_(this.eventWrappers_);
-  if (this.filterWrapper_) {
-    this.targetWorkspace_.removeChangeListener(this.filterWrapper_);
-    this.filterWrapper_ = null;
-  }
-  if (this.scrollbar_) {
-    this.scrollbar_.dispose();
-    this.scrollbar_ = null;
-  }
-  if (this.workspace_) {
-    this.workspace_.targetWorkspace = null;
-    this.workspace_.dispose();
-    this.workspace_ = null;
-  }
-  if (this.svgGroup_) {
-    goog.dom.removeNode(this.svgGroup_);
-    this.svgGroup_ = null;
-  }
-  this.svgBackground_ = null;
-  this.targetWorkspace_ = null;
-};
 
 /**
- * Get the width of the flyout.
- * @return {number} The width of the flyout.
+ * Parses an XML Schema duration (ISO 8601 extended).
+ * @see http://www.w3.org/TR/xmlschema-2/#duration
+ *
+ * @param  {string} duration An XML schema duration in textual format.
+ *     Recurring durations and weeks are not supported.
+ * @return {goog.date.Interval} The duration as a goog.date.Interval or null
+ *     if the parse fails.
  */
-Blockly.Flyout.prototype.getWidth = function() {
-  return this.width_;
-};
-
-/**
- * Get the height of the flyout.
- * @return {number} The width of the flyout.
- */
-Blockly.Flyout.prototype.getHeight = function() {
-  return this.height_;
-};
-
-/**
- * Return an object with all the metrics required to size scrollbars for the
- * flyout.  The following properties are computed:
- * .viewHeight: Height of the visible rectangle,
- * .viewWidth: Width of the visible rectangle,
- * .contentHeight: Height of the contents,
- * .contentWidth: Width of the contents,
- * .viewTop: Offset of top edge of visible rectangle from parent,
- * .contentTop: Offset of the top-most content from the y=0 coordinate,
- * .absoluteTop: Top-edge of view.
- * .viewLeft: Offset of the left edge of visible rectangle from parent,
- * .contentLeft: Offset of the left-most content from the x=0 coordinate,
- * .absoluteLeft: Left-edge of view.
- * @return {Object} Contains size and position metrics of the flyout.
- * @private
- */
-Blockly.Flyout.prototype.getMetrics_ = function() {
-  if (!this.isVisible()) {
-    // Flyout is hidden.
+goog.date.Interval.fromIsoString = function(duration) {
+  var parts = duration.match(goog.date.splitDurationRegex_);
+  if (!parts) {
     return null;
   }
 
-  try {
-    var optionBox = this.workspace_.getCanvas().getBBox();
-  } catch (e) {
-    // Firefox has trouble with hidden elements (Bug 528969).
-    var optionBox = {height: 0, y: 0, width: 0, x: 0};
+  var timeEmpty = !(parts[6] || parts[7] || parts[8]);
+  var dateTimeEmpty = timeEmpty && !(parts[2] || parts[3] || parts[4]);
+  if (dateTimeEmpty || timeEmpty && parts[5]) {
+    return null;
   }
 
-  var absoluteTop = this.SCROLLBAR_PADDING;
-  var absoluteLeft = this.SCROLLBAR_PADDING;
-  if (this.horizontalLayout_) {
-    if (this.toolboxPosition_ == Blockly.TOOLBOX_AT_BOTTOM) {
-      absoluteTop = 0;
+  var negative = parts[1];
+  var years = parseInt(parts[2], 10) || 0;
+  var months = parseInt(parts[3], 10) || 0;
+  var days = parseInt(parts[4], 10) || 0;
+  var hours = parseInt(parts[6], 10) || 0;
+  var minutes = parseInt(parts[7], 10) || 0;
+  var seconds = parseFloat(parts[8]) || 0;
+  return negative ?
+      new goog.date.Interval(
+          -years, -months, -days, -hours, -minutes, -seconds) :
+      new goog.date.Interval(years, months, days, hours, minutes, seconds);
+};
+
+
+/**
+ * Serializes goog.date.Interval into XML Schema duration (ISO 8601 extended).
+ * @see http://www.w3.org/TR/xmlschema-2/#duration
+ *
+ * @param {boolean=} opt_verbose Include zero fields in the duration string.
+ * @return {?string} An XML schema duration in ISO 8601 extended format,
+ *     or null if the interval contains both positive and negative fields.
+ */
+goog.date.Interval.prototype.toIsoString = function(opt_verbose) {
+  var minField = Math.min(
+      this.years, this.months, this.days, this.hours, this.minutes,
+      this.seconds);
+  var maxField = Math.max(
+      this.years, this.months, this.days, this.hours, this.minutes,
+      this.seconds);
+  if (minField < 0 && maxField > 0) {
+    return null;
+  }
+
+  // Return 0 seconds if all fields are zero.
+  if (!opt_verbose && minField == 0 && maxField == 0) {
+    return 'PT0S';
+  }
+
+  var res = [];
+
+  // Add sign and 'P' prefix.
+  if (minField < 0) {
+    res.push('-');
+  }
+  res.push('P');
+
+  // Add date.
+  if (this.years || opt_verbose) {
+    res.push(Math.abs(this.years) + 'Y');
+  }
+  if (this.months || opt_verbose) {
+    res.push(Math.abs(this.months) + 'M');
+  }
+  if (this.days || opt_verbose) {
+    res.push(Math.abs(this.days) + 'D');
+  }
+
+  // Add time.
+  if (this.hours || this.minutes || this.seconds || opt_verbose) {
+    res.push('T');
+    if (this.hours || opt_verbose) {
+      res.push(Math.abs(this.hours) + 'H');
     }
-    var viewHeight = this.height_;
-    if (this.toolboxPosition_ == Blockly.TOOLBOX_AT_TOP) {
-      viewHeight += this.MARGIN - this.SCROLLBAR_PADDING;
+    if (this.minutes || opt_verbose) {
+      res.push(Math.abs(this.minutes) + 'M');
     }
-    var viewWidth = this.width_ - 2 * this.SCROLLBAR_PADDING;
+    if (this.seconds || opt_verbose) {
+      res.push(Math.abs(this.seconds) + 'S');
+    }
+  }
+
+  return res.join('');
+};
+
+
+/**
+ * Tests whether the given interval is equal to this interval.
+ * Note, this is a simple field-by-field comparison, it doesn't
+ * account for comparisons like "12 months == 1 year".
+ *
+ * @param {goog.date.Interval} other The interval to test.
+ * @return {boolean} Whether the intervals are equal.
+ */
+goog.date.Interval.prototype.equals = function(other) {
+  return other.years == this.years && other.months == this.months &&
+      other.days == this.days && other.hours == this.hours &&
+      other.minutes == this.minutes && other.seconds == this.seconds;
+};
+
+
+/**
+ * @return {!goog.date.Interval} A clone of the interval object.
+ */
+goog.date.Interval.prototype.clone = function() {
+  return new goog.date.Interval(
+      this.years, this.months, this.days, this.hours, this.minutes,
+      this.seconds);
+};
+
+
+/**
+ * Years constant for the date parts.
+ * @type {string}
+ */
+goog.date.Interval.YEARS = 'y';
+
+
+/**
+ * Months constant for the date parts.
+ * @type {string}
+ */
+goog.date.Interval.MONTHS = 'm';
+
+
+/**
+ * Days constant for the date parts.
+ * @type {string}
+ */
+goog.date.Interval.DAYS = 'd';
+
+
+/**
+ * Hours constant for the date parts.
+ * @type {string}
+ */
+goog.date.Interval.HOURS = 'h';
+
+
+/**
+ * Minutes constant for the date parts.
+ * @type {string}
+ */
+goog.date.Interval.MINUTES = 'n';
+
+
+/**
+ * Seconds constant for the date parts.
+ * @type {string}
+ */
+goog.date.Interval.SECONDS = 's';
+
+
+/**
+ * @return {boolean} Whether all fields of the interval are zero.
+ */
+goog.date.Interval.prototype.isZero = function() {
+  return this.years == 0 && this.months == 0 && this.days == 0 &&
+      this.hours == 0 && this.minutes == 0 && this.seconds == 0;
+};
+
+
+/**
+ * @return {!goog.date.Interval} Negative of this interval.
+ */
+goog.date.Interval.prototype.getInverse = function() {
+  return this.times(-1);
+};
+
+
+/**
+ * Calculates n * (this interval) by memberwise multiplication.
+ * @param {number} n An integer.
+ * @return {!goog.date.Interval} n * this.
+ */
+goog.date.Interval.prototype.times = function(n) {
+  return new goog.date.Interval(
+      this.years * n, this.months * n, this.days * n, this.hours * n,
+      this.minutes * n, this.seconds * n);
+};
+
+
+/**
+ * Gets the total number of seconds in the time interval. Assumes that months
+ * and years are empty.
+ * @return {number} Total number of seconds in the interval.
+ */
+goog.date.Interval.prototype.getTotalSeconds = function() {
+  goog.asserts.assert(this.years == 0 && this.months == 0);
+  return ((this.days * 24 + this.hours) * 60 + this.minutes) * 60 +
+      this.seconds;
+};
+
+
+/**
+ * Adds the Interval in the argument to this Interval field by field.
+ *
+ * @param {goog.date.Interval} interval The Interval to add.
+ */
+goog.date.Interval.prototype.add = function(interval) {
+  this.years += interval.years;
+  this.months += interval.months;
+  this.days += interval.days;
+  this.hours += interval.hours;
+  this.minutes += interval.minutes;
+  this.seconds += interval.seconds;
+};
+
+
+
+/**
+ * Class representing a date. Defaults to current date if none is specified.
+ *
+ * Implements most methods of the native js Date object (except the time related
+ * ones, {@see goog.date.DateTime}) and can be used interchangeably with it just
+ * as if goog.date.Date was a synonym of Date. To make this more transparent,
+ * Closure APIs should accept goog.date.DateLike instead of the real Date
+ * object.
+ *
+ * To allow goog.date.Date objects to be passed as arguments to methods
+ * expecting Date objects this class is marked as extending the built in Date
+ * object even though that's not strictly true.
+ *
+ * @param {number|goog.date.DateLike=} opt_year Four digit year or a date-like
+ *     object. If not set, the created object will contain the date
+ *     determined by goog.now().
+ * @param {number=} opt_month Month, 0 = Jan, 11 = Dec.
+ * @param {number=} opt_date Date of month, 1 - 31.
+ * @constructor
+ * @struct
+ * @see goog.date.DateTime
+ */
+goog.date.Date = function(opt_year, opt_month, opt_date) {
+  /** @protected {!Date} The wrapped date or datetime. */
+  this.date;
+  // goog.date.DateTime assumes that only this.date is added in this ctor.
+  if (goog.isNumber(opt_year)) {
+    this.date = this.buildDate_(opt_year, opt_month || 0, opt_date || 1);
+    this.maybeFixDst_(opt_date || 1);
+  } else if (goog.isObject(opt_year)) {
+    this.date = this.buildDate_(
+        opt_year.getFullYear(), opt_year.getMonth(), opt_year.getDate());
+    this.maybeFixDst_(opt_year.getDate());
   } else {
-    absoluteLeft = 0;
-    var viewHeight = this.height_ - 2 * this.SCROLLBAR_PADDING;
-    var viewWidth = this.width_;
-    if (!this.RTL) {
-      viewWidth -= this.SCROLLBAR_PADDING;
-    }
+    this.date = new Date(goog.now());
+    var expectedDate = this.date.getDate();
+    this.date.setHours(0);
+    this.date.setMinutes(0);
+    this.date.setSeconds(0);
+    this.date.setMilliseconds(0);
+    // In some time zones there is no "0" hour on certain days during DST.
+    // Adjust here, if necessary. See:
+    // https://github.com/google/closure-library/issues/34.
+    this.maybeFixDst_(expectedDate);
   }
-
-  var metrics = {
-    viewHeight: viewHeight,
-    viewWidth: viewWidth,
-    contentHeight: (optionBox.height + 2 * this.MARGIN) * this.workspace_.scale,
-    contentWidth: (optionBox.width + 2 * this.MARGIN) * this.workspace_.scale,
-    viewTop: -this.workspace_.scrollY,
-    viewLeft: -this.workspace_.scrollX,
-    contentTop: 0, // TODO: #349
-    contentLeft: 0, // TODO: #349
-    absoluteTop: absoluteTop,
-    absoluteLeft: absoluteLeft
-  };
-  return metrics;
 };
 
+
 /**
- * Sets the translation of the flyout to match the scrollbars.
- * @param {!Object} xyRatio Contains a y property which is a float
- *     between 0 and 1 specifying the degree of scrolling and a
- *     similar x property.
+ * new Date(y, m, d) treats years in the interval [0, 100) as two digit years,
+ * adding 1900 to them. This method ensures that calling the date constructor
+ * as a copy constructor returns a value that is equal to the passed in
+ * date value by explicitly setting the full year.
+ * @private
+ * @param {number} fullYear The full year (including century).
+ * @param {number} month The month, from 0-11.
+ * @param {number} date The day of the month.
+ * @return {!Date} The constructed Date object.
+ */
+goog.date.Date.prototype.buildDate_ = function(fullYear, month, date) {
+  var d = new Date(fullYear, month, date);
+  if (fullYear >= 0 && fullYear < 100) {
+    // Can't just setFullYear as new Date() can flip over for e.g. month = 13.
+    d.setFullYear(d.getFullYear() - 1900);
+  }
+  return d;
+};
+
+
+/**
+ * First day of week. 0 = Mon, 6 = Sun.
+ * @type {number}
  * @private
  */
-Blockly.Flyout.prototype.setMetrics_ = function(xyRatio) {
-  var metrics = this.getMetrics_();
-  // This is a fix to an apparent race condition.
-  if (!metrics) {
-    return;
-  }
-  if (!this.horizontalLayout_ && goog.isNumber(xyRatio.y)) {
-    this.workspace_.scrollY = -metrics.contentHeight * xyRatio.y;
-  } else if (this.horizontalLayout_ && goog.isNumber(xyRatio.x)) {
-    this.workspace_.scrollX = -metrics.contentWidth * xyRatio.x;
-  }
+goog.date.Date.prototype.firstDayOfWeek_ =
+    goog.i18n.DateTimeSymbols.FIRSTDAYOFWEEK;
 
-  this.workspace_.translate(this.workspace_.scrollX + metrics.absoluteLeft,
-      this.workspace_.scrollY + metrics.absoluteTop);
-};
 
 /**
- * Move the flyout to the edge of the workspace.
+ * The cut off weekday used for week number calculations. 0 = Mon, 6 = Sun.
+ * @type {number}
+ * @private
  */
-Blockly.Flyout.prototype.position = function() {
-  if (!this.isVisible()) {
-    return;
-  }
-  var metrics = this.targetWorkspace_.getMetrics();
-  if (!metrics) {
-    // Hidden components will return null.
-    return;
-  }
-  var edgeWidth = this.horizontalLayout_ ? metrics.viewWidth : this.width_;
-  edgeWidth -= this.CORNER_RADIUS;
-  if (this.toolboxPosition_ == Blockly.TOOLBOX_AT_RIGHT) {
-    edgeWidth *= -1;
+goog.date.Date.prototype.firstWeekCutOffDay_ =
+    goog.i18n.DateTimeSymbols.FIRSTWEEKCUTOFFDAY;
+
+
+/**
+ * @return {!goog.date.Date} A clone of the date object.
+ */
+goog.date.Date.prototype.clone = function() {
+  var date = new goog.date.Date(this.date);
+  date.firstDayOfWeek_ = this.firstDayOfWeek_;
+  date.firstWeekCutOffDay_ = this.firstWeekCutOffDay_;
+
+  return date;
+};
+
+
+/**
+ * @return {number} The four digit year of date.
+ */
+goog.date.Date.prototype.getFullYear = function() {
+  return this.date.getFullYear();
+};
+
+
+/**
+ * Alias for getFullYear.
+ *
+ * @return {number} The four digit year of date.
+ * @see #getFullYear
+ */
+goog.date.Date.prototype.getYear = function() {
+  return this.getFullYear();
+};
+
+
+/**
+ * @return {goog.date.month} The month of date, 0 = Jan, 11 = Dec.
+ */
+goog.date.Date.prototype.getMonth = function() {
+  return /** @type {goog.date.month} */ (this.date.getMonth());
+};
+
+
+/**
+ * @return {number} The date of month.
+ */
+goog.date.Date.prototype.getDate = function() {
+  return this.date.getDate();
+};
+
+
+/**
+ * Returns the number of milliseconds since 1 January 1970 00:00:00.
+ *
+ * @return {number} The number of milliseconds since 1 January 1970 00:00:00.
+ */
+goog.date.Date.prototype.getTime = function() {
+  return this.date.getTime();
+};
+
+
+/**
+ * @return {number} The day of week, US style. 0 = Sun, 6 = Sat.
+ */
+goog.date.Date.prototype.getDay = function() {
+  return this.date.getDay();
+};
+
+
+/**
+ * @return {goog.date.weekDay} The day of week, ISO style. 0 = Mon, 6 = Sun.
+ */
+goog.date.Date.prototype.getIsoWeekday = function() {
+  return /** @type {goog.date.weekDay} */ ((this.getDay() + 6) % 7);
+};
+
+
+/**
+ * @return {number} The day of week according to firstDayOfWeek setting.
+ */
+goog.date.Date.prototype.getWeekday = function() {
+  return (this.getIsoWeekday() - this.firstDayOfWeek_ + 7) % 7;
+};
+
+
+/**
+ * @return {number} The four digit year of date according to universal time.
+ */
+goog.date.Date.prototype.getUTCFullYear = function() {
+  return this.date.getUTCFullYear();
+};
+
+
+/**
+ * @return {goog.date.month} The month of date according to universal time,
+ *     0 = Jan, 11 = Dec.
+ */
+goog.date.Date.prototype.getUTCMonth = function() {
+  return /** @type {goog.date.month} */ (this.date.getUTCMonth());
+};
+
+
+/**
+ * @return {number} The date of month according to universal time.
+ */
+goog.date.Date.prototype.getUTCDate = function() {
+  return this.date.getUTCDate();
+};
+
+
+/**
+ * @return {number} The day of week according to universal time, US style.
+ *     0 = Sun, 1 = Mon, 6 = Sat.
+ */
+goog.date.Date.prototype.getUTCDay = function() {
+  return this.date.getDay();
+};
+
+
+/**
+ * @return {number} The hours value according to universal time.
+ */
+goog.date.Date.prototype.getUTCHours = function() {
+  return this.date.getUTCHours();
+};
+
+
+/**
+ * @return {number} The hours value according to universal time.
+ */
+goog.date.Date.prototype.getUTCMinutes = function() {
+  return this.date.getUTCMinutes();
+};
+
+
+/**
+ * @return {goog.date.weekDay} The day of week according to universal time, ISO
+ *     style. 0 = Mon, 6 = Sun.
+ */
+goog.date.Date.prototype.getUTCIsoWeekday = function() {
+  return /** @type {goog.date.weekDay} */ ((this.date.getUTCDay() + 6) % 7);
+};
+
+
+/**
+ * @return {number} The day of week according to universal time and
+ *     firstDayOfWeek setting.
+ */
+goog.date.Date.prototype.getUTCWeekday = function() {
+  return (this.getUTCIsoWeekday() - this.firstDayOfWeek_ + 7) % 7;
+};
+
+
+/**
+ * @return {number} The first day of the week. 0 = Mon, 6 = Sun.
+ */
+goog.date.Date.prototype.getFirstDayOfWeek = function() {
+  return this.firstDayOfWeek_;
+};
+
+
+/**
+ * @return {number} The cut off weekday used for week number calculations.
+ *     0 = Mon, 6 = Sun.
+ */
+goog.date.Date.prototype.getFirstWeekCutOffDay = function() {
+  return this.firstWeekCutOffDay_;
+};
+
+
+/**
+ * @return {number} The number of days for the selected month.
+ */
+goog.date.Date.prototype.getNumberOfDaysInMonth = function() {
+  return goog.date.getNumberOfDaysInMonth(this.getFullYear(), this.getMonth());
+};
+
+
+/**
+ * @return {number} The week number.
+ */
+goog.date.Date.prototype.getWeekNumber = function() {
+  return goog.date.getWeekNumber(
+      this.getFullYear(), this.getMonth(), this.getDate(),
+      this.firstWeekCutOffDay_, this.firstDayOfWeek_);
+};
+
+
+/**
+ * @return {number} The day of year.
+ */
+goog.date.Date.prototype.getDayOfYear = function() {
+  var dayOfYear = this.getDate();
+  var year = this.getFullYear();
+  for (var m = this.getMonth() - 1; m >= 0; m--) {
+    dayOfYear += goog.date.getNumberOfDaysInMonth(year, m);
   }
 
-  this.setBackgroundPath_(edgeWidth,
-      this.horizontalLayout_ ? this.height_ : metrics.viewHeight);
+  return dayOfYear;
+};
 
-  var x = metrics.absoluteLeft;
-  if (this.toolboxPosition_ == Blockly.TOOLBOX_AT_RIGHT) {
-    x += metrics.viewWidth;
-    x -= this.width_;
-  }
 
-  var y = metrics.absoluteTop;
-  if (this.toolboxPosition_ == Blockly.TOOLBOX_AT_BOTTOM) {
-    y += metrics.viewHeight;
-    y -= this.height_;
-  }
+/**
+ * Returns timezone offset. The timezone offset is the delta in minutes between
+ * UTC and your local time. E.g., UTC+10 returns -600. Daylight savings time
+ * prevents this value from being constant.
+ *
+ * @return {number} The timezone offset.
+ */
+goog.date.Date.prototype.getTimezoneOffset = function() {
+  return this.date.getTimezoneOffset();
+};
 
-  this.svgGroup_.setAttribute('transform', 'translate(' + x + ',' + y + ')');
 
-  // Record the height for Blockly.Flyout.getMetrics_, or width if the layout is
-  // horizontal.
-  if (this.horizontalLayout_) {
-    this.width_ = metrics.viewWidth;
+/**
+ * Returns timezone offset as a string. Returns offset in [+-]HH:mm format or Z
+ * for UTC.
+ *
+ * @return {string} The timezone offset as a string.
+ */
+goog.date.Date.prototype.getTimezoneOffsetString = function() {
+  var tz;
+  var offset = this.getTimezoneOffset();
+
+  if (offset == 0) {
+    tz = 'Z';
   } else {
-    this.height_ = metrics.viewHeight;
+    var n = Math.abs(offset) / 60;
+    var h = Math.floor(n);
+    var m = (n - h) * 60;
+    tz = (offset > 0 ? '-' : '+') + goog.string.padNumber(h, 2) + ':' +
+        goog.string.padNumber(m, 2);
   }
 
-  // Update the scrollbar (if one exists).
-  if (this.scrollbar_) {
-    this.scrollbar_.resize();
+  return tz;
+};
+
+
+/**
+ * Sets the date.
+ *
+ * @param {goog.date.Date} date Date object to set date from.
+ */
+goog.date.Date.prototype.set = function(date) {
+  this.date = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+};
+
+
+/**
+ * Sets the year part of the date.
+ *
+ * @param {number} year Four digit year.
+ */
+goog.date.Date.prototype.setFullYear = function(year) {
+  this.date.setFullYear(year);
+};
+
+
+/**
+ * Alias for setFullYear.
+ *
+ * @param {number} year Four digit year.
+ * @see #setFullYear
+ */
+goog.date.Date.prototype.setYear = function(year) {
+  this.setFullYear(year);
+};
+
+
+/**
+ * Sets the month part of the date.
+ *
+ * TODO(nnaze): Update type to goog.date.month.
+ *
+ * @param {number} month The month, where 0 = Jan, 11 = Dec.
+ */
+goog.date.Date.prototype.setMonth = function(month) {
+  this.date.setMonth(month);
+};
+
+
+/**
+ * Sets the day part of the date.
+ *
+ * @param {number} date The day part.
+ */
+goog.date.Date.prototype.setDate = function(date) {
+  this.date.setDate(date);
+};
+
+
+/**
+ * Sets the value of the date object as expressed in the number of milliseconds
+ * since 1 January 1970 00:00:00.
+ *
+ * @param {number} ms Number of milliseconds since 1 Jan 1970.
+ */
+goog.date.Date.prototype.setTime = function(ms) {
+  this.date.setTime(ms);
+};
+
+
+/**
+ * Sets the year part of the date according to universal time.
+ *
+ * @param {number} year Four digit year.
+ */
+goog.date.Date.prototype.setUTCFullYear = function(year) {
+  this.date.setUTCFullYear(year);
+};
+
+
+/**
+ * Sets the month part of the date according to universal time.
+ *
+ * @param {number} month The month, where 0 = Jan, 11 = Dec.
+ */
+goog.date.Date.prototype.setUTCMonth = function(month) {
+  this.date.setUTCMonth(month);
+};
+
+
+/**
+ * Sets the day part of the date according to universal time.
+ *
+ * @param {number} date The UTC date.
+ */
+goog.date.Date.prototype.setUTCDate = function(date) {
+  this.date.setUTCDate(date);
+};
+
+
+/**
+ * Sets the first day of week.
+ *
+ * @param {number} day 0 = Mon, 6 = Sun.
+ */
+goog.date.Date.prototype.setFirstDayOfWeek = function(day) {
+  this.firstDayOfWeek_ = day;
+};
+
+
+/**
+ * Sets cut off weekday used for week number calculations. 0 = Mon, 6 = Sun.
+ *
+ * @param {number} day The cut off weekday.
+ */
+goog.date.Date.prototype.setFirstWeekCutOffDay = function(day) {
+  this.firstWeekCutOffDay_ = day;
+};
+
+
+/**
+ * Performs date calculation by adding the supplied interval to the date.
+ *
+ * @param {goog.date.Interval} interval Date interval to add.
+ */
+goog.date.Date.prototype.add = function(interval) {
+  if (interval.years || interval.months) {
+    // As months have different number of days adding a month to Jan 31 by just
+    // setting the month would result in a date in early March rather than Feb
+    // 28 or 29. Doing it this way overcomes that problem.
+
+    // adjust year and month, accounting for both directions
+    var month = this.getMonth() + interval.months + interval.years * 12;
+    var year = this.getYear() + Math.floor(month / 12);
+    month %= 12;
+    if (month < 0) {
+      month += 12;
+    }
+
+    var daysInTargetMonth = goog.date.getNumberOfDaysInMonth(year, month);
+    var date = Math.min(daysInTargetMonth, this.getDate());
+
+    // avoid inadvertently causing rollovers to adjacent months
+    this.setDate(1);
+
+    this.setFullYear(year);
+    this.setMonth(month);
+    this.setDate(date);
+  }
+
+  if (interval.days) {
+    // Convert the days to milliseconds and add it to the UNIX timestamp.
+    // Taking noon helps to avoid 1 day error due to the daylight saving.
+    var noon = new Date(this.getYear(), this.getMonth(), this.getDate(), 12);
+    var result = new Date(noon.getTime() + interval.days * 86400000);
+
+    // Set date to 1 to prevent rollover caused by setting the year or month.
+    this.setDate(1);
+    this.setFullYear(result.getFullYear());
+    this.setMonth(result.getMonth());
+    this.setDate(result.getDate());
+
+    this.maybeFixDst_(result.getDate());
   }
 };
 
+
 /**
- * Create and set the path for the visible boundaries of the flyout.
- * @param {number} width The width of the flyout, not including the
- *     rounded corners.
- * @param {number} height The height of the flyout, not including
- *     rounded corners.
+ * Returns ISO 8601 string representation of date.
+ *
+ * @param {boolean=} opt_verbose Whether the verbose format should be used
+ *     instead of the default compact one.
+ * @param {boolean=} opt_tz Whether the timezone offset should be included
+ *     in the string.
+ * @return {string} ISO 8601 string representation of date.
+ */
+goog.date.Date.prototype.toIsoString = function(opt_verbose, opt_tz) {
+  var str = [
+    this.getFullYear(), goog.string.padNumber(this.getMonth() + 1, 2),
+    goog.string.padNumber(this.getDate(), 2)
+  ];
+
+  return str.join((opt_verbose) ? '-' : '') +
+      (opt_tz ? this.getTimezoneOffsetString() : '');
+};
+
+
+/**
+ * Returns ISO 8601 string representation of date according to universal time.
+ *
+ * @param {boolean=} opt_verbose Whether the verbose format should be used
+ *     instead of the default compact one.
+ * @param {boolean=} opt_tz Whether the timezone offset should be included in
+ *     the string.
+ * @return {string} ISO 8601 string representation of date according to
+ *     universal time.
+ */
+goog.date.Date.prototype.toUTCIsoString = function(opt_verbose, opt_tz) {
+  var str = [
+    this.getUTCFullYear(), goog.string.padNumber(this.getUTCMonth() + 1, 2),
+    goog.string.padNumber(this.getUTCDate(), 2)
+  ];
+
+  return str.join((opt_verbose) ? '-' : '') + (opt_tz ? 'Z' : '');
+};
+
+
+/**
+ * Tests whether given date is equal to this Date.
+ * Note: This ignores units more precise than days (hours and below)
+ * and also ignores timezone considerations.
+ *
+ * @param {goog.date.Date} other The date to compare.
+ * @return {boolean} Whether the given date is equal to this one.
+ */
+goog.date.Date.prototype.equals = function(other) {
+  return !!(
+      other && this.getYear() == other.getYear() &&
+      this.getMonth() == other.getMonth() && this.getDate() == other.getDate());
+};
+
+
+/**
+ * Overloaded toString method for object.
+ * @return {string} ISO 8601 string representation of date.
+ * @override
+ */
+goog.date.Date.prototype.toString = function() {
+  return this.toIsoString();
+};
+
+
+/**
+ * Fixes date to account for daylight savings time in browsers that fail to do
+ * so automatically.
+ * @param {number} expected Expected date.
  * @private
  */
-Blockly.Flyout.prototype.setBackgroundPath_ = function(width, height) {
-  if (this.horizontalLayout_) {
-    this.setBackgroundPathHorizontal_(width, height);
+goog.date.Date.prototype.maybeFixDst_ = function(expected) {
+  if (this.getDate() != expected) {
+    var dir = this.getDate() < expected ? 1 : -1;
+    this.date.setUTCHours(this.date.getUTCHours() + dir);
+  }
+};
+
+
+/**
+ * @return {number} Value of wrapped date.
+ * @override
+ */
+goog.date.Date.prototype.valueOf = function() {
+  return this.date.valueOf();
+};
+
+
+/**
+ * Compares two dates.  May be used as a sorting function.
+ * @see goog.array.sort
+ * @param {!goog.date.DateLike} date1 Date to compare.
+ * @param {!goog.date.DateLike} date2 Date to compare.
+ * @return {number} Comparison result. 0 if dates are the same, less than 0 if
+ *     date1 is earlier than date2, greater than 0 if date1 is later than date2.
+ */
+goog.date.Date.compare = function(date1, date2) {
+  return date1.getTime() - date2.getTime();
+};
+
+
+
+/**
+ * Class representing a date and time. Defaults to current date and time if none
+ * is specified.
+ *
+ * Implements most methods of the native js Date object and can be used
+ * interchangeably with it just as if goog.date.DateTime was a subclass of Date.
+ *
+ * @param {number|Object=} opt_year Four digit year or a date-like object. If
+ *     not set, the created object will contain the date determined by
+ *     goog.now().
+ * @param {number=} opt_month Month, 0 = Jan, 11 = Dec.
+ * @param {number=} opt_date Date of month, 1 - 31.
+ * @param {number=} opt_hours Hours, 0 - 23.
+ * @param {number=} opt_minutes Minutes, 0 - 59.
+ * @param {number=} opt_seconds Seconds, 0 - 61.
+ * @param {number=} opt_milliseconds Milliseconds, 0 - 999.
+ * @constructor
+ * @struct
+ * @extends {goog.date.Date}
+ */
+goog.date.DateTime = function(
+    opt_year, opt_month, opt_date, opt_hours, opt_minutes, opt_seconds,
+    opt_milliseconds) {
+  if (goog.isNumber(opt_year)) {
+    this.date = new Date(
+        opt_year, opt_month || 0, opt_date || 1, opt_hours || 0,
+        opt_minutes || 0, opt_seconds || 0, opt_milliseconds || 0);
   } else {
-    this.setBackgroundPathVertical_(width, height);
+    this.date = new Date(
+        opt_year && opt_year.getTime ? opt_year.getTime() : goog.now());
+  }
+};
+goog.inherits(goog.date.DateTime, goog.date.Date);
+
+
+/**
+ * @param {number} timestamp Number of milliseconds since Epoch.
+ * @return {!goog.date.DateTime}
+ */
+goog.date.DateTime.fromTimestamp = function(timestamp) {
+  var date = new goog.date.DateTime();
+  date.setTime(timestamp);
+  return date;
+};
+
+
+/**
+ * Creates a DateTime from a datetime string expressed in RFC 822 format.
+ *
+ * @param {string} formatted A date or datetime expressed in RFC 822 format.
+ * @return {goog.date.DateTime} Parsed date or null if parse fails.
+ */
+goog.date.DateTime.fromRfc822String = function(formatted) {
+  var date = new Date(formatted);
+  return !isNaN(date.getTime()) ? new goog.date.DateTime(date) : null;
+};
+
+
+/**
+ * Returns the hours part of the datetime.
+ *
+ * @return {number} An integer between 0 and 23, representing the hour.
+ */
+goog.date.DateTime.prototype.getHours = function() {
+  return this.date.getHours();
+};
+
+
+/**
+ * Returns the minutes part of the datetime.
+ *
+ * @return {number} An integer between 0 and 59, representing the minutes.
+ */
+goog.date.DateTime.prototype.getMinutes = function() {
+  return this.date.getMinutes();
+};
+
+
+/**
+ * Returns the seconds part of the datetime.
+ *
+ * @return {number} An integer between 0 and 59, representing the seconds.
+ */
+goog.date.DateTime.prototype.getSeconds = function() {
+  return this.date.getSeconds();
+};
+
+
+/**
+ * Returns the milliseconds part of the datetime.
+ *
+ * @return {number} An integer between 0 and 999, representing the milliseconds.
+ */
+goog.date.DateTime.prototype.getMilliseconds = function() {
+  return this.date.getMilliseconds();
+};
+
+
+/**
+ * Returns the day of week according to universal time, US style.
+ *
+ * @return {goog.date.weekDay} Day of week, 0 = Sun, 1 = Mon, 6 = Sat.
+ * @override
+ */
+goog.date.DateTime.prototype.getUTCDay = function() {
+  return /** @type {goog.date.weekDay} */ (this.date.getUTCDay());
+};
+
+
+/**
+ * Returns the hours part of the datetime according to universal time.
+ *
+ * @return {number} An integer between 0 and 23, representing the hour.
+ * @override
+ */
+goog.date.DateTime.prototype.getUTCHours = function() {
+  return this.date.getUTCHours();
+};
+
+
+/**
+ * Returns the minutes part of the datetime according to universal time.
+ *
+ * @return {number} An integer between 0 and 59, representing the minutes.
+ * @override
+ */
+goog.date.DateTime.prototype.getUTCMinutes = function() {
+  return this.date.getUTCMinutes();
+};
+
+
+/**
+ * Returns the seconds part of the datetime according to universal time.
+ *
+ * @return {number} An integer between 0 and 59, representing the seconds.
+ */
+goog.date.DateTime.prototype.getUTCSeconds = function() {
+  return this.date.getUTCSeconds();
+};
+
+
+/**
+ * Returns the milliseconds part of the datetime according to universal time.
+ *
+ * @return {number} An integer between 0 and 999, representing the milliseconds.
+ */
+goog.date.DateTime.prototype.getUTCMilliseconds = function() {
+  return this.date.getUTCMilliseconds();
+};
+
+
+/**
+ * Sets the hours part of the datetime.
+ *
+ * @param {number} hours An integer between 0 and 23, representing the hour.
+ */
+goog.date.DateTime.prototype.setHours = function(hours) {
+  this.date.setHours(hours);
+};
+
+
+/**
+ * Sets the minutes part of the datetime.
+ *
+ * @param {number} minutes Integer between 0 and 59, representing the minutes.
+ */
+goog.date.DateTime.prototype.setMinutes = function(minutes) {
+  this.date.setMinutes(minutes);
+};
+
+
+/**
+ * Sets the seconds part of the datetime.
+ *
+ * @param {number} seconds Integer between 0 and 59, representing the seconds.
+ */
+goog.date.DateTime.prototype.setSeconds = function(seconds) {
+  this.date.setSeconds(seconds);
+};
+
+
+/**
+ * Sets the milliseconds part of the datetime.
+ *
+ * @param {number} ms Integer between 0 and 999, representing the milliseconds.
+ */
+goog.date.DateTime.prototype.setMilliseconds = function(ms) {
+  this.date.setMilliseconds(ms);
+};
+
+
+/**
+ * Sets the hours part of the datetime according to universal time.
+ *
+ * @param {number} hours An integer between 0 and 23, representing the hour.
+ */
+goog.date.DateTime.prototype.setUTCHours = function(hours) {
+  this.date.setUTCHours(hours);
+};
+
+
+/**
+ * Sets the minutes part of the datetime according to universal time.
+ *
+ * @param {number} minutes Integer between 0 and 59, representing the minutes.
+ */
+goog.date.DateTime.prototype.setUTCMinutes = function(minutes) {
+  this.date.setUTCMinutes(minutes);
+};
+
+
+/**
+ * Sets the seconds part of the datetime according to universal time.
+ *
+ * @param {number} seconds Integer between 0 and 59, representing the seconds.
+ */
+goog.date.DateTime.prototype.setUTCSeconds = function(seconds) {
+  this.date.setUTCSeconds(seconds);
+};
+
+
+/**
+ * Sets the seconds part of the datetime according to universal time.
+ *
+ * @param {number} ms Integer between 0 and 999, representing the milliseconds.
+ */
+goog.date.DateTime.prototype.setUTCMilliseconds = function(ms) {
+  this.date.setUTCMilliseconds(ms);
+};
+
+
+/**
+ * @return {boolean} Whether the datetime is aligned to midnight.
+ */
+goog.date.DateTime.prototype.isMidnight = function() {
+  return this.getHours() == 0 && this.getMinutes() == 0 &&
+      this.getSeconds() == 0 && this.getMilliseconds() == 0;
+};
+
+
+/**
+ * Performs date calculation by adding the supplied interval to the date.
+ *
+ * @param {goog.date.Interval} interval Date interval to add.
+ * @override
+ */
+goog.date.DateTime.prototype.add = function(interval) {
+  goog.date.Date.prototype.add.call(this, interval);
+
+  if (interval.hours) {
+    this.setUTCHours(this.date.getUTCHours() + interval.hours);
+  }
+  if (interval.minutes) {
+    this.setUTCMinutes(this.date.getUTCMinutes() + interval.minutes);
+  }
+  if (interval.seconds) {
+    this.setUTCSeconds(this.date.getUTCSeconds() + interval.seconds);
   }
 };
 
+
 /**
- * Create and set the path for the visible boundaries of the flyout in vertical
- * mode.
- * @param {number} width The width of the flyout, not including the
- *     rounded corners.
- * @param {number} height The height of the flyout, not including
- *     rounded corners.
- * @private
+ * Returns ISO 8601 string representation of date/time.
+ *
+ * @param {boolean=} opt_verbose Whether the verbose format should be used
+ *     instead of the default compact one.
+ * @param {boolean=} opt_tz Whether the timezone offset should be included
+ *     in the string.
+ * @return {string} ISO 8601 string representation of date/time.
+ * @override
  */
-Blockly.Flyout.prototype.setBackgroundPathVertical_ = function(width, height) {
-  var atRight = this.toolboxPosition_ == Blockly.TOOLBOX_AT_RIGHT;
-  // Decide whether to start on the left or right.
-  var path = ['M ' + (atRight ? this.width_ : 0) + ',0'];
-  // Top.
-  path.push('h', width);
-  // Rounded corner.
-  path.push('a', this.CORNER_RADIUS, this.CORNER_RADIUS, 0, 0,
-      atRight ? 0 : 1,
-      atRight ? -this.CORNER_RADIUS : this.CORNER_RADIUS,
-      this.CORNER_RADIUS);
-  // Side closest to workspace.
-  path.push('v', Math.max(0, height - this.CORNER_RADIUS * 2));
-  // Rounded corner.
-  path.push('a', this.CORNER_RADIUS, this.CORNER_RADIUS, 0, 0,
-      atRight ? 0 : 1,
-      atRight ? this.CORNER_RADIUS : -this.CORNER_RADIUS,
-      this.CORNER_RADIUS);
-  // Bottom.
-  path.push('h', -width);
-  path.push('z');
-  this.svgBackground_.setAttribute('d', path.join(' '));
+goog.date.DateTime.prototype.toIsoString = function(opt_verbose, opt_tz) {
+  var dateString = goog.date.Date.prototype.toIsoString.call(this, opt_verbose);
+
+  if (opt_verbose) {
+    return dateString + ' ' + goog.string.padNumber(this.getHours(), 2) + ':' +
+        goog.string.padNumber(this.getMinutes(), 2) + ':' +
+        goog.string.padNumber(this.getSeconds(), 2) +
+        (opt_tz ? this.getTimezoneOffsetString() : '');
+  }
+
+  return dateString + 'T' + goog.string.padNumber(this.getHours(), 2) +
+      goog.string.padNumber(this.getMinutes(), 2) +
+      goog.string.padNumber(this.getSeconds(), 2) +
+      (opt_tz ? this.getTimezoneOffsetString() : '');
 };
 
-/**
- * Create and set the path for the visible boundaries of the flyout in
- * horizontal mode.
- * @param {number} width The width of the flyout, not including the
- *     rounded corners.
- * @param {number} height The height of the flyout, not including
- *     rounded corners.
- * @private
- */
-Blockly.Flyout.prototype.setBackgroundPathHorizontal_ =
-    function(width, height) {
-  var atTop = this.toolboxPosition_ == Blockly.TOOLBOX_AT_TOP;
-  // Start at top left.
-  var path = ['M 0,' + (atTop ? 0 : this.CORNER_RADIUS)];
 
-  if (atTop) {
-    // Top.
-    path.push('h', width + this.CORNER_RADIUS);
-    // Right.
-    path.push('v', height);
-    // Bottom.
-    path.push('a', this.CORNER_RADIUS, this.CORNER_RADIUS, 0, 0, 1,
-        -this.CORNER_RADIUS, this.CORNER_RADIUS);
-    path.push('h', -1 * (width - this.CORNER_RADIUS));
-    // Left.
-    path.push('a', this.CORNER_RADIUS, this.CORNER_RADIUS, 0, 0, 1,
-        -this.CORNER_RADIUS, -this.CORNER_RADIUS);
-    path.push('z');
-  } else {
-    // Top.
-    path.push('a', this.CORNER_RADIUS, this.CORNER_RADIUS, 0, 0, 1,
-        this.CORNER_RADIUS, -this.CORNER_RADIUS);
-    path.push('h', width - this.CORNER_RADIUS);
-     // Right.
-    path.push('a', this.CORNER_RADIUS, this.CORNER_RADIUS, 0, 0, 1,
-        this.CORNER_RADIUS, this.CORNER_RADIUS);
-    path.push('v', height - this.CORNER_RADIUS);
-    // Bottom.
-    path.push('h', -width - this.CORNER_RADIUS);
-    // Left.
-    path.push('z');
-  }
-  this.svgBackground_.setAttribute('d', path.join(' '));
+/**
+ * Returns XML Schema 2 string representation of date/time.
+ * The return value is also ISO 8601 compliant.
+ *
+ * @param {boolean=} opt_timezone Should the timezone offset be included in the
+ *     string?.
+ * @return {string} XML Schema 2 string representation of date/time.
+ */
+goog.date.DateTime.prototype.toXmlDateTime = function(opt_timezone) {
+  return goog.date.Date.prototype.toIsoString.call(this, true) + 'T' +
+      goog.string.padNumber(this.getHours(), 2) + ':' +
+      goog.string.padNumber(this.getMinutes(), 2) + ':' +
+      goog.string.padNumber(this.getSeconds(), 2) +
+      (opt_timezone ? this.getTimezoneOffsetString() : '');
 };
 
+
 /**
- * Scroll the flyout to the top.
+ * Returns ISO 8601 string representation of date/time according to universal
+ * time.
+ *
+ * @param {boolean=} opt_verbose Whether the opt_verbose format should be
+ *     returned instead of the default compact one.
+ * @param {boolean=} opt_tz Whether the the timezone offset should be included
+ *     in the string.
+ * @return {string} ISO 8601 string representation of date/time according to
+ *     universal time.
+ * @override
  */
-Blockly.Flyout.prototype.scrollToStart = function() {
-  this.scrollbar_.set((this.horizontalLayout_ && this.RTL) ? Infinity : 0);
+goog.date.DateTime.prototype.toUTCIsoString = function(opt_verbose, opt_tz) {
+  var dateStr = goog.date.Date.prototype.toUTCIsoString.call(this, opt_verbose);
+
+  if (opt_verbose) {
+    return dateStr + ' ' + goog.string.padNumber(this.getUTCHours(), 2) + ':' +
+        goog.string.padNumber(this.getUTCMinutes(), 2) + ':' +
+        goog.string.padNumber(this.getUTCSeconds(), 2) + (opt_tz ? 'Z' : '');
+  }
+
+  return dateStr + 'T' + goog.string.padNumber(this.getUTCHours(), 2) +
+      goog.string.padNumber(this.getUTCMinutes(), 2) +
+      goog.string.padNumber(this.getUTCSeconds(), 2) + (opt_tz ? 'Z' : '');
 };
 
+
 /**
- * Scroll the flyout.
- * @param {!Event} e Mouse wheel scroll event.
- * @private
+ * Tests whether given datetime is exactly equal to this DateTime.
+ *
+ * @param {goog.date.Date} other The datetime to compare.
+ * @return {boolean} Whether the given datetime is exactly equal to this one.
+ * @override
  */
-Blockly.Flyout.prototype.wheel_ = function(e) {
-  var delta = this.horizontalLayout_ ? e.deltaX : e.deltaY;
-
-  if (delta) {
-    if (goog.userAgent.GECKO) {
-      // Firefox's deltas are a tenth that of Chrome/Safari.
-      delta *= 10;
-    }
-    var metrics = this.getMetrics_();
-    var pos = this.horizontalLayout_ ? metrics.viewLeft + delta :
-        metrics.viewTop + delta;
-    var limit = this.horizontalLayout_ ?
-        metrics.contentWidth - metrics.viewWidth :
-        metrics.contentHeight - metrics.viewHeight;
-    pos = Math.min(pos, limit);
-    pos = Math.max(pos, 0);
-    this.scrollbar_.set(pos);
-  }
-
-  // Don't scroll the page.
-  e.preventDefault();
-  // Don't propagate mousewheel event (zooming).
-  e.stopPropagation();
+goog.date.DateTime.prototype.equals = function(other) {
+  return this.getTime() == other.getTime();
 };
 
+
 /**
- * Is the flyout visible?
- * @return {boolean} True if visible.
+ * Overloaded toString method for object.
+ * @return {string} ISO 8601 string representation of date/time.
+ * @override
  */
-Blockly.Flyout.prototype.isVisible = function() {
-  return this.svgGroup_ && this.svgGroup_.style.display == 'block';
+goog.date.DateTime.prototype.toString = function() {
+  return this.toIsoString();
 };
 
+
 /**
- * Hide and empty the flyout.
+ * Generates time label for the datetime, e.g., '5:30am'.
+ * By default this does not pad hours (e.g., to '05:30') and it does add
+ * an am/pm suffix.
+ * TODO(user): i18n -- hardcoding time format like this is bad.  E.g., in CJK
+ *               locales, need Chinese characters for hour and minute units.
+ * @param {boolean=} opt_padHours Whether to pad hours, e.g., '05:30' vs '5:30'.
+ * @param {boolean=} opt_showAmPm Whether to show the 'am' and 'pm' suffix.
+ * @param {boolean=} opt_omitZeroMinutes E.g., '5:00pm' becomes '5pm',
+ *                                      but '5:01pm' remains '5:01pm'.
+ * @return {string} The time label.
  */
-Blockly.Flyout.prototype.hide = function() {
-  if (!this.isVisible()) {
-    return;
+goog.date.DateTime.prototype.toUsTimeString = function(
+    opt_padHours, opt_showAmPm, opt_omitZeroMinutes) {
+  var hours = this.getHours();
+
+  // show am/pm marker by default
+  if (!goog.isDef(opt_showAmPm)) {
+    opt_showAmPm = true;
   }
-  this.svgGroup_.style.display = 'none';
-  // Delete all the event listeners.
-  for (var x = 0, listen; listen = this.listeners_[x]; x++) {
-    Blockly.unbindEvent_(listen);
+
+  // 12pm
+  var isPM = hours == 12;
+
+  // change from 1-24 to 1-12 basis
+  if (hours > 12) {
+    hours -= 12;
+    isPM = true;
   }
-  this.listeners_.length = 0;
-  if (this.reflowWrapper_) {
-    this.workspace_.removeChangeListener(this.reflowWrapper_);
-    this.reflowWrapper_ = null;
+
+  // midnight is expressed as "12am", but if am/pm marker omitted, keep as '0'
+  if (hours == 0 && opt_showAmPm) {
+    hours = 12;
   }
-  // Do NOT delete the blocks here.  Wait until Flyout.show.
-  // https://neil.fraser.name/news/2014/08/09/
+
+  var label = opt_padHours ? goog.string.padNumber(hours, 2) : String(hours);
+  var minutes = this.getMinutes();
+  if (!opt_omitZeroMinutes || minutes > 0) {
+    label += ':' + goog.string.padNumber(minutes, 2);
+  }
+
+  // by default, show am/pm suffix
+  if (opt_showAmPm) {
+    /**
+     * @desc Suffix for morning times.
+     */
+    var MSG_TIME_AM = goog.getMsg('am');
+
+    /**
+     * @desc Suffix for afternoon times.
+     */
+    var MSG_TIME_PM = goog.getMsg('pm');
+
+    label += isPM ? MSG_TIME_PM : MSG_TIME_AM;
+  }
+  return label;
 };
 
+
 /**
- * Show and populate the flyout.
- * @param {!Array|string} xmlList List of blocks to show.
- *     Variables and procedures have a custom set of blocks.
+ * Generates time label for the datetime in standard ISO 24-hour time format.
+ * E.g., '06:00:00' or '23:30:15'.
+ * @param {boolean=} opt_showSeconds Whether to shows seconds. Defaults to TRUE.
+ * @return {string} The time label.
  */
-Blockly.Flyout.prototype.show = function(xmlList) {
-  this.hide();
-  this.clearOldBlocks_();
-
-  if (xmlList == Blockly.Variables.NAME_TYPE) {
-    // Special category for variables.
-    xmlList =
-        Blockly.Variables.flyoutCategory(this.workspace_.targetWorkspace);
-  } else if (xmlList == Blockly.Procedures.NAME_TYPE) {
-    // Special category for procedures.
-    xmlList =
-        Blockly.Procedures.flyoutCategory(this.workspace_.targetWorkspace);
+goog.date.DateTime.prototype.toIsoTimeString = function(opt_showSeconds) {
+  var hours = this.getHours();
+  var label = goog.string.padNumber(hours, 2) + ':' +
+      goog.string.padNumber(this.getMinutes(), 2);
+  if (!goog.isDef(opt_showSeconds) || opt_showSeconds) {
+    label += ':' + goog.string.padNumber(this.getSeconds(), 2);
   }
-
-  this.svgGroup_.style.display = 'block';
-  // Create the blocks to be shown in this flyout.
-  var blocks = [];
-  var gaps = [];
-  this.permanentlyDisabled_.length = 0;
-  for (var i = 0, xml; xml = xmlList[i]; i++) {
-    if (xml.tagName && xml.tagName.toUpperCase() == 'BLOCK') {
-      var curBlock = Blockly.Xml.domToBlock(xml, this.workspace_);
-      if (curBlock.disabled) {
-        // Record blocks that were initially disabled.
-        // Do not enable these blocks as a result of capacity filtering.
-        this.permanentlyDisabled_.push(curBlock);
-      }
-      blocks.push(curBlock);
-      var gap = parseInt(xml.getAttribute('gap'), 10);
-      gaps.push(isNaN(gap) ? this.MARGIN * 3 : gap);
-    }
-  }
-
-  this.layoutBlocks_(blocks, gaps);
-
-  // IE 11 is an incompetant browser that fails to fire mouseout events.
-  // When the mouse is over the background, deselect all blocks.
-  var deselectAll = function(e) {
-    var topBlocks = this.workspace_.getTopBlocks(false);
-    for (var i = 0, block; block = topBlocks[i]; i++) {
-      block.removeSelect();
-    }
-  };
-  this.listeners_.push(Blockly.bindEvent_(this.svgBackground_, 'mouseover',
-      this, deselectAll));
-
-  if (this.horizontalLayout_) {
-    this.height_ = 0;
-  } else {
-    this.width_ = 0;
-  }
-  this.reflow();
-
-  this.offsetHorizontalRtlBlocks(this.workspace_.getTopBlocks(false));
-  this.filterForCapacity_();
-
-  // Fire a resize event to update the flyout's scrollbar.
-  Blockly.svgResize(this.workspace_);
-  this.reflowWrapper_ = this.reflow.bind(this);
-  this.workspace_.addChangeListener(this.reflowWrapper_);
+  return label;
 };
 
-/**
- * Lay out the blocks in the flyout.
- * @param {!Array.<!Blockly.BlockSvg>} blocks The blocks to lay out.
- * @param {!Array.<number>} gaps The visible gaps between blocks.
- * @private
- */
-Blockly.Flyout.prototype.layoutBlocks_ = function(blocks, gaps) {
-  var margin = this.MARGIN * this.workspace_.scale;
-  var cursorX = this.RTL ? margin : margin + Blockly.BlockSvg.TAB_WIDTH;
-  var cursorY = margin;
-  for (var i = 0, block; block = blocks[i]; i++) {
-    var allBlocks = block.getDescendants();
-    for (var j = 0, child; child = allBlocks[j]; j++) {
-      // Mark blocks as being inside a flyout.  This is used to detect and
-      // prevent the closure of the flyout if the user right-clicks on such a
-      // block.
-      child.isInFlyout = true;
-    }
-    block.render();
-    var root = block.getSvgRoot();
-    var blockHW = block.getHeightWidth();
-    var tab = block.outputConnection ? Blockly.BlockSvg.TAB_WIDTH : 0;
-    if (this.horizontalLayout_) {
-      cursorX += tab;
-    }
-    block.moveBy((this.horizontalLayout_ && this.RTL) ? -cursorX : cursorX,
-        cursorY);
-    if (this.horizontalLayout_) {
-      cursorX += (blockHW.width + gaps[i] - tab);
-    } else {
-      cursorY += blockHW.height + gaps[i];
-    }
-
-    // Create an invisible rectangle under the block to act as a button.  Just
-    // using the block as a button is poor, since blocks have holes in them.
-    var rect = Blockly.createSvgElement('rect', {'fill-opacity': 0}, null);
-    rect.tooltip = block;
-    Blockly.Tooltip.bindMouseEvents(rect);
-    // Add the rectangles under the blocks, so that the blocks' tooltips work.
-    this.workspace_.getCanvas().insertBefore(rect, block.getSvgRoot());
-    block.flyoutRect_ = rect;
-    this.buttons_[i] = rect;
-
-    this.addBlockListeners_(root, block, rect);
-  }
-};
 
 /**
- * Delete blocks and background buttons from a previous showing of the flyout.
- * @private
+ * @return {!goog.date.DateTime} A clone of the datetime object.
+ * @override
  */
-Blockly.Flyout.prototype.clearOldBlocks_ = function() {
-  // Delete any blocks from a previous showing.
-  var oldBlocks = this.workspace_.getTopBlocks(false);
-  for (var i = 0, block; block = oldBlocks[i]; i++) {
-    if (block.workspace == this.workspace_) {
-      block.dispose(false, false);
-    }
-  }
-  // Delete any background buttons from a previous showing.
-  for (var j = 0, rect; rect = this.buttons_[j]; j++) {
-    goog.dom.removeNode(rect);
-  }
-  this.buttons_.length = 0;
-};
-
-/**
- * Add listeners to a block that has been added to the flyout.
- * @param {!Element} root The root node of the SVG group the block is in.
- * @param {!Blockly.Block} block The block to add listeners for.
- * @param {!Element} rect The invisible rectangle under the block that acts as
- *     a button for that block.
- * @private
- */
-Blockly.Flyout.prototype.addBlockListeners_ = function(root, block, rect) {
-  if (this.autoClose) {
-    this.listeners_.push(Blockly.bindEvent_(root, 'mousedown', null,
-        this.createBlockFunc_(block)));
-    this.listeners_.push(Blockly.bindEvent_(rect, 'mousedown', null,
-        this.createBlockFunc_(block)));
-  } else {
-    this.listeners_.push(Blockly.bindEvent_(root, 'mousedown', null,
-        this.blockMouseDown_(block)));
-    this.listeners_.push(Blockly.bindEvent_(rect, 'mousedown', null,
-        this.blockMouseDown_(block)));
-  }
-  this.listeners_.push(Blockly.bindEvent_(root, 'mouseover', block,
-      block.addSelect));
-  this.listeners_.push(Blockly.bindEvent_(root, 'mouseout', block,
-      block.removeSelect));
-  this.listeners_.push(Blockly.bindEvent_(rect, 'mouseover', block,
-      block.addSelect));
-  this.listeners_.push(Blockly.bindEvent_(rect, 'mouseout', block,
-      block.removeSelect));
-};
-
-/**
- * Handle a mouse-down on an SVG block in a non-closing flyout.
- * @param {!Blockly.Block} block The flyout block to copy.
- * @return {!Function} Function to call when block is clicked.
- * @private
- */
-Blockly.Flyout.prototype.blockMouseDown_ = function(block) {
-  var flyout = this;
-  return function(e) {
-    Blockly.terminateDrag_();
-    Blockly.hideChaff();
-    if (Blockly.isRightButton(e)) {
-      // Right-click.
-      block.showContextMenu_(e);
-    } else {
-      // Left-click (or middle click)
-      Blockly.Css.setCursor(Blockly.Css.Cursor.CLOSED);
-      // Record the current mouse position.
-      Blockly.Flyout.startDownEvent_ = e;
-      Blockly.Flyout.startBlock_ = block;
-      Blockly.Flyout.startFlyout_ = flyout;
-      Blockly.Flyout.onMouseUpWrapper_ = Blockly.bindEvent_(document,
-          'mouseup', this, flyout.onMouseUp_);
-      Blockly.Flyout.onMouseMoveBlockWrapper_ = Blockly.bindEvent_(document,
-          'mousemove', this, flyout.onMouseMoveBlock_);
-    }
-    // This event has been handled.  No need to bubble up to the document.
-    e.stopPropagation();
-  };
-};
-
-/**
- * Mouse down on the flyout background.  Start a vertical scroll drag.
- * @param {!Event} e Mouse down event.
- * @private
- */
-Blockly.Flyout.prototype.onMouseDown_ = function(e) {
-  if (Blockly.isRightButton(e)) {
-    return;
-  }
-  Blockly.hideChaff(true);
-  Blockly.Flyout.terminateDrag_();
-  this.startDragMouseY_ = e.clientY;
-  this.startDragMouseX_ = e.clientX;
-  Blockly.Flyout.onMouseMoveWrapper_ = Blockly.bindEvent_(document, 'mousemove',
-      this, this.onMouseMove_);
-  Blockly.Flyout.onMouseUpWrapper_ = Blockly.bindEvent_(document, 'mouseup',
-      this, Blockly.Flyout.terminateDrag_);
-  // This event has been handled.  No need to bubble up to the document.
-  e.preventDefault();
-  e.stopPropagation();
-};
-
-/**
- * Handle a mouse-up anywhere in the SVG pane.  Is only registered when a
- * block is clicked.  We can't use mouseUp on the block since a fast-moving
- * cursor can briefly escape the block before it catches up.
- * @param {!Event} e Mouse up event.
- * @private
- */
-Blockly.Flyout.prototype.onMouseUp_ = function(e) {
-  if (Blockly.dragMode_ != Blockly.DRAG_FREE &&
-      !Blockly.WidgetDiv.isVisible()) {
-    Blockly.Events.fire(
-        new Blockly.Events.Ui(Blockly.Flyout.startBlock_, 'click',
-                              undefined, undefined));
-  }
-  Blockly.terminateDrag_();
-};
-
-/**
- * Handle a mouse-move to vertically drag the flyout.
- * @param {!Event} e Mouse move event.
- * @private
- */
-Blockly.Flyout.prototype.onMouseMove_ = function(e) {
-  var metrics = this.getMetrics_();
-  if (this.horizontalLayout_) {
-    if (metrics.contentWidth - metrics.viewWidth < 0) {
-      return;
-    }
-    var dx = e.clientX - this.startDragMouseX_;
-    this.startDragMouseX_ = e.clientX;
-    var x = metrics.viewLeft - dx;
-    x = goog.math.clamp(x, 0, metrics.contentWidth - metrics.viewWidth);
-    this.scrollbar_.set(x);
-  } else {
-    if (metrics.contentHeight - metrics.viewHeight < 0) {
-      return;
-    }
-    var dy = e.clientY - this.startDragMouseY_;
-    this.startDragMouseY_ = e.clientY;
-    var y = metrics.viewTop - dy;
-    y = goog.math.clamp(y, 0, metrics.contentHeight - metrics.viewHeight);
-    this.scrollbar_.set(y);
-  }
-};
-
-/**
- * Mouse button is down on a block in a non-closing flyout.  Create the block
- * if the mouse moves beyond a small radius.  This allows one to play with
- * fields without instantiating blocks that instantly self-destruct.
- * @param {!Event} e Mouse move event.
- * @private
- */
-Blockly.Flyout.prototype.onMouseMoveBlock_ = function(e) {
-  if (e.type == 'mousemove' && e.clientX <= 1 && e.clientY == 0 &&
-      e.button == 0) {
-    /* HACK:
-     Safari Mobile 6.0 and Chrome for Android 18.0 fire rogue mousemove events
-     on certain touch actions. Ignore events with these signatures.
-     This may result in a one-pixel blind spot in other browsers,
-     but this shouldn't be noticable. */
-    e.stopPropagation();
-    return;
-  }
-  var dx = e.clientX - Blockly.Flyout.startDownEvent_.clientX;
-  var dy = e.clientY - Blockly.Flyout.startDownEvent_.clientY;
-  // Still dragging within the sticky DRAG_RADIUS.
-  if (Math.sqrt(dx * dx + dy * dy) > Blockly.DRAG_RADIUS) {
-    // Create the block.
-    Blockly.Flyout.startFlyout_.createBlockFunc_(Blockly.Flyout.startBlock_)(
-        Blockly.Flyout.startDownEvent_);
-  }
-};
-
-/**
- * Create a copy of this block on the workspace.
- * @param {!Blockly.Block} originBlock The flyout block to copy.
- * @return {!Function} Function to call when block is clicked.
- * @private
- */
-Blockly.Flyout.prototype.createBlockFunc_ = function(originBlock) {
-  var flyout = this;
-  return function(e) {
-    if (Blockly.isRightButton(e)) {
-      // Right-click.  Don't create a block, let the context menu show.
-      return;
-    }
-    if (originBlock.disabled) {
-      // Beyond capacity.
-      return;
-    }
-    Blockly.Events.disable();
-    var block = flyout.placeNewBlock_(originBlock);
-    Blockly.Events.enable();
-    if (Blockly.Events.isEnabled()) {
-      Blockly.Events.setGroup(true);
-      Blockly.Events.fire(new Blockly.Events.Create(block));
-    }
-    if (flyout.autoClose) {
-      flyout.hide();
-    } else {
-      flyout.filterForCapacity_();
-    }
-    // Start a dragging operation on the new block.
-    block.onMouseDown_(e);
-    Blockly.dragMode_ = Blockly.DRAG_FREE;
-    block.setDragging_(true);
-  };
-};
-
-/**
- * Copy a block from the flyout to the workspace and position it correctly.
- * @param {!Blockly.Block} originBlock The flyout block to copy..
- * @return {!Blockly.Block} The new block in the main workspace.
- * @private
- */
-Blockly.Flyout.prototype.placeNewBlock_ = function(originBlock) {
-  var targetWorkspace = this.targetWorkspace_;
-  var svgRootOld = originBlock.getSvgRoot();
-  if (!svgRootOld) {
-    throw 'originBlock is not rendered.';
-  }
-  // Figure out where the original block is on the screen, relative to the upper
-  // left corner of the main workspace.
-  var xyOld = Blockly.getSvgXY_(svgRootOld, targetWorkspace);
-  // Take into account that the flyout might have been scrolled horizontally
-  // (separately from the main workspace).
-  // Generally a no-op in vertical mode but likely to happen in horizontal
-  // mode.
-  var scrollX = this.workspace_.scrollX;
-  var scale = this.workspace_.scale;
-  xyOld.x += scrollX / scale - scrollX;
-  // If the flyout is on the right side, (0, 0) in the flyout is offset to
-  // the right of (0, 0) in the main workspace.  Add an offset to take that
-  // into account.
-  if (this.toolboxPosition_ == Blockly.TOOLBOX_AT_RIGHT) {
-    scrollX = targetWorkspace.getMetrics().viewWidth - this.width_;
-    scale = targetWorkspace.scale;
-    // Scale the scroll (getSvgXY_ did not do this).
-    xyOld.x += scrollX / scale - scrollX;
-  }
-
-  // Take into account that the flyout might have been scrolled vertically
-  // (separately from the main workspace).
-  // Generally a no-op in horizontal mode but likely to happen in vertical
-  // mode.
-  var scrollY = this.workspace_.scrollY;
-  scale = this.workspace_.scale;
-  xyOld.y += scrollY / scale - scrollY;
-  // If the flyout is on the bottom, (0, 0) in the flyout is offset to be below
-  // (0, 0) in the main workspace.  Add an offset to take that into account.
-  if (this.toolboxPosition_ == Blockly.TOOLBOX_AT_BOTTOM) {
-    scrollY = targetWorkspace.getMetrics().viewHeight - this.height_;
-    scale = targetWorkspace.scale;
-    xyOld.y += scrollY / scale - scrollY;
-  }
-
-  // Create the new block by cloning the block in the flyout (via XML).
-  var xml = Blockly.Xml.blockToDom(originBlock);
-  var block = Blockly.Xml.domToBlock(xml, targetWorkspace);
-  var svgRootNew = block.getSvgRoot();
-  if (!svgRootNew) {
-    throw 'block is not rendered.';
-  }
-  // Figure out where the new block got placed on the screen, relative to the
-  // upper left corner of the workspace.  This may not be the same as the
-  // original block because the flyout's origin may not be the same as the
-  // main workspace's origin.
-  var xyNew = Blockly.getSvgXY_(svgRootNew, targetWorkspace);
-  // Scale the scroll (getSvgXY_ did not do this).
-  xyNew.x +=
-      targetWorkspace.scrollX / targetWorkspace.scale - targetWorkspace.scrollX;
-  xyNew.y +=
-      targetWorkspace.scrollY / targetWorkspace.scale - targetWorkspace.scrollY;
-  // If the flyout is collapsible and the workspace can't be scrolled.
-  if (targetWorkspace.toolbox_ && !targetWorkspace.scrollbar) {
-    xyNew.x += targetWorkspace.toolbox_.getWidth() / targetWorkspace.scale;
-    xyNew.y += targetWorkspace.toolbox_.getHeight() / targetWorkspace.scale;
-  }
-
-  // Move the new block to where the old block is.
-  block.moveBy(xyOld.x - xyNew.x, xyOld.y - xyNew.y);
-  return block;
-};
-
-/**
- * Filter the blocks on the flyout to disable the ones that are above the
- * capacity limit.
- * @private
- */
-Blockly.Flyout.prototype.filterForCapacity_ = function() {
-  var remainingCapacity = this.targetWorkspace_.remainingCapacity();
-  var blocks = this.workspace_.getTopBlocks(false);
-  for (var i = 0, block; block = blocks[i]; i++) {
-    if (this.permanentlyDisabled_.indexOf(block) == -1) {
-      var allBlocks = block.getDescendants();
-      block.setDisabled(allBlocks.length > remainingCapacity);
-    }
-  }
-};
-
-/**
- * Return the deletion rectangle for this flyout.
- * @return {goog.math.Rect} Rectangle in which to delete.
- */
-Blockly.Flyout.prototype.getClientRect = function() {
-  var flyoutRect = this.svgGroup_.getBoundingClientRect();
-  // BIG_NUM is offscreen padding so that blocks dragged beyond the shown flyout
-  // area are still deleted.  Must be larger than the largest screen size,
-  // but be smaller than half Number.MAX_SAFE_INTEGER (not available on IE).
-  var BIG_NUM = 1000000000;
-  var x = flyoutRect.left;
-  var y = flyoutRect.top;
-  var width = flyoutRect.width;
-  var height = flyoutRect.height;
-
-  if (this.toolboxPosition_ == Blockly.TOOLBOX_AT_TOP) {
-    return new goog.math.Rect(-BIG_NUM, y - BIG_NUM, BIG_NUM * 2,
-        BIG_NUM + height);
-  } else if (this.toolboxPosition_ == Blockly.TOOLBOX_AT_BOTTOM) {
-    return new goog.math.Rect(-BIG_NUM, y, BIG_NUM * 2,
-        BIG_NUM + height);
-  } else if (this.toolboxPosition_ == Blockly.TOOLBOX_AT_LEFT) {
-    return new goog.math.Rect(x - BIG_NUM, -BIG_NUM, BIG_NUM + width,
-        BIG_NUM * 2);
-  } else {  // Right
-    return new goog.math.Rect(x, -BIG_NUM, BIG_NUM + width, BIG_NUM * 2);
-  }
-};
-
-/**
- * Stop binding to the global mouseup and mousemove events.
- * @private
- */
-Blockly.Flyout.terminateDrag_ = function() {
-  if (Blockly.Flyout.onMouseUpWrapper_) {
-    Blockly.unbindEvent_(Blockly.Flyout.onMouseUpWrapper_);
-    Blockly.Flyout.onMouseUpWrapper_ = null;
-  }
-  if (Blockly.Flyout.onMouseMoveBlockWrapper_) {
-    Blockly.unbindEvent_(Blockly.Flyout.onMouseMoveBlockWrapper_);
-    Blockly.Flyout.onMouseMoveBlockWrapper_ = null;
-  }
-  if (Blockly.Flyout.onMouseMoveWrapper_) {
-    Blockly.unbindEvent_(Blockly.Flyout.onMouseMoveWrapper_);
-    Blockly.Flyout.onMouseMoveWrapper_ = null;
-  }
-  if (Blockly.Flyout.onMouseUpWrapper_) {
-    Blockly.unbindEvent_(Blockly.Flyout.onMouseUpWrapper_);
-    Blockly.Flyout.onMouseUpWrapper_ = null;
-  }
-  Blockly.Flyout.startDownEvent_ = null;
-  Blockly.Flyout.startBlock_ = null;
-  Blockly.Flyout.startFlyout_ = null;
-};
-
-/**
- * Compute height of flyout.  Position button under each block.
- * For RTL: Lay out the blocks right-aligned.
- * @param {!Array<!Blockly.Block>} blocks The blocks to reflow.
- */
-Blockly.Flyout.prototype.reflowHorizontal = function(blocks) {
-  this.workspace_.scale = this.targetWorkspace_.scale;
-  var flyoutHeight = 0;
-  for (var i = 0, block; block = blocks[i]; i++) {
-    flyoutHeight = Math.max(flyoutHeight, block.getHeightWidth().height);
-  }
-  flyoutHeight += this.MARGIN * 1.5;
-  flyoutHeight *= this.workspace_.scale;
-  flyoutHeight += Blockly.Scrollbar.scrollbarThickness;
-  if (this.height_ != flyoutHeight) {
-    for (var i = 0, block; block = blocks[i]; i++) {
-      var blockHW = block.getHeightWidth();
-      if (block.flyoutRect_) {
-        block.flyoutRect_.setAttribute('width', blockHW.width);
-        block.flyoutRect_.setAttribute('height', blockHW.height);
-        // Rectangles behind blocks with output tabs are shifted a bit.
-        var tab = block.outputConnection ? Blockly.BlockSvg.TAB_WIDTH : 0;
-        var blockXY = block.getRelativeToSurfaceXY();
-        block.flyoutRect_.setAttribute('y', blockXY.y);
-        block.flyoutRect_.setAttribute('x',
-            this.RTL ? blockXY.x - blockHW.width + tab : blockXY.x - tab);
-        // For hat blocks we want to shift them down by the hat height
-        // since the y coordinate is the corner, not the top of the hat.
-        var hatOffset =
-            block.startHat_ ? Blockly.BlockSvg.START_HAT_HEIGHT : 0;
-        if (hatOffset) {
-          block.moveBy(0, hatOffset);
-        }
-        block.flyoutRect_.setAttribute('y', blockXY.y);
-      }
-    }
-    // Record the height for .getMetrics_ and .position.
-    this.height_ = flyoutHeight;
-    Blockly.asyncSvgResize(this.workspace_);
-  }
-};
-
-/**
- * Compute width of flyout.  Position button under each block.
- * For RTL: Lay out the blocks right-aligned.
- * @param {!Array<!Blockly.Block>} blocks The blocks to reflow.
- */
-Blockly.Flyout.prototype.reflowVertical = function(blocks) {
-  this.workspace_.scale = this.targetWorkspace_.scale;
-  var flyoutWidth = 0;
-  for (var i = 0, block; block = blocks[i]; i++) {
-    var width = block.getHeightWidth().width;
-    if (block.outputConnection) {
-      width -= Blockly.BlockSvg.TAB_WIDTH;
-    }
-    flyoutWidth = Math.max(flyoutWidth, width);
-  }
-  flyoutWidth += this.MARGIN * 1.5 + Blockly.BlockSvg.TAB_WIDTH;
-  flyoutWidth *= this.workspace_.scale;
-  flyoutWidth += Blockly.Scrollbar.scrollbarThickness;
-  if (this.width_ != flyoutWidth) {
-    for (var i = 0, block; block = blocks[i]; i++) {
-      var blockHW = block.getHeightWidth();
-      if (this.RTL) {
-        // With the flyoutWidth known, right-align the blocks.
-        var oldX = block.getRelativeToSurfaceXY().x;
-        var dx = flyoutWidth - this.MARGIN;
-        dx /= this.workspace_.scale;
-        dx -= Blockly.BlockSvg.TAB_WIDTH;
-        block.moveBy(dx - oldX, 0);
-      }
-      if (block.flyoutRect_) {
-        block.flyoutRect_.setAttribute('width', blockHW.width);
-        block.flyoutRect_.setAttribute('height', blockHW.height);
-        // Blocks with output tabs are shifted a bit.
-        var tab = block.outputConnection ? Blockly.BlockSvg.TAB_WIDTH : 0;
-        var blockXY = block.getRelativeToSurfaceXY();
-        block.flyoutRect_.setAttribute('x',
-            this.RTL ? blockXY.x - blockHW.width + tab : blockXY.x - tab);
-        // For hat blocks we want to shift them down by the hat height
-        // since the y coordinate is the corner, not the top of the hat.
-        var hatOffset =
-            block.startHat_ ? Blockly.BlockSvg.START_HAT_HEIGHT : 0;
-        if (hatOffset) {
-          block.moveBy(0, hatOffset);
-        }
-        block.flyoutRect_.setAttribute('y', blockXY.y);
-      }
-    }
-    // Record the width for .getMetrics_ and .position.
-    this.width_ = flyoutWidth;
-    Blockly.asyncSvgResize(this.workspace_);
-  }
-};
-
-/**
- * Reflow blocks and their buttons.
- */
-Blockly.Flyout.prototype.reflow = function() {
-  var blocks = this.workspace_.getTopBlocks(false);
-  if (this.horizontalLayout_) {
-    this.reflowHorizontal(blocks);
-  } else {
-    this.reflowVertical(blocks);
-  }
-};
-
-/**
- * In the horizontal RTL case all of the blocks will be laid out to the left of
- * the origin, but we won't know how big the workspace is until the layout pass
- * is done.
- * Now that it's done, shunt all the blocks to be right of the origin.
- * @param {!Array<!Blockly.Block>} blocks The blocks to reposition.
- */
-Blockly.Flyout.prototype.offsetHorizontalRtlBlocks = function(blocks) {
-  if (this.horizontalLayout_ && this.RTL) {
-    // We don't know this workspace's view width yet.
-    this.position();
-    try {
-      var optionBox = this.workspace_.getCanvas().getBBox();
-    } catch (e) {
-      // Firefox has trouble with hidden elements (Bug 528969).
-      optionBox = {height: 0, y: 0, width: 0, x: 0};
-    }
-
-    var offset = Math.max(-optionBox.x + this.MARGIN,
-        this.width_ / this.workspace_.scale);
-
-    for (var i = 0, block; block = blocks[i]; i++) {
-      block.moveBy(offset, 0);
-      if (block.flyoutRect_) {
-        block.flyoutRect_.setAttribute('x',
-            offset + Number(block.flyoutRect_.getAttribute('x')));
-      }
-    }
-  }
+goog.date.DateTime.prototype.clone = function() {
+  var date = new goog.date.DateTime(this.date);
+  date.setFirstDayOfWeek(this.getFirstDayOfWeek());
+  date.setFirstWeekCutOffDay(this.getFirstWeekCutOffDay());
+  return date;
 };

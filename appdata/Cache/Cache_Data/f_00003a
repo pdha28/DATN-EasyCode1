@@ -1,837 +1,386 @@
-/**
- * @license Licensed under the Apache License, Version 2.0 (the "License"):
- *          http://www.apache.org/licenses/LICENSE-2.0
- *
- * @fileoverview General javaScript for Arduino app with material design.
- */
-'use strict';
-
-/** Create a namespace for the application. */
-var Ardublockly = Ardublockly || {};
-
-/** Initialize function for Ardublockly, to be called on page load. */
-Ardublockly.init = function() {
- // console.log();
-  Ardublockly.initLanguage();
-  // Inject Blockly into content_blocks and fetch additional blocks
-  var toolbox=Ardublockly.TOOLBOX_XML(Ardublockly.getUrlBoard ());
- if(Ardublockly.getCode()=="python") toolbox=Ardublockly.TOOLBOX_XML_PYTHON();
-  Ardublockly.injectBlockly(document.getElementById('content_blocks'),toolbox
-                            , '../blockly/');
-  Ardublockly.importExtraBlocks();
-
-  Ardublockly.designJsInit();
-  Ardublockly.initialiseIdeButtons();
-
-  Ardublockly.bindDesignEventListeners();
-  Ardublockly.bindActionFunctions();
-  Ardublockly.bindBlocklyEventListeners();
-
-  // Hackish way to check if not running locally
-  if (document.location.hostname != 'localhost') {
-    Ardublockly.openNotConnectedModal();
-    console.log('Offline app modal opened as non localhost host name found: ' +
-                document.location.hostname)
-  }
-};
-
-
-Ardublockly.getUrlBoard = function() {
-  var langKey = 'board';
-  var val = location.search.match(new RegExp('[?&]' + langKey + '=([^&]+)'));
-  var board = val ? decodeURIComponent(val[1].replace(/\+/g, '%20')) : '';
-   langKey = 'name';
-   val = location.search.match(new RegExp('[?&]' + langKey + '=([^&]+)'));
-   var name = val ? decodeURIComponent(val[1].replace(/\+/g, '%20')) : '';
-  return {board:board,name:name};
-};
-Ardublockly.getCode = function() {
-  var langKey = 'code';
-  var val = location.search.match(new RegExp('[?&]' + langKey + '=([^&]+)'));
-  var code = val ? decodeURIComponent(val[1].replace(/\+/g, '%20')) : '';
-  return code==""?'arduino':code;
-};
-Ardublockly.changeBoard = function(board) {
-  let lang=Ardublockly.getUrlLanguage ();
-  // Ardublockly.initLanguage();
-  // var toolbox=Ardublockly.TOOLBOX_XML(board);
-  // document.getElementById('content_blocks').innerHTML='';
-  // Ardublockly.injectBlockly(document.getElementById('content_blocks'),toolbox
-  //                           , '../blockly/');
-  // Ardublockly.saveSessionStorageBlocks();
-  // board=JSON.stringify( board);
-  // //var languageMenu = document.getElementById('language');
-  // //var newLang = encodeURIComponent(
-  // //    languageMenu.options[languageMenu.selectedIndex].value);
-
-  // var newBoard = encodeURIComponent(board);
-  // var search = window.location.search;
-  // if (search.length <= 1) {
-  //   search = '?board=' + newBoard;
-  // } 
-  // else if (search.match(/[?&]board=[^&]*/)) {
-  //   search = search.replace(/([?&]board=)[^&]*/, '$1' + newBoard);
-  // } 
-  // else {
-  //   search = search.replace(/\?/, '?board=' + newBoard + '&');
-  // }
-   window.location = window.location.protocol + '//' +
-       window.location.host + window.location.pathname + '?lang='+lang+'&board='+board.board+'&name='+board.name;
-};
-
-/** Binds functions to each of the buttons, nav links, and related. */
-Ardublockly.bindActionFunctions = function() {
-  // Navigation buttons
-  Ardublockly.bindClick_('button_load', Ardublockly.loadUserXmlFile);
-  Ardublockly.bindClick_('button_save', Ardublockly.saveXmlFile);
-  Ardublockly.bindClick_('button_delete', Ardublockly.discardAllBlocks);
-
-  // Side menu buttons, they also close the side menu
-  Ardublockly.bindClick_('menu_load', function() {
-    Ardublockly.loadUserXmlFile();
-    $('.button-collapse').sideNav('hide');
-  });
-  Ardublockly.bindClick_('menu_save', function() {
-    Ardublockly.saveXmlFile();
-    $('.button-collapse').sideNav('hide');
-  });
-  Ardublockly.bindClick_('menu_delete', function() {
-    Ardublockly.discardAllBlocks();
-    $('.button-collapse').sideNav('hide');
-  });
-  Ardublockly.bindClick_('menu_settings', function() {
-    Ardublockly.openSettings();
-    $('.button-collapse').sideNav('hide');
-  });
-  Ardublockly.bindClick_('menu_example_1', function() {
-    Ardublockly.loadServerXmlFile('../examples/blink.xml');
-    $('.button-collapse').sideNav('hide');
-  });
-  Ardublockly.bindClick_('menu_example_2', function() {
-    Ardublockly.loadServerXmlFile('../examples/serial_print_ascii.xml');
-    $('.button-collapse').sideNav('hide');
-  });
-  Ardublockly.bindClick_('menu_example_3', function() {
-    Ardublockly.loadServerXmlFile('../examples/serial_repeat_game.xml');
-    $('.button-collapse').sideNav('hide');
-  });
-  Ardublockly.bindClick_('menu_example_4', function() {
-    Ardublockly.loadServerXmlFile('../examples/servo_knob.xml');
-    $('.button-collapse').sideNav('hide');
-  });
-  Ardublockly.bindClick_('menu_example_5', function() {
-    Ardublockly.loadServerXmlFile('../examples/stepper_knob.xml');
-    $('.button-collapse').sideNav('hide');
-  });
-  Ardublockly.bindClick_('menu_example_6', function() {
-  Ardublockly.loadServerXmlFile('../examples/dieu_khien_giong_noi.xml');
-  $('.button-collapse').sideNav('hide');
-  });
-
-  // Floating buttons
-  Ardublockly.bindClick_('button_ide_large', function() {
-    Ardublockly.ideButtonLargeAction();
-  });
-  Ardublockly.bindClick_('button_ide_middle', function() {
-      Ardublockly.ideButtonMiddleAction();
-  });
-  Ardublockly.bindClick_('button_ide_left', function() {
-    Ardublockly.ideButtonLeftAction();
-  });
-  Ardublockly.bindClick_('button_load_xml', Ardublockly.XmlTextareaToBlocks);
-  Ardublockly.bindClick_('button_toggle_toolbox', Ardublockly.toogleToolbox);
-
-  // Settings modal input field listeners only if they can be edited
-  var settingsPathInputListeners = function(elId, setValFunc, setHtmlCallback) {
-    var el = document.getElementById(elId);
-    if (el.readOnly === false) {
-      // Event listener that send the data when the user presses 'Enter'
-      el.onkeypress = function(e) {
-        if (!e) e = window.event;
-        var keyCode = e.keyCode || e.which;
-        if (keyCode == '13') {
-          setValFunc(el.value, function(jsonObj) {
-            setHtmlCallback(ArdublocklyServer.jsonToHtmlTextInput(jsonObj));
-          });
-          return false;
-        }
-      };
-      // Event listener that send the data when moving out of the input field
-      el.onblur = function() {
-        setValFunc(el.value, function(jsonObj) {
-          setHtmlCallback(ArdublocklyServer.jsonToHtmlTextInput(jsonObj));
-        });
-      };
-    }
-  };
-  settingsPathInputListeners('settings_compiler_location',
-                             ArdublocklyServer.setCompilerLocation,
-                             Ardublockly.setCompilerLocationHtml);
-  settingsPathInputListeners('settings_sketch_location',
-                             ArdublocklyServer.setSketchLocationHtml,
-                             Ardublockly.setSketchLocationHtml);
-};
-
-/** Sets the Ardublockly server IDE setting to upload and sends the code. */
-Ardublockly.ideSendUpload = function() {
-  // Check if this is the currently selected option before edit sever setting
-  if (Ardublockly.ideButtonLargeAction !== Ardublockly.ideSendUpload) {
-    Ardublockly.showExtraIdeButtons(false);
-    Ardublockly.setIdeSettings(null, 'upload');
-  }
-  Ardublockly.shortMessage(Ardublockly.getLocalStr('uploadingSketch'));
-  Ardublockly.resetIdeOutputContent();
-  Ardublockly.sendCode();
-};
-
-/** Sets the Ardublockly server IDE setting to verify and sends the code. */
-Ardublockly.ideSendVerify = function() {
-  // Check if this is the currently selected option before edit sever setting
-  if (Ardublockly.ideButtonLargeAction !== Ardublockly.ideSendVerify) {
-    Ardublockly.showExtraIdeButtons(false);
-    Ardublockly.setIdeSettings(null, 'verify');
-  }
-  Ardublockly.shortMessage(Ardublockly.getLocalStr('verifyingSketch'));
-  Ardublockly.resetIdeOutputContent();
-  Ardublockly.sendCode();
-};
-
-/** Sets the Ardublockly server IDE setting to open and sends the code. */
-Ardublockly.ideSendOpen = function() {
-  // Check if this is the currently selected option before edit sever setting
-  if (Ardublockly.ideButtonLargeAction !== Ardublockly.ideSendOpen) {
-    Ardublockly.showExtraIdeButtons(false);
-    Ardublockly.setIdeSettings(null, 'open');
-  }
-  Ardublockly.shortMessage(Ardublockly.getLocalStr('openingSketch'));
-  Ardublockly.resetIdeOutputContent();
-  Ardublockly.sendCode();
-};
-
-/** Function bound to the left IDE button, to be changed based on settings. */
-Ardublockly.ideButtonLargeAction = Ardublockly.ideSendUpload;
-
-/** Function bound to the middle IDE button, to be changed based on settings. */
-Ardublockly.ideButtonMiddleAction = Ardublockly.ideSendVerify;
-
-/** Function bound to the large IDE button, to be changed based on settings. */
-Ardublockly.ideButtonLeftAction = Ardublockly.ideSendOpen;
-
-/** Initialises the IDE buttons with the default option from the server. */
-Ardublockly.initialiseIdeButtons = function() {
-  document.getElementById('button_ide_left').title =
-      Ardublockly.getLocalStr('openSketch');
-  document.getElementById('button_ide_middle').title =
-      Ardublockly.getLocalStr('verifySketch');
-  document.getElementById('button_ide_large').title =
-      Ardublockly.getLocalStr('uploadSketch');
-  ArdublocklyServer.requestIdeOptions(function(jsonObj) {
-    if (jsonObj != null) {
-      Ardublockly.changeIdeButtons(jsonObj.selected);
-    } // else Null: Ardublockly server is not running, do nothing
-  });
-};
-
-/**
- * Changes the IDE launch buttons based on the option indicated in the argument.
- * @param {!string} value One of the 3 possible values from the drop down select
- *     in the settings modal: 'upload', 'verify', or 'open'.
- */
-Ardublockly.changeIdeButtons = function(value) {
-  var largeButton = document.getElementById('button_ide_large');
-  var middleButton = document.getElementById('button_ide_middle');
-  var leftButton = document.getElementById('button_ide_left');
-  var openTitle = Ardublockly.getLocalStr('openSketch');
-  var verifyTitle = Ardublockly.getLocalStr('verifySketch');
-  var uploadTitle = Ardublockly.getLocalStr('uploadSketch');
-  if (value === 'upload') {
-    Ardublockly.changeIdeButtonsDesign(value);
-    Ardublockly.ideButtonLeftAction = Ardublockly.ideSendOpen;
-    Ardublockly.ideButtonMiddleAction = Ardublockly.ideSendVerify;
-    Ardublockly.ideButtonLargeAction = Ardublockly.ideSendUpload;
-    leftButton.title = openTitle;
-    middleButton.title = verifyTitle;
-    largeButton.title = uploadTitle;
-  } else if (value === 'verify') {
-    Ardublockly.changeIdeButtonsDesign(value);
-    Ardublockly.ideButtonLeftAction = Ardublockly.ideSendOpen;
-    Ardublockly.ideButtonMiddleAction = Ardublockly.ideSendUpload;
-    Ardublockly.ideButtonLargeAction = Ardublockly.ideSendVerify;
-    leftButton.title = openTitle;
-    middleButton.title = uploadTitle;
-    largeButton.title = verifyTitle;
-  } else if (value === 'open') {
-    Ardublockly.changeIdeButtonsDesign(value);
-    Ardublockly.ideButtonLeftAction = Ardublockly.ideSendVerify;
-    Ardublockly.ideButtonMiddleAction = Ardublockly.ideSendUpload;
-    Ardublockly.ideButtonLargeAction = Ardublockly.ideSendOpen;
-    leftButton.title = verifyTitle;
-    middleButton.title = uploadTitle;
-    largeButton.title = openTitle;
-  }
-};
-
-/**
- * Loads an XML file from the server and replaces the current blocks into the
- * Blockly workspace.
- * @param {!string} xmlFile Server location of the XML file to load.
- */
-Ardublockly.loadServerXmlFile = function(xmlFile) {
-  var loadXmlfileAccepted = function() {
-    // loadXmlBlockFile loads the file asynchronously and needs a callback
-    var loadXmlCb = function(sucess) {
-      if (sucess) {
-        Ardublockly.renderContent();
-      } else {
-        Ardublockly.alertMessage(
-            Ardublockly.getLocalStr('invalidXmlTitle'),
-            Ardublockly.getLocalStr('invalidXmlBody'),
-            false);
-      }
-    };
-    var connectionErrorCb = function() {
-      Ardublockly.openNotConnectedModal();
-    };
-    Ardublockly.loadXmlBlockFile(xmlFile, loadXmlCb, connectionErrorCb);
-  };
-
-  if (Ardublockly.isWorkspaceEmpty()) {
-    loadXmlfileAccepted();
-  } else {
-    Ardublockly.alertMessage(
-        Ardublockly.getLocalStr('loadNewBlocksTitle'),
-        Ardublockly.getLocalStr('loadNewBlocksBody'),
-        true, loadXmlfileAccepted);
-  }
-};
-
-/**
- * Loads an XML file from the users file system and adds the blocks into the
- * Blockly workspace.
- */
-Ardublockly.loadUserXmlFile = function() {
-  // Create File Reader event listener function
-  var parseInputXMLfile = function(e) {
-    var xmlFile = e.target.files[0];
-    var filename = xmlFile.name;
-    if(xmlFile.path.length>0) sessionStorage.setItem("path", xmlFile.path);
-    var extensionPosition = filename.lastIndexOf('.');
-    if (extensionPosition !== -1) {
-      filename = filename.substr(0, extensionPosition);
-    }
-
-    var reader = new FileReader();
-    reader.onload = function() {
-      var success = Ardublockly.replaceBlocksfromXml(reader.result);
-      if (success) {
-        Ardublockly.renderContent();
-        Ardublockly.sketchNameSet(filename);
-      } else {
-        Ardublockly.alertMessage(
-            Ardublockly.getLocalStr('invalidXmlTitle'),
-            Ardublockly.getLocalStr('invalidXmlBody'),
-            false);
-      }
-    };
-    reader.readAsText(xmlFile);
-  };
-
-  // Create once invisible browse button with event listener, and click it
-  var selectFile = document.getElementById('select_file');
-  if (selectFile === null) {
-    var selectFileDom = document.createElement('INPUT');
-    selectFileDom.type = 'file';
-    selectFileDom.id = 'select_file';
-
-    var selectFileWrapperDom = document.createElement('DIV');
-    selectFileWrapperDom.id = 'select_file_wrapper';
-    selectFileWrapperDom.style.display = 'none';
-    selectFileWrapperDom.appendChild(selectFileDom);
-
-    document.body.appendChild(selectFileWrapperDom);
-    selectFile = document.getElementById('select_file');
-    selectFile.addEventListener('change', parseInputXMLfile, false);
-  }
-  selectFile.click();
-};
-
-/**
- * Creates an XML file containing the blocks from the Blockly workspace and
- * prompts the users to save it into their local file system.
- */
-var pathSaveXmlFile;
-Ardublockly.saveXmlFile = function() {
-  Ardublockly.saveTextFileAs(
-      document.getElementById('sketch_name').value + '.xml',
-      Ardublockly.generateXml());
-};
-
-Ardublockly.continuossaveXmlFile=function(){
-  if(sessionStorage.getItem("path") && sessionStorage.getItem("path")!='null'){
- return JSON.stringify({content:Ardublockly.generateXml(),name:document.getElementById('sketch_name').value + '.xml',path:sessionStorage.getItem("path")});
-
-}
-else{
- return JSON.stringify({content:Ardublockly.generateXml(),name:document.getElementById('sketch_name').value + '.xml',path:null});
-}
-
-};
-
-/**
- * Creates an Arduino Sketch file containing the Arduino code generated from
- * the Blockly workspace and prompts the users to save it into their local file
- * system.
- */
-Ardublockly.saveSketchFile = function() {
-  Ardublockly.saveTextFileAs(
-      document.getElementById('sketch_name').value + '.ino',
-      Ardublockly.generateArduino());
-};
-
-/**
- * Creates an text file with the input content and files name, and prompts the
- * users to save it into their local file system.
- * @param {!string} fileName Name for the file to be saved.
- * @param {!string} content Text datd to be saved in to the file.
- */
-Ardublockly.saveTextFileAs = function(fileName, content) {
-  var blob = new Blob([content], {type: 'text/plain;charset=utf-8'});
-  saveAs(blob, fileName);
-};
-
-/**
- * Retrieves the Settings from ArdublocklyServer to populates the form data
- * and opens the Settings modal dialog.
- */
-Ardublockly.openSettings = function() {
-  ArdublocklyServer.requestCompilerLocation(function(jsonObj) {
-    Ardublockly.setCompilerLocationHtml(
-        ArdublocklyServer.jsonToHtmlTextInput(jsonObj));
-  });
-  ArdublocklyServer.requestSketchLocation(function(jsonObj) {
-    Ardublockly.setSketchLocationHtml(
-        ArdublocklyServer.jsonToHtmlTextInput(jsonObj));
-  });
-  ArdublocklyServer.requestArduinoBoards(function(jsonObj) {
-    Ardublockly.setArduinoBoardsHtml(
-        ArdublocklyServer.jsonToHtmlDropdown(jsonObj));
-  });
-  ArdublocklyServer.requestSerialPorts(function(jsonObj) {
-    Ardublockly.setSerialPortsHtml(
-        ArdublocklyServer.jsonToHtmlDropdown(jsonObj));
-  });
-  ArdublocklyServer.requestIdeOptions(function(jsonObj) {
-    Ardublockly.setIdeHtml(ArdublocklyServer.jsonToHtmlDropdown(jsonObj));
-  });
-  // Language menu only set on page load within Ardublockly.initLanguage()
-  Ardublockly.openSettingsModal();
-};
-
-
-Ardublockly.openSettingCom = function() {
-  ArdublocklyServer.requestSerialPorts(function(jsonObj) {
-    Ardublockly.setSerialPortsHtml(
-        ArdublocklyServer.jsonToHtmlDropdown(jsonObj));
-  });
-  // Language menu only set on page load within Ardublockly.initLanguage()
-  Ardublockly.openSettingComModal();
-};
-
-/**
- * Sets the compiler location form data retrieve from an updated element.
- * @param {element} jsonResponse JSON data coming back from the server.
- * @return {undefined} Might exit early if response is null.
- */
-Ardublockly.setCompilerLocationHtml = function(newEl) {
-  if (newEl === null) return Ardublockly.openNotConnectedModal();
-
-  var compLocIp = document.getElementById('settings_compiler_location');
-  if (compLocIp != null) {
-    compLocIp.value = newEl.value || compLocIp.value ||
-        'Please enter the location of the Arduino IDE executable';
-    compLocIp.style.cssText = newEl.style.cssText;
-  }
-};
-
-/**
- * Sets the sketch location form data retrieve from an updated element.
- * @param {element} jsonResponse JSON data coming back from the server.
- * @return {undefined} Might exit early if response is null.
- */
-Ardublockly.setSketchLocationHtml = function(newEl) {
-  if (newEl === null) return Ardublockly.openNotConnectedModal();
-
-  var sketchLocIp = document.getElementById('settings_sketch_location');
-  if (sketchLocIp != null) {
-    sketchLocIp.value = newEl.value || sketchLocIp.value ||
-        'Please enter a folder to store the Arduino Sketch';
-    sketchLocIp.style.cssText = newEl.style.cssText;
-  }
-};
-
-/**
- * Replaces the Arduino Boards form data with a new HTMl element.
- * Ensures there is a change listener to call 'setSerialPort' function
- * @param {element} jsonObj JSON data coming back from the server.
- * @return {undefined} Might exit early if response is null.
- */
-Ardublockly.setArduinoBoardsHtml = function(newEl) {
-  if (newEl === null) return Ardublockly.openNotConnectedModal();
-
-  var boardDropdown = document.getElementById('board');
-  if (boardDropdown !== null) {
-    // Restarting the select elements built by materialize
-    $('select').material_select('destroy');
-    newEl.name = 'settings_board';
-    newEl.id = 'board';
-    newEl.onchange = Ardublockly.setBoard;
-    boardDropdown.parentNode.replaceChild(newEl, boardDropdown);
-    // Refresh the materialize select menus
-    $('select').material_select();
-  }
-};
-
-/**
- * Sets the Arduino Board type with the selected user input from the drop down.
- */
-Ardublockly.setBoard = function(board) {
-  // var el = document.getElementById('board');
-  // var boardValue = el.options[el.selectedIndex].value;
-  var boardValue=board;
-  ArdublocklyServer.setArduinoBoard(boardValue, function(jsonObj) {
-    var newEl = ArdublocklyServer.jsonToHtmlDropdown(jsonObj);
-    Ardublockly.setArduinoBoardsHtml(newEl);
-  });
-  Ardublockly.changeBlocklyArduinoBoard(
-      boardValue.toLowerCase().replace(/ /g, '_'));
-};
-
-/**
- * Replaces the Serial Port form data with a new HTMl element.
- * Ensures there is a change listener to call 'setSerialPort' function
- * @param {element} jsonResponse JSON data coming back from the server.
- * @return {undefined} Might exit early if response is null.
- */
-Ardublockly.setSerialPortsHtml = function(newEl) {
-  if (newEl === null) return Ardublockly.openNotConnectedModal();
-
-  var serialDropdown = document.getElementById('serial_port');
-  if (serialDropdown !== null) {
-    // Restarting the select elements built by materialize
-    $('select').material_select('destroy');
-    newEl.name = 'settings_serial';
-    newEl.id = 'serial_port';
-    newEl.onchange = Ardublockly.setSerial;
-    serialDropdown.parentNode.replaceChild(newEl, serialDropdown);
-    // Refresh the materialize select menus
-    $('select').material_select();
-  }
-};
-
-/** Sets the Serial Port with the selected user input from the drop down. */
-Ardublockly.setSerial = function() {
-  var el = document.getElementById('serial_port');
-  var serialValue = el.options[el.selectedIndex].value;
-  ArdublocklyServer.setSerialPort(serialValue, function(jsonObj) {
-    var newEl = ArdublocklyServer.jsonToHtmlDropdown(jsonObj);
-    Ardublockly.setSerialPortsHtml(newEl);
-  });
-};
-
-/**
- * Replaces IDE options form data with a new HTMl element.
- * Ensures there is a change listener to call 'setIdeSettings' function
- * @param {element} jsonResponse JSON data coming back from the server.
- * @return {undefined} Might exit early if response is null.
- */
-Ardublockly.setIdeHtml = function(newEl) {
-  if (newEl === null) return Ardublockly.openNotConnectedModal();
-
-  var ideDropdown = document.getElementById('ide_settings');
-  if (ideDropdown !== null) {
-    // Restarting the select elements built by materialize
-    $('select').material_select('destroy');
-    newEl.name = 'settings_ide';
-    newEl.id = 'ide_settings';
-    newEl.onchange = Ardublockly.setIdeSettings;
-    ideDropdown.parentNode.replaceChild(newEl, ideDropdown);
-    // Refresh the materialize select menus
-    $('select').material_select();
-  }
-};
-
-/**
- * Sets the IDE settings data with the selected user input from the drop down.
- * @param {Event} e Event that triggered this function call. Required for link
- *     it to the listeners, but not used.
- * @param {string} preset A value to set the IDE settings bypassing the drop
- *     down selected value. Valid data: 'upload', 'verify', or 'open'.
- */
-Ardublockly.setIdeSettings = function(e, preset) {
-  if (preset !== undefined) {
-    var ideValue = preset;
-  } else {
-    var el = document.getElementById('ide_settings');
-    var ideValue = el.options[el.selectedIndex].value;
-  }
-  Ardublockly.changeIdeButtons(ideValue);
-  ArdublocklyServer.setIdeOptions(ideValue, function(jsonObj) {
-    Ardublockly.setIdeHtml(ArdublocklyServer.jsonToHtmlDropdown(jsonObj));
-  });
-};
-
-/**
- * Send the Arduino Code to the ArdublocklyServer to process.
- * Shows a loader around the button, blocking it (unblocked upon received
- * message from server).
- */
-Ardublockly.sendCode = function() {
-  Ardublockly.largeIdeButtonSpinner(true);
-
-  /**
-   * Receives the IDE data back to be displayed and stops spinner.
-   * @param {element} jsonResponse JSON data coming back from the server.
-   * @return {undefined} Might exit early if response is null.
-   */
-  var sendCodeReturn = function(jsonObj) {
-    Ardublockly.largeIdeButtonSpinner(false);
-    if (jsonObj === null) return Ardublockly.openNotConnectedModal();
-    var dataBack = ArdublocklyServer.jsonToIdeModal(jsonObj);
-    Ardublockly.arduinoIdeOutput(dataBack);
-  };
-
-  
-  ArdublocklyServer.sendSketchToServer(
-      Ardublockly.generateArduino(), sendCodeReturn);
-};
-
-/** Populate the workspace blocks with the XML written in the XML text area. */
-Ardublockly.XmlTextareaToBlocks = function() {
-  var success = Ardublockly.replaceBlocksfromXml(
-      document.getElementById('content_xml').value);
-  if (success) {
-    Ardublockly.renderContent();
-  } else {
-    Ardublockly.alertMessage(
-        Ardublockly.getLocalStr('invalidXmlTitle'),
-        Ardublockly.getLocalStr('invalidXmlBody'),
-        false);
-  }
-};
-
-/**
- * Private variable to save the previous version of the Arduino Code.
- * @type {!String}
- * @private
- */
-Ardublockly.PREV_ARDUINO_CODE_ = 'void setup() {\n\n}\n\n\nvoid loop() {\n\n}';
-
-/**
- * Populate the Arduino Code and Blocks XML panels with content generated from
- * the blocks.
- */
-Ardublockly.renderContent = function() {
-  // Render Arduino Code with latest change highlight and syntax highlighting
-  var arduinoCode = Ardublockly.generateArduino();
-  if (arduinoCode !== Ardublockly.PREV_ARDUINO_CODE_) {
-    var diff = JsDiff.diffWords(Ardublockly.PREV_ARDUINO_CODE_, arduinoCode);
-    var resultStringArray = [];
-    for (var i = 0; i < diff.length; i++) {
-      if (!diff[i].removed) {
-        var escapedCode = diff[i].value.replace(/</g, '&lt;')
-                                       .replace(/>/g, '&gt;');
-        if (diff[i].added) {
-          resultStringArray.push(
-              '<span class="code_highlight_new">' + escapedCode + '</span>');
-        } else {
-          resultStringArray.push(escapedCode);
-        }
-      }
-    }
-    document.getElementById('content_arduino').innerHTML =
-        prettyPrintOne(resultStringArray.join(''), 'cpp', false);
-    Ardublockly.PREV_ARDUINO_CODE_ = arduinoCode;
-  }
-
-  // Generate plain XML into element
-  document.getElementById('content_xml').value = Ardublockly.generateXml();
-};
-
-/**
- * Private variable to indicate if the toolbox is meant to be shown.
- * @type {!boolean}
- * @private
- */
-Ardublockly.TOOLBAR_SHOWING_ = true;
-
-/**
- * Toggles the blockly toolbox and the Ardublockly toolbox button On and Off.
- * Uses namespace member variable TOOLBAR_SHOWING_ to toggle state.
- */
-Ardublockly.toogleToolbox = function() {
-  if (Ardublockly.TOOLBAR_SHOWING_) {
-    Ardublockly.blocklyCloseToolbox();
-    Ardublockly.displayToolbox(false);
-  } else {
-    Ardublockly.displayToolbox(true);
-  }
-  Ardublockly.TOOLBAR_SHOWING_ = !Ardublockly.TOOLBAR_SHOWING_;
-};
-
-/** @return {boolean} Indicates if the toolbox is currently visible. */
-Ardublockly.isToolboxVisible = function() {
-  return Ardublockly.TOOLBAR_SHOWING_;
-};
-
-/**
- * Lazy loads the additional block JS files from the ./block directory.
- * Initialises any additional Ardublockly extensions.
- * TODO: Loads the examples into the examples modal
- */
-Ardublockly.importExtraBlocks = function() {
-  /**
-   * Parses the JSON data to find the block and languages js files.
-   * @param {jsonDataObj} jsonDataObj JSON in JavaScript object format, null
-   *     indicates an error occurred.
-   * @return {undefined} Might exit early if response is null.
-   */
-  var jsonDataCb = function(jsonDataObj) {
-    if (jsonDataObj === null) return Ardublockly.openNotConnectedModal();
-    if (jsonDataObj.categories !== undefined) {
-      var head = document.getElementsByTagName('head')[0];
-      for (var catDir in jsonDataObj.categories) {
-        var blocksJsLoad = document.createElement('script');
-        blocksJsLoad.src = '../blocks/' + catDir + '/blocks.js';
-        head.appendChild(blocksJsLoad);
-
-        var blocksLangJsLoad = document.createElement('script');
-        blocksLangJsLoad.src = '../blocks/' + catDir + '/msg/' + 'messages.js';
-            //'lang/' + Ardublockly.LANG + '.js';
-        head.appendChild(blocksLangJsLoad);
-
-        var blocksGeneratorJsLoad = document.createElement('script');
-        blocksGeneratorJsLoad.src = '../blocks/' + catDir +
-            '/generator_arduino.js';
-        head.appendChild(blocksGeneratorJsLoad);
-
-        // Check if the blocks add additional Ardublockly functionality
-        var extensions = jsonDataObj.categories[catDir].extensions;
-        if (extensions) {
-          for (var i = 0; i < extensions.length; i++) {
-            var blockExtensionJsLoad = document.createElement('script');
-            blockExtensionJsLoad.src = '../blocks/' + catDir + '/extensions.js';
-            head.appendChild(blockExtensionJsLoad);
-            // Add function to scheduler as lazy loading has to complete first
-            setTimeout(function(category, extension) {
-              var extensionNamespaces = extension.split('.');
-              var extensionCall = window;
-              var invalidFunc = false;
-              for (var j = 0; j < extensionNamespaces.length; j++) {
-                extensionCall = extensionCall[extensionNamespaces[j]];
-                if (extensionCall === undefined) {
-                  invalidFunc = true;
-                  break;
-                }
-              }
-              if (typeof extensionCall != 'function') {
-                invalidFunc = true;
-              }
-              if (invalidFunc) {
-                throw 'Blocks ' + category.categoryName + ' extension "' +
-                      extension + '" is not a valid function.';
-              } else {
-                extensionCall();
-              }
-            }, 800, jsonDataObj.categories[catDir], extensions[i]);
-          }
-        }
-      }
-    }
-  };
-  // Reads the JSON data containing all block categories from ./blocks directory
-  // TODO: Now reading a local file, to be replaced by server generated JSON
-  ArdublocklyServer.getJson('../blocks/blocks_data.json', jsonDataCb);
-};
-
-/** Opens a modal with a list of categories to add or remove to the toolbox */
-Ardublockly.openExtraCategoriesSelect = function() {
-  /**
-   * Parses the JSON data from the server into a list of additional categories.
-   * @param {jsonDataObj} jsonDataObj JSON in JavaScript object format, null
-   *     indicates an error occurred.
-   * @return {undefined} Might exit early if response is null.
-   */
-  var jsonDataCb = function(jsonDataObj) {
-    if (jsonDataObj === null) return Ardublockly.openNotConnectedModal();
-    var htmlContent = document.createElement('div');
-    if (jsonDataObj.categories !== undefined) {
-      for (var catDir in jsonDataObj.categories) {
-        // Function required to maintain each loop variable scope separated
-        (function(cat) {
-          var clickBind = function(tickValue) {
-            if (tickValue) {
-              var catDom = (new DOMParser()).parseFromString(
-                  cat.toolbox.join(''), 'text/xml').firstChild;
-              Ardublockly.addToolboxCategory(cat.toolboxName, catDom);
-            } else {
-              Ardublockly.removeToolboxCategory(cat.toolboxName);
-            }
-          };
-          htmlContent.appendChild(Ardublockly.createExtraBlocksCatHtml(
-              cat.categoryName, cat.description, clickBind));
-        })(jsonDataObj.categories[catDir]);
-      }
-    }
-    Ardublockly.openAdditionalBlocksModal(htmlContent);
-  };
-  // Reads the JSON data containing all block categories from ./blocks directory
-  // TODO: Now reading a local file, to be replaced by server generated JSON
-  ArdublocklyServer.getJson('../blocks/blocks_data.json', jsonDataCb);
-};
-
-/** Informs the user that the selected function is not yet implemented. */
-Ardublockly.functionNotImplemented = function() {
-  Ardublockly.shortMessage('Function not yet implemented');
-};
-
-/**
- * Interface to display messages with a possible action.
- * @param {!string} title HTML to include in title.
- * @param {!element} body HTML to include in body.
- * @param {boolean=} confirm Indicates if the user is shown a single option (ok)
- *     or an option to cancel, with an action applied to the "ok".
- * @param {string=|function=} callback If confirm option is selected this would
- *     be the function called when clicked 'OK'.
- */
-Ardublockly.alertMessage = function(title, body, confirm, callback) {
-  Ardublockly.materialAlert(title, body, confirm, callback);
-};
-
-/**
- * Interface to displays a short message, which disappears after a time out.
- * @param {!string} message Text to be temporarily displayed.
- */
-Ardublockly.shortMessage = function(message) {
-  Ardublockly.MaterialToast(message);
-};
-
-/**
- * Bind a function to a button's click event.
- * On touch enabled browsers, ontouchend is treated as equivalent to onclick.
- * @param {!Element|string} el Button element or ID thereof.
- * @param {!function} func Event handler to bind.
- * @private
- */
-Ardublockly.bindClick_ = function(el, func) {
-  if (typeof el == 'string') {
-    el = document.getElementById(el);
-  }
-  // Need to ensure both, touch and click, events don't fire for the same thing
-  var propagateOnce = function(e) {
-    e.stopPropagation();
-    e.preventDefault();
-    func();
-  };
-  el.addEventListener('ontouchend', propagateOnce);
-  el.addEventListener('click', propagateOnce);
-};
+<!DOCTYPE HTML>
+<html>
+<head>
+  <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#00878F">
+  <link rel="icon" href="img/ardublockly_splash.png">
+  <title class="translatable_title">EASYCODE</title>
+
+  <!-- Materialize, Prettify, and Ardublockly CSS -->
+  <link rel="stylesheet" href="materialize/materialize.css" media="screen,projection">
+  <link rel="stylesheet" href="prettify/arduino.css">
+  <link rel="stylesheet" href="ardublockly.css" media="screen,projection">
+  <link rel="stylesheet" href="font-awesome-4.7.0/css/font-awesome.min.css" media="screen,projection" >
+
+  <!-- Ardublockly - These three files contain the compress version -->
+  <!-- <script src="../blockly/blockly_compressed.js"></script>
+  <script src="../blockly/blocks_compressed.js"></script>
+  <script src="../blockly/arduino_compressed.js"></script> -->
+  <!-- To use the uncompressed version comment out the above and comment in the ones below -->
+  <script src="../blockly/blockly_uncompressed.js"></script>
+  <script src="../blockly/blocks/logic.js"></script>
+  <script src="../blockly/blocks/loops.js"></script>
+  <script src="../blockly/blocks/math.js"></script>
+  <script src="../blockly/blocks/text.js"></script>
+  <script src="../blockly/blocks/lists.js"></script>
+  <script src="../blockly/blocks/colour.js"></script>
+  <script src="../blockly/blocks/variables.js"></script>
+  <script src="../blockly/blocks/procedures.js"></script>
+  <script src="../blockly/blocks/arduino/io.js"></script>
+  <script src="../blockly/blocks/arduino/map.js"></script>
+  <script src="../blockly/blocks/arduino/procedures.js"></script>
+  <script src="../blockly/blocks/arduino/serial.js"></script>
+  <script src="../blockly/blocks/arduino/servo.js"></script>
+  <script src="../blockly/blocks/arduino/spi.js"></script>
+  <script src="../blockly/blocks/arduino/stepper.js"></script>
+  <script src="../blockly/blocks/arduino/time.js"></script>
+  <script src="../blockly/blocks/arduino/tone.js"></script>
+  <script src="../blockly/blocks/arduino/variables.js"></script>
+  <script src="../blockly/generators/arduino.js"></script>
+  <script src="../blockly/generators/arduino/boards.js"></script>
+  <script src="../blockly/generators/arduino/io.js"></script>
+  <script src="../blockly/generators/arduino/lists.js"></script>
+  <script src="../blockly/generators/arduino/logic.js"></script>
+  <script src="../blockly/generators/arduino/loops.js"></script>
+  <script src="../blockly/generators/arduino/map.js"></script>
+  <script src="../blockly/generators/arduino/math.js"></script>
+  <script src="../blockly/generators/arduino/procedures.js"></script>
+  <script src="../blockly/generators/arduino/serial.js"></script>
+  <script src="../blockly/generators/arduino/servo.js"></script>
+  <script src="../blockly/generators/arduino/spi.js"></script>
+  <script src="../blockly/generators/arduino/stepper.js"></script>
+  <script src="../blockly/generators/arduino/text.js"></script>
+  <script src="../blockly/generators/arduino/time.js"></script>
+  <script src="../blockly/generators/arduino/tone.js"></script>
+  <script src="../blockly/generators/arduino/variables.js"></script>
+  <script type="text/javascript" src="../blockly/generators/arduino/grove.js"></script>
+  <script type="text/javascript" src="../blockly/blocks/grove/grove.js"></script>
+  <script type="text/javascript" src="../blockly/generators/arduino/arduino_robot.js"></script>
+  <script type="text/javascript" src="../blockly/blocks/grove/arduino_robot.js"></script>
+  <script type="text/javascript" src="../blockly/generators/arduino/IoT.js"></script>
+  <script type="text/javascript" src="../blockly/blocks/grove/IoT.js"></script>
+  <script type="text/javascript" src="../blockly/generators/arduino/Mbot.js"></script>
+  <script type="text/javascript" src="../blockly/blocks/grove/Mbot.js"></script>
+  <script type="text/javascript" src="../blockly/blocks/Python/Python_robot.js"></script>
+  <script type="text/javascript" src="../blockly/blocks/Python/serial.js"></script>
+
+  <script type="text/javascript" src="../blockly/generators/python.js"></script>
+  <script type="text/javascript" src="../blockly/generators/python/colour.js"></script>
+  <script type="text/javascript" src="../blockly/generators/python/lists.js"></script>
+  <script type="text/javascript" src="../blockly/generators/python/logic.js"></script>
+  <script type="text/javascript" src="../blockly/generators/python/loops.js"></script>
+  <script type="text/javascript" src="../blockly/generators/python/math.js"></script>
+  <script type="text/javascript" src="../blockly/generators/python/procedures.js"></script>
+  <script type="text/javascript" src="../blockly/generators/python/text.js"></script>
+  <script type="text/javascript" src="../blockly/generators/python/variables.js"></script>
+  <script type="text/javascript" src="../blockly/generators/python/Python_robot.js"></script>
+  <script type="text/javascript" src="../blockly/generators/python/time.js"></script>
+  <script type="text/javascript" src="../blockly/generators/python/serial.js"></script>
+  <!-- Default language js files, user selection appended to head on load -->
+  <script src="../blockly/msg/js/en.js"></script>
+  <script src="msg/en.js"></script>
+</head>
+
+<body>
+  <!-- Horizontal Navigation bar -->
+  <nav class="nav-fixed arduino_teal">
+    <div class="nav-wrapper container">
+      <a class="show-on-large button-collapse" href="#" data-activates="slide-out" id="button-collapse"><i class="mdi-navigation-menu"></i></a>
+      <a id="logo-container" class="brand-logo">
+        <img src="img/logo_1.png" height="40px" >
+        <!-- Sketch name editable text field -->
+        <span class="sketch_name_wrapper">
+          <i class="mdi-image-edit sketch_name_icon"></i>
+          <input id="sketch_name" class="sketch_name" type="text">
+        </span>
+      </a>
+      <a class="name_top text_color_yellow" >Learn to Code - Code to Learn</a>
+      <!-- Horizontal Navbar links only shown on large resolutions -->
+      <ul id="nav-mobile" class="right hide-on-med-and-down">
+        <li><a href="#" id="button_load"><span class="translatable_open">Open</span><i class="mdi-file-file-upload left"></i></a></li>
+        <li><a href="#" id="button_save"><span class="translatable_save">Save</span><i class="mdi-file-file-download left"></i></a></li>
+        <li><a href="#" id="button_delete"><span class="translatable_deleteAll">Delete All</span><i class="mdi-action-delete left"></i></a></li>
+      </ul>
+    </div>
+  </nav>
+
+  <!-- Sidebar navigation -->
+  <ul id="slide-out" class="side-nav">
+    <li class="logo"><img src="img/sidenav_header.png" alt="Ardublockly block image"></li>
+    <li class="no-padding">
+      <ul>
+        <li id="menu_load"><a href="#"><span class="translatable_open">Open</span><i class="mdi-file-file-upload left"></i></a></li>
+        <li id="menu_save"><a href="#"><span class="translatable_save">Save</span><i class="mdi-file-file-download left"></i></a></li>
+        <li id="menu_delete"><a href="#"><span class="translatable_deleteAll">Delete All</span><i class="mdi-action-delete left"></i></a></li>
+        <li id="menu_settings"><a href="#"><span class="translatable_settings">Settings</span><i class="mdi-action-settings left"></i></a></li>
+        <li id="menu_bug"><a href="https://github.com/carlosperate/ardublockly/wiki" target="_blank"><span class="translatable_documentation">Documentation</span><i class="mdi-action-help left"></i></a></li>
+        <li id="menu_bug"><a href="http://github.com/carlosperate/ardublockly/issues" target="_blank"><span class="translatable_reportBug">Report Bug</span><i class="mdi-action-bug-report left"></i></a></li>
+      </ul>
+    <li class="no-padding">
+      <ul class="collapsible collapsible-accordion">
+        <li>
+          <div class="collapsible-header"><span class="translatable_examples">Examples</span><i class="mdi-navigation-arrow-drop-down"></i></div>
+          <div class="collapsible-body">
+            <ul>
+              <li id="menu_example_1"><a href="#!">Blink</a></li>
+              <li id="menu_example_2"><a href="#!">Serial print</a></li>
+              <li id="menu_example_3"><a href="#!">Serial repeat game</a></li>
+              <li id="menu_example_4"><a href="#!">Servo knob</a></li>
+              <li id="menu_example_5"><a href="#!">dieu_khien_giong_noi</a></li>
+              <li id="menu_example_6"><a href="#!">dieu_khien_giong_noi</a></li>
+            </ul>
+          </div>
+        </li>
+      </ul>
+    </li>
+    <li class="no-padding side-menu-end">&nbsp;</li>
+  </ul>
+
+  <!-- Content -->
+  <div class="container" id="main">
+    <div class="row">
+      <div class="col s12 m12 l8" style="position:relative" id="block_content">
+        <!-- Toolbox visibility button -->
+        <a id="button_toggle_toolbox" class="waves-effect waves-light btn-flat button_toggle_toolbox_off" style="display: none"><i id="button_toggle_toolbox_icon" class="mdi-action-visibility-off"></i></a>
+        <!-- Arduino IDE action buttons -->
+        <div id="ide_buttons_wrapper">
+          <a id="button_ide_left" class="waves-effect waves-light waves-circle btn-floating z-depth-1-half arduino_yellow"><i id="button_ide_left_icon" class="mdi-action-open-in-browser"></i></a>
+          <a id="button_ide_middle" class="waves-effect waves-light waves-circle btn-floating z-depth-1-half arduino_teal"><i id="button_ide_middle_icon" class="mdi-navigation-check"></i></a>
+          <a id="button_ide_large" class="waves-effect waves-light waves-circle btn-floating z-depth-1-half arduino_orange"><i id="button_ide_large_icon" class="mdi-av-play-arrow"></i></a>
+          <div id="button_ide_large_spinner" class="preloader-wrapper active ide_loader" style="display:none">
+            <div class="spinner-layer spinner-orange">
+              <div class="circle-clipper left">
+                <div class="circle"></div>
+              </div><div class="gap-patch">
+                <div class="circle"></div>
+              </div><div class="circle-clipper right">
+                <div class="circle"></div>
+              </div>
+            </div>
+            <div class="spinner-layer spinner-dark-teal">
+              <div class="circle-clipper left">
+                <div class="circle"></div>
+              </div><div class="gap-patch">
+                <div class="circle"></div>
+              </div><div class="circle-clipper right">
+                <div class="circle"></div>
+              </div>
+            </div>
+            <div class="spinner-layer spinner-yellow">
+              <div class="circle-clipper left">
+                <div class="circle"></div>
+              </div><div class="gap-patch">
+                <div class="circle"></div>
+              </div><div class="circle-clipper right">
+                <div class="circle"></div>
+              </div>
+            </div>
+            <div class="spinner-layer spinner-light-teal">
+              <div class="circle-clipper left">
+                <div class="circle"></div>
+              </div><div class="gap-patch">
+                <div class="circle"></div>
+              </div><div class="circle-clipper right">
+                <div class="circle"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <!-- Blockly Panel -->
+        <div class="card-panel white" style="padding: 0">
+          <div id="blocks_panel" class="content blocks_panel_large">
+            <div id="content_blocks" class="content z-depth-1"></div>
+          </div>
+        </div>
+      </div>
+      <div class="col s12 m12 l4" id="arduino_content">
+        <ul class="collapsible z-depth-1" data-collapsible="accordion" style="z-index: 1;position:relative;">
+          <li>
+            <div class="collapsible-header active">
+              <span class="collapsible_logo">{ }</span>
+              <span class="translatable_arduinoSourceCode">Arduino Source Code</span>
+            </div>
+            <div class="collapsible-body">
+              <pre id="content_arduino" class="content content_height_transition content_arduino_large"></pre>
+            </div>
+          </li>
+          <li style="display:none">
+            <div class="collapsible-header" id="xml_collapsible_header" >
+              <span class="collapsible_logo">&#60; &#62;</span>
+              <span class="translatable_blocksXml">Blocks XML</span>
+            </div>
+            <div class="collapsible-body" style="position:relative" id="xml_collapsible_body">
+              <a class="btn-floating btn-large waves-effect waves-light arduino_teal z-depth-1-half" id="button_load_xml"><i class="mdi-action-extension"></i></a>
+              <textarea id="content_xml" class="content content_height_transition content_xml_large" wrap="soft"></textarea>
+            </div>
+          </li>
+        </ul>
+        <div class="robo_image" >
+          <a>
+          <img src="./img/AppIcon.svg" >
+          </a>
+          <a>www.kidscode.edu.vn</a>
+        </div>        
+      </div>
+    </div>
+  </div>
+
+  <!-- IDE Output content -->
+  <div class="ide_output_wrapper">
+    <ul class="collapsible ide_output_collapsible" data-collapsible="expandable">
+      <li>
+        <div id="ide_output_collapsible_header" class="collapsible-header ide_output_header_normal">
+          <i class="mdi-action-swap-vert Medium" style="font-size: 2.2rem;"></i>
+          <span class="translatable_arduinoOpMainTitle">Arduino IDE output</span>
+        </div>
+        <div class="collapsible-body">
+          <div id="content_ide_output" class="content"></div>
+        </div>
+      </li>
+    </ul>
+  </div>
+  <div id="ide_output_spacer"></div>
+
+  <!-- Settings: Displayed as a Materialize Modal -->
+  <div id="settings_dialog" class="modal modal-fixed-footer">
+    <div class="modal-content" style="height:auto">
+      <h4><span class="translatable_settings">Settings</span></h4>
+      <div class="modal_section">
+        <label><span class="translatable_compilerLocation">Compiler Location</span>:</label>
+        <input type="text" id="settings_compiler_location">
+      </div>
+      <div class="modal_section">
+        <label><span class="translatable_sketchFolder">Sketch Folder</span>:</label>
+        <input type="text" id="settings_sketch_location">
+      </div>
+      <div class="modal_section" style="display:none">
+        <label><span class="translatable_arduinoBoard">Arduino Board</span>:</label>
+        <select name="settings_board" id="board">
+          <option value="uno" class="translatable_arduinoBoardDefault">Arduino Board unknown</option>
+        </select>
+      </div>
+      <!-- <div class="modal_section" >
+        <label><span class="translatable_comPort">COM Port<span>:</label>
+        <select name="settings_serial" id="serial_port">
+          <option value="COMX" class="translatable_comPortDefault">COM Port unknown</option>
+        </select>
+      </div> -->
+      <div class="modal_section" style="display:none">
+        <label><span class="translatable_defaultIdeButton">Default IDE button</span>:</label>
+        <select name="settings_ide" id="ide_settings">
+          <option value="verify" class="translatable_defaultIdeButtonDefault">IDE options unknown</option>
+        </select>
+      </div>
+      <div class="modal_section" style="display:none">
+        <label><span class="translatable_language">Language</span>:</label>
+        <select name="settings_language" id="language"></select>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <a href="#" class="waves-effect btn-flat modal-close"><span class="translatable_return">Return</span></a>
+    </div>
+  </div>
+
+    <!-- Settings: Displayed as a Materialize Modal -->
+    <div id="setting_com" class="modal modal-fixed-footer">
+      <div class="modal-content">
+        <h4><span class="translatable_settings">Settings</span></h4>
+        <div class="modal_section" >
+          <label><span class="translatable_comPort">COM Port<span>:</label>
+          <select name="settings_serial" id="serial_port">
+            <option value="COMX" class="translatable_comPortDefault">COM Port unknown</option>
+            
+          </select>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <a href="#" class="waves-effect btn-flat modal-close"><span class="translatable_return">Return</span></a>
+      </div>
+    </div>
+
+  <!-- Select Additional Blocks menu -->
+  <div id="blocks_menu" class="modal modal-fixed-footer">
+    <div class="modal-content">
+      <div>
+        <h4><span class="translatable_addBlocksTitle">Additional Blocks</span></h4>
+      </div>
+      <div id="blocks_menu_body"></div>
+    </div>
+    <div class="modal-footer">
+      <a href="#" class="waves-effect btn-flat modal-close"><span class="translatable_return">Return</span></a>
+    </div>
+  </div>
+
+  <!-- General Alert: Content is loaded using JavaScript to display alerts -->
+  <div id="gen_alert" class="modal modal_small modal-fixed-footer">
+    <div class="modal-content">
+      <h5 id="gen_alert_title">Empty Alert</h4>
+      <p><span id="gen_alert_body">Empty alert text</span></p>
+    </div>
+    <div class="modal-footer">
+      <a id="gen_alert_ok_link" href="#" class="waves-effect btn-flat modal-close"><span class="translatable_okay">Okay</span></a>
+      <a id="gen_alert_cancel_link" href="#" class="waves-effect btn-flat modal-close"><span class="translatable_cancel">Cancel</span></a>
+    </div>
+  </div>
+
+  <!-- Prompt: Content is loaded using JavaScript to display input prompt -->
+  <div id="gen_prompt" class="modal modal_small modal-fixed-footer">
+    <div class="modal-content">
+      <p><span id="gen_prompt_message">Prompt message</span></p>
+      <p><input id="gen_prompt_input" value="test" /></p>
+    </div>
+    <div class="modal-footer">
+      <a id="gen_prompt_ok_link" href="#" class="waves-effect btn-flat modal-close"><span class="translatable_okay">Okay</span></a>
+      <a id="gen_prompt_cancel_link" href="#" class="waves-effect btn-flat modal-close"><span class="translatable_cancel">Cancel</span></a>
+    </div>
+  </div>
+
+  <!-- Local Modal to be shown if Ardublockly Server is not running. -->
+  <div id="not_running_dialog" class="modal">
+    <div class="modal-content">
+      <div>
+        <h4 id="gen_alert_title"><span class="translatable_noServerTitle">Ardublockly app not running</span></h4>
+      </div>
+      <div class="translatable_noServerBody">
+        <p>For all the Ardublockly features to be enabled, the Ardublockly desktop application must be running locally on your computer.</p>
+        <p>If you are using an online version you will not be able to configure the settings nor load the blocks code into an Arduino.</p>
+        <p>Installation instruction can be found in the <a href="https://github.com/carlosperate/ardublockly">Ardublockly repository</a>.</p>
+        <p>If you have Ardublockly already installed, make sure the application is running correctly.</p>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <a id="gen_alert_ok_link" href="#" class="waves-effect btn-flat modal-close"><span class="translatable_okay">Okay</span></a>
+    </div>
+  </div>
+
+  <!-- Desktop version of Ardublockly JS, needs to be loaded first. -->
+  <script src="ardublockly_desktop.js"></script>
+  <!-- jQuery and Materialize JS -->
+  <script src="js_libs/jquery-2.1.3.min.js"></script>
+  <script src="materialize/materialize.js"></script>
+  <!-- FileSaver JS -->
+  <script src="js_libs/FileSaver.min.js"></script>
+  <!-- JS Diff -->
+  <script src="js_libs/diff.js"></script>
+  <!-- Prettify JS -->
+  <script src="prettify/prettify.js"></script>
+  <!-- Ardublockly app -->
+  <script src="ardublockly_toolbox.js"></script>
+  <script src="ardublockly_toolbox_python.js"></script>
+  <script src="ardublocklyserver_ajax.js"></script>
+  <script src="ardublockly_lang.js"></script>
+  <script src="ardublockly_design.js"></script>
+  <script src="ardublockly_blockly.js"></script>
+  <script src="ardublockly.js"></script>
+  <script>
+    window.addEventListener('load', function load(event) {
+      window.removeEventListener('load', load, false);
+      Ardublockly.init();
+    });
+  </script>
+  <script>
+  console.log($(".blocklyTreeRoot").css());
+  </script>
+</body>
+</html>

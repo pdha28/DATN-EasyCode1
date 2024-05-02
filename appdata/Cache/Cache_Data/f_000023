@@ -1,1372 +1,1136 @@
-// Copyright 2007 The Closure Library Authors. All Rights Reserved.
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//      http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS-IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-
 /**
- * @fileoverview Base class for containers that host {@link goog.ui.Control}s,
- * such as menus and toolbars.  Provides default keyboard and mouse event
- * handling and child management, based on a generalized version of
- * {@link goog.ui.Menu}.
+ * @license
+ * Visual Blocks Editor
  *
- * @author attila@google.com (Attila Bodis)
- * @see ../demos/container.html
+ * Copyright 2011 Google Inc.
+ * https://developers.google.com/blockly/
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *   http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
  */
-// TODO(attila):  Fix code/logic duplication between this and goog.ui.Control.
-// TODO(attila):  Maybe pull common stuff all the way up into Component...?
 
-goog.provide('goog.ui.Container');
-goog.provide('goog.ui.Container.EventType');
-goog.provide('goog.ui.Container.Orientation');
+/**
+ * @fileoverview Flyout tray containing blocks which may be created.
+ * @author fraser@google.com (Neil Fraser)
+ */
+'use strict';
 
-goog.require('goog.a11y.aria');
-goog.require('goog.a11y.aria.State');
-goog.require('goog.asserts');
+goog.provide('Blockly.Flyout');
+
+goog.require('Blockly.Block');
+goog.require('Blockly.Comment');
+goog.require('Blockly.Events');
+goog.require('Blockly.WorkspaceSvg');
 goog.require('goog.dom');
-goog.require('goog.events.EventType');
-goog.require('goog.events.KeyCodes');
-goog.require('goog.events.KeyHandler');
-goog.require('goog.object');
-goog.require('goog.style');
-goog.require('goog.ui.Component');
-goog.require('goog.ui.ContainerRenderer');
-goog.require('goog.ui.Control');
-
+goog.require('goog.events');
+goog.require('goog.math.Rect');
+goog.require('goog.userAgent');
 
 
 /**
- * Base class for containers.  Extends {@link goog.ui.Component} by adding
- * the following:
- *  <ul>
- *    <li>a {@link goog.events.KeyHandler}, to simplify keyboard handling,
- *    <li>a pluggable <em>renderer</em> framework, to simplify the creation of
- *        containers without the need to subclass this class,
- *    <li>methods to manage child controls hosted in the container,
- *    <li>default mouse and keyboard event handling methods.
- *  </ul>
- * @param {?goog.ui.Container.Orientation=} opt_orientation Container
- *     orientation; defaults to {@code VERTICAL}.
- * @param {goog.ui.ContainerRenderer=} opt_renderer Renderer used to render or
- *     decorate the container; defaults to {@link goog.ui.ContainerRenderer}.
- * @param {goog.dom.DomHelper=} opt_domHelper DOM helper, used for document
- *     interaction.
- * @extends {goog.ui.Component}
+ * Class for a flyout.
+ * @param {!Object} workspaceOptions Dictionary of options for the workspace.
  * @constructor
  */
-goog.ui.Container = function(opt_orientation, opt_renderer, opt_domHelper) {
-  goog.ui.Component.call(this, opt_domHelper);
-  this.renderer_ = opt_renderer || goog.ui.ContainerRenderer.getInstance();
-  this.orientation_ = opt_orientation || this.renderer_.getDefaultOrientation();
-};
-goog.inherits(goog.ui.Container, goog.ui.Component);
-goog.tagUnsealableClass(goog.ui.Container);
-
-
-/**
- * Container-specific events.
- * @enum {string}
- */
-goog.ui.Container.EventType = {
+Blockly.Flyout = function(workspaceOptions) {
+  workspaceOptions.getMetrics = this.getMetrics_.bind(this);
+  workspaceOptions.setMetrics = this.setMetrics_.bind(this);
   /**
-   * Dispatched after a goog.ui.Container becomes visible. Non-cancellable.
-   * NOTE(user): This event really shouldn't exist, because the
-   * goog.ui.Component.EventType.SHOW event should behave like this one. But the
-   * SHOW event for containers has been behaving as other components'
-   * BEFORE_SHOW event for a long time, and too much code relies on that old
-   * behavior to fix it now.
+   * @type {!Blockly.Workspace}
+   * @private
    */
-  AFTER_SHOW: 'aftershow',
+  this.workspace_ = new Blockly.WorkspaceSvg(workspaceOptions);
+  this.workspace_.isFlyout = true;
 
   /**
-   * Dispatched after a goog.ui.Container becomes invisible. Non-cancellable.
+   * Is RTL vs LTR.
+   * @type {boolean}
    */
-  AFTER_HIDE: 'afterhide'
+  this.RTL = !!workspaceOptions.RTL;
+
+  /**
+   * Flyout should be laid out horizontally vs vertically.
+   * @type {boolean}
+   * @private
+   */
+  this.horizontalLayout_ = workspaceOptions.horizontalLayout;
+
+  /**
+   * Position of the toolbox and flyout relative to the workspace.
+   * @type {number}
+   * @private
+   */
+  this.toolboxPosition_ = workspaceOptions.toolboxPosition;
+
+  /**
+   * Opaque data that can be passed to Blockly.unbindEvent_.
+   * @type {!Array.<!Array>}
+   * @private
+   */
+  this.eventWrappers_ = [];
+
+  /**
+   * List of background buttons that lurk behind each block to catch clicks
+   * landing in the blocks' lakes and bays.
+   * @type {!Array.<!Element>}
+   * @private
+   */
+  this.buttons_ = [];
+
+  /**
+   * List of event listeners.
+   * @type {!Array.<!Array>}
+   * @private
+   */
+  this.listeners_ = [];
+
+  /**
+   * List of blocks that should always be disabled.
+   * @type {!Array.<!Blockly.Block>}
+   * @private
+   */
+  this.permanentlyDisabled_ = [];
 };
 
-
 /**
- * Container orientation constants.
- * @enum {string}
- */
-goog.ui.Container.Orientation = {
-  HORIZONTAL: 'horizontal',
-  VERTICAL: 'vertical'
-};
-
-
-/**
- * Allows an alternative element to be set to receive key events, otherwise
- * defers to the renderer's element choice.
- * @type {Element|undefined}
- * @private
- */
-goog.ui.Container.prototype.keyEventTarget_ = null;
-
-
-/**
- * Keyboard event handler.
- * @type {goog.events.KeyHandler?}
- * @private
- */
-goog.ui.Container.prototype.keyHandler_ = null;
-
-
-/**
- * Renderer for the container.  Defaults to {@link goog.ui.ContainerRenderer}.
- * @type {goog.ui.ContainerRenderer?}
- * @private
- */
-goog.ui.Container.prototype.renderer_ = null;
-
-
-/**
- * Container orientation; determines layout and default keyboard navigation.
- * @type {?goog.ui.Container.Orientation}
- * @private
- */
-goog.ui.Container.prototype.orientation_ = null;
-
-
-/**
- * Whether the container is set to be visible.  Defaults to true.
+ * Does the flyout automatically close when a block is created?
  * @type {boolean}
- * @private
  */
-goog.ui.Container.prototype.visible_ = true;
-
+Blockly.Flyout.prototype.autoClose = true;
 
 /**
- * Whether the container is enabled and reacting to keyboard and mouse events.
- * Defaults to true.
- * @type {boolean}
- * @private
+ * Corner radius of the flyout background.
+ * @type {number}
+ * @const
  */
-goog.ui.Container.prototype.enabled_ = true;
-
+Blockly.Flyout.prototype.CORNER_RADIUS = 8;
 
 /**
- * Whether the container supports keyboard focus.  Defaults to true.  Focusable
- * containers have a {@code tabIndex} and can be navigated to via the keyboard.
- * @type {boolean}
- * @private
+ * Margin around the edges of the blocks in the flyout.
+ * @type {number}
+ * @const
  */
-goog.ui.Container.prototype.focusable_ = true;
-
+Blockly.Flyout.prototype.MARGIN = Blockly.Flyout.prototype.CORNER_RADIUS;
 
 /**
- * The 0-based index of the currently highlighted control in the container
- * (-1 if none).
+ * Top/bottom padding between scrollbar and edge of flyout background.
+ * @type {number}
+ * @const
+ */
+Blockly.Flyout.prototype.SCROLLBAR_PADDING = 2;
+
+/**
+ * Width of flyout.
  * @type {number}
  * @private
  */
-goog.ui.Container.prototype.highlightedIndex_ = -1;
-
+Blockly.Flyout.prototype.width_ = 0;
 
 /**
- * The currently open (expanded) control in the container (null if none).
- * @type {goog.ui.Control?}
+ * Height of flyout.
+ * @type {number}
  * @private
  */
-goog.ui.Container.prototype.openItem_ = null;
-
-
-/**
- * Whether the mouse button is held down.  Defaults to false.  This flag is set
- * when the user mouses down over the container, and remains set until they
- * release the mouse button.
- * @type {boolean}
- * @private
- */
-goog.ui.Container.prototype.mouseButtonPressed_ = false;
-
+Blockly.Flyout.prototype.height_ = 0;
 
 /**
- * Whether focus of child components should be allowed.  Only effective if
- * focusable_ is set to false.
- * @type {boolean}
- * @private
+ * Creates the flyout's DOM.  Only needs to be called once.
+ * @return {!Element} The flyout's SVG group.
  */
-goog.ui.Container.prototype.allowFocusableChildren_ = false;
-
-
-/**
- * Whether highlighting a child component should also open it.
- * @type {boolean}
- * @private
- */
-goog.ui.Container.prototype.openFollowsHighlight_ = true;
-
-
-/**
- * Map of DOM IDs to child controls.  Each key is the DOM ID of a child
- * control's root element; each value is a reference to the child control
- * itself.  Used for looking up the child control corresponding to a DOM
- * node in O(1) time.
- * @type {Object}
- * @private
- */
-goog.ui.Container.prototype.childElementIdMap_ = null;
-
-
-// Event handler and renderer management.
-
-
-/**
- * Returns the DOM element on which the container is listening for keyboard
- * events (null if none).
- * @return {Element} Element on which the container is listening for key
- *     events.
- */
-goog.ui.Container.prototype.getKeyEventTarget = function() {
-  // Delegate to renderer, unless we've set an explicit target.
-  return this.keyEventTarget_ || this.renderer_.getKeyEventTarget(this);
+Blockly.Flyout.prototype.createDom = function() {
+  /*
+  <g>
+    <path class="blocklyFlyoutBackground"/>
+    <g class="blocklyFlyout"></g>
+  </g>
+  */
+  this.svgGroup_ = Blockly.createSvgElement('g',
+      {'class': 'blocklyFlyout'}, null);
+  this.svgBackground_ = Blockly.createSvgElement('path',
+      {'class': 'blocklyFlyoutBackground'}, this.svgGroup_);
+  this.svgGroup_.appendChild(this.workspace_.createDom());
+  return this.svgGroup_;
 };
 
+/**
+ * Initializes the flyout.
+ * @param {!Blockly.Workspace} targetWorkspace The workspace in which to create
+ *     new blocks.
+ */
+Blockly.Flyout.prototype.init = function(targetWorkspace) {
+  this.targetWorkspace_ = targetWorkspace;
+  this.workspace_.targetWorkspace = targetWorkspace;
+  // Add scrollbar.
+  this.scrollbar_ = new Blockly.Scrollbar(this.workspace_,
+      this.horizontalLayout_, false);
+
+  this.hide();
+
+  Array.prototype.push.apply(this.eventWrappers_,
+      Blockly.bindEvent_(this.svgGroup_, 'wheel', this, this.wheel_));
+  if (!this.autoClose) {
+    this.filterWrapper_ = this.filterForCapacity_.bind(this);
+    this.targetWorkspace_.addChangeListener(this.filterWrapper_);
+  }
+  // Dragging the flyout up and down.
+  Array.prototype.push.apply(this.eventWrappers_,
+      Blockly.bindEvent_(this.svgGroup_, 'mousedown', this, this.onMouseDown_));
+};
 
 /**
- * Attaches an element on which to listen for key events.
- * @param {Element|undefined} element The element to attach, or null/undefined
- *     to attach to the default element.
+ * Dispose of this flyout.
+ * Unlink from all DOM elements to prevent memory leaks.
  */
-goog.ui.Container.prototype.setKeyEventTarget = function(element) {
-  if (this.focusable_) {
-    var oldTarget = this.getKeyEventTarget();
-    var inDocument = this.isInDocument();
+Blockly.Flyout.prototype.dispose = function() {
+  this.hide();
+  Blockly.unbindEvent_(this.eventWrappers_);
+  if (this.filterWrapper_) {
+    this.targetWorkspace_.removeChangeListener(this.filterWrapper_);
+    this.filterWrapper_ = null;
+  }
+  if (this.scrollbar_) {
+    this.scrollbar_.dispose();
+    this.scrollbar_ = null;
+  }
+  if (this.workspace_) {
+    this.workspace_.targetWorkspace = null;
+    this.workspace_.dispose();
+    this.workspace_ = null;
+  }
+  if (this.svgGroup_) {
+    goog.dom.removeNode(this.svgGroup_);
+    this.svgGroup_ = null;
+  }
+  this.svgBackground_ = null;
+  this.targetWorkspace_ = null;
+};
 
-    this.keyEventTarget_ = element;
-    var newTarget = this.getKeyEventTarget();
+/**
+ * Get the width of the flyout.
+ * @return {number} The width of the flyout.
+ */
+Blockly.Flyout.prototype.getWidth = function() {
+  return this.width_;
+};
 
-    if (inDocument) {
-      // Unlisten for events on the old key target.  Requires us to reset
-      // key target state temporarily.
-      this.keyEventTarget_ = oldTarget;
-      this.enableFocusHandling_(false);
-      this.keyEventTarget_ = element;
+/**
+ * Get the height of the flyout.
+ * @return {number} The width of the flyout.
+ */
+Blockly.Flyout.prototype.getHeight = function() {
+  return this.height_;
+};
 
-      // Listen for events on the new key target.
-      this.getKeyHandler().attach(newTarget);
-      this.enableFocusHandling_(true);
+/**
+ * Return an object with all the metrics required to size scrollbars for the
+ * flyout.  The following properties are computed:
+ * .viewHeight: Height of the visible rectangle,
+ * .viewWidth: Width of the visible rectangle,
+ * .contentHeight: Height of the contents,
+ * .contentWidth: Width of the contents,
+ * .viewTop: Offset of top edge of visible rectangle from parent,
+ * .contentTop: Offset of the top-most content from the y=0 coordinate,
+ * .absoluteTop: Top-edge of view.
+ * .viewLeft: Offset of the left edge of visible rectangle from parent,
+ * .contentLeft: Offset of the left-most content from the x=0 coordinate,
+ * .absoluteLeft: Left-edge of view.
+ * @return {Object} Contains size and position metrics of the flyout.
+ * @private
+ */
+Blockly.Flyout.prototype.getMetrics_ = function() {
+  if (!this.isVisible()) {
+    // Flyout is hidden.
+    return null;
+  }
+
+  try {
+    var optionBox = this.workspace_.getCanvas().getBBox();
+  } catch (e) {
+    // Firefox has trouble with hidden elements (Bug 528969).
+    var optionBox = {height: 0, y: 0, width: 0, x: 0};
+  }
+
+  var absoluteTop = this.SCROLLBAR_PADDING;
+  var absoluteLeft = this.SCROLLBAR_PADDING;
+  if (this.horizontalLayout_) {
+    if (this.toolboxPosition_ == Blockly.TOOLBOX_AT_BOTTOM) {
+      absoluteTop = 0;
     }
+    var viewHeight = this.height_;
+    if (this.toolboxPosition_ == Blockly.TOOLBOX_AT_TOP) {
+      viewHeight += this.MARGIN - this.SCROLLBAR_PADDING;
+    }
+    var viewWidth = this.width_ - 2 * this.SCROLLBAR_PADDING;
   } else {
-    throw Error(
-        'Can\'t set key event target for container ' +
-        'that doesn\'t support keyboard focus!');
-  }
-};
-
-
-/**
- * Returns the keyboard event handler for this container, lazily created the
- * first time this method is called.  The keyboard event handler listens for
- * keyboard events on the container's key event target, as determined by its
- * renderer.
- * @return {!goog.events.KeyHandler} Keyboard event handler for this container.
- */
-goog.ui.Container.prototype.getKeyHandler = function() {
-  return this.keyHandler_ ||
-      (this.keyHandler_ = new goog.events.KeyHandler(this.getKeyEventTarget()));
-};
-
-
-/**
- * Returns the renderer used by this container to render itself or to decorate
- * an existing element.
- * @return {goog.ui.ContainerRenderer} Renderer used by the container.
- */
-goog.ui.Container.prototype.getRenderer = function() {
-  return this.renderer_;
-};
-
-
-/**
- * Registers the given renderer with the container.  Changing renderers after
- * the container has already been rendered or decorated is an error.
- * @param {goog.ui.ContainerRenderer} renderer Renderer used by the container.
- */
-goog.ui.Container.prototype.setRenderer = function(renderer) {
-  if (this.getElement()) {
-    // Too late.
-    throw Error(goog.ui.Component.Error.ALREADY_RENDERED);
-  }
-
-  this.renderer_ = renderer;
-};
-
-
-// Standard goog.ui.Component implementation.
-
-
-/**
- * Creates the container's DOM.
- * @override
- */
-goog.ui.Container.prototype.createDom = function() {
-  // Delegate to renderer.
-  this.setElementInternal(this.renderer_.createDom(this));
-};
-
-
-/**
- * Returns the DOM element into which child components are to be rendered,
- * or null if the container itself hasn't been rendered yet.  Overrides
- * {@link goog.ui.Component#getContentElement} by delegating to the renderer.
- * @return {Element} Element to contain child elements (null if none).
- * @override
- */
-goog.ui.Container.prototype.getContentElement = function() {
-  // Delegate to renderer.
-  return this.renderer_.getContentElement(this.getElement());
-};
-
-
-/**
- * Returns true if the given element can be decorated by this container.
- * Overrides {@link goog.ui.Component#canDecorate}.
- * @param {Element} element Element to decorate.
- * @return {boolean} True iff the element can be decorated.
- * @override
- */
-goog.ui.Container.prototype.canDecorate = function(element) {
-  // Delegate to renderer.
-  return this.renderer_.canDecorate(element);
-};
-
-
-/**
- * Decorates the given element with this container. Overrides {@link
- * goog.ui.Component#decorateInternal}.  Considered protected.
- * @param {Element} element Element to decorate.
- * @override
- */
-goog.ui.Container.prototype.decorateInternal = function(element) {
-  // Delegate to renderer.
-  this.setElementInternal(this.renderer_.decorate(this, element));
-  // Check whether the decorated element is explicitly styled to be invisible.
-  if (element.style.display == 'none') {
-    this.visible_ = false;
-  }
-};
-
-
-/**
- * Configures the container after its DOM has been rendered, and sets up event
- * handling.  Overrides {@link goog.ui.Component#enterDocument}.
- * @override
- */
-goog.ui.Container.prototype.enterDocument = function() {
-  goog.ui.Container.superClass_.enterDocument.call(this);
-
-  this.forEachChild(function(child) {
-    if (child.isInDocument()) {
-      this.registerChildId_(child);
+    absoluteLeft = 0;
+    var viewHeight = this.height_ - 2 * this.SCROLLBAR_PADDING;
+    var viewWidth = this.width_;
+    if (!this.RTL) {
+      viewWidth -= this.SCROLLBAR_PADDING;
     }
-  }, this);
-
-  var elem = this.getElement();
-
-  // Call the renderer's initializeDom method to initialize the container's DOM.
-  this.renderer_.initializeDom(this);
-
-  // Initialize visibility (opt_force = true, so we don't dispatch events).
-  this.setVisible(this.visible_, true);
-
-  // Handle events dispatched by child controls.
-  this.getHandler()
-      .listen(this, goog.ui.Component.EventType.ENTER, this.handleEnterItem)
-      .listen(
-          this, goog.ui.Component.EventType.HIGHLIGHT, this.handleHighlightItem)
-      .listen(
-          this, goog.ui.Component.EventType.UNHIGHLIGHT,
-          this.handleUnHighlightItem)
-      .listen(this, goog.ui.Component.EventType.OPEN, this.handleOpenItem)
-      .listen(this, goog.ui.Component.EventType.CLOSE, this.handleCloseItem)
-      .
-
-      // Handle mouse events.
-      listen(elem, goog.events.EventType.MOUSEDOWN, this.handleMouseDown)
-      .listen(
-          goog.dom.getOwnerDocument(elem), goog.events.EventType.MOUSEUP,
-          this.handleDocumentMouseUp)
-      .
-
-      // Handle mouse events on behalf of controls in the container.
-      listen(
-          elem,
-          [
-            goog.events.EventType.MOUSEDOWN, goog.events.EventType.MOUSEUP,
-            goog.events.EventType.MOUSEOVER, goog.events.EventType.MOUSEOUT,
-            goog.events.EventType.CONTEXTMENU
-          ],
-          this.handleChildMouseEvents);
-
-  // If the container is focusable, set up keyboard event handling.
-  if (this.isFocusable()) {
-    this.enableFocusHandling_(true);
   }
+
+  var metrics = {
+    viewHeight: viewHeight,
+    viewWidth: viewWidth,
+    contentHeight: (optionBox.height + 2 * this.MARGIN) * this.workspace_.scale,
+    contentWidth: (optionBox.width + 2 * this.MARGIN) * this.workspace_.scale,
+    viewTop: -this.workspace_.scrollY,
+    viewLeft: -this.workspace_.scrollX,
+    contentTop: 0, // TODO: #349
+    contentLeft: 0, // TODO: #349
+    absoluteTop: absoluteTop,
+    absoluteLeft: absoluteLeft
+  };
+  return metrics;
 };
 
-
 /**
- * Sets up listening for events applicable to focusable containers.
- * @param {boolean} enable Whether to enable or disable focus handling.
+ * Sets the translation of the flyout to match the scrollbars.
+ * @param {!Object} xyRatio Contains a y property which is a float
+ *     between 0 and 1 specifying the degree of scrolling and a
+ *     similar x property.
  * @private
  */
-goog.ui.Container.prototype.enableFocusHandling_ = function(enable) {
-  var handler = this.getHandler();
-  var keyTarget = this.getKeyEventTarget();
-  if (enable) {
-    handler.listen(keyTarget, goog.events.EventType.FOCUS, this.handleFocus)
-        .listen(keyTarget, goog.events.EventType.BLUR, this.handleBlur)
-        .listen(
-            this.getKeyHandler(), goog.events.KeyHandler.EventType.KEY,
-            this.handleKeyEvent);
+Blockly.Flyout.prototype.setMetrics_ = function(xyRatio) {
+  var metrics = this.getMetrics_();
+  // This is a fix to an apparent race condition.
+  if (!metrics) {
+    return;
+  }
+  if (!this.horizontalLayout_ && goog.isNumber(xyRatio.y)) {
+    this.workspace_.scrollY = -metrics.contentHeight * xyRatio.y;
+  } else if (this.horizontalLayout_ && goog.isNumber(xyRatio.x)) {
+    this.workspace_.scrollX = -metrics.contentWidth * xyRatio.x;
+  }
+
+  this.workspace_.translate(this.workspace_.scrollX + metrics.absoluteLeft,
+      this.workspace_.scrollY + metrics.absoluteTop);
+};
+
+/**
+ * Move the flyout to the edge of the workspace.
+ */
+Blockly.Flyout.prototype.position = function() {
+  if (!this.isVisible()) {
+    return;
+  }
+  var metrics = this.targetWorkspace_.getMetrics();
+  if (!metrics) {
+    // Hidden components will return null.
+    return;
+  }
+  var edgeWidth = this.horizontalLayout_ ? metrics.viewWidth : this.width_;
+  edgeWidth -= this.CORNER_RADIUS;
+  if (this.toolboxPosition_ == Blockly.TOOLBOX_AT_RIGHT) {
+    edgeWidth *= -1;
+  }
+
+  this.setBackgroundPath_(edgeWidth,
+      this.horizontalLayout_ ? this.height_ : metrics.viewHeight);
+
+  var x = metrics.absoluteLeft;
+  if (this.toolboxPosition_ == Blockly.TOOLBOX_AT_RIGHT) {
+    x += metrics.viewWidth;
+    x -= this.width_;
+  }
+
+  var y = metrics.absoluteTop;
+  if (this.toolboxPosition_ == Blockly.TOOLBOX_AT_BOTTOM) {
+    y += metrics.viewHeight;
+    y -= this.height_;
+  }
+
+  this.svgGroup_.setAttribute('transform', 'translate(' + x + ',' + y + ')');
+
+  // Record the height for Blockly.Flyout.getMetrics_, or width if the layout is
+  // horizontal.
+  if (this.horizontalLayout_) {
+    this.width_ = metrics.viewWidth;
   } else {
-    handler.unlisten(keyTarget, goog.events.EventType.FOCUS, this.handleFocus)
-        .unlisten(keyTarget, goog.events.EventType.BLUR, this.handleBlur)
-        .unlisten(
-            this.getKeyHandler(), goog.events.KeyHandler.EventType.KEY,
-            this.handleKeyEvent);
+    this.height_ = metrics.viewHeight;
+  }
+
+  // Update the scrollbar (if one exists).
+  if (this.scrollbar_) {
+    this.scrollbar_.resize();
   }
 };
-
 
 /**
- * Cleans up the container before its DOM is removed from the document, and
- * removes event handlers.  Overrides {@link goog.ui.Component#exitDocument}.
- * @override
+ * Create and set the path for the visible boundaries of the flyout.
+ * @param {number} width The width of the flyout, not including the
+ *     rounded corners.
+ * @param {number} height The height of the flyout, not including
+ *     rounded corners.
+ * @private
  */
-goog.ui.Container.prototype.exitDocument = function() {
-  // {@link #setHighlightedIndex} has to be called before
-  // {@link goog.ui.Component#exitDocument}, otherwise it has no effect.
-  this.setHighlightedIndex(-1);
-
-  if (this.openItem_) {
-    this.openItem_.setOpen(false);
-  }
-
-  this.mouseButtonPressed_ = false;
-
-  goog.ui.Container.superClass_.exitDocument.call(this);
-};
-
-
-/** @override */
-goog.ui.Container.prototype.disposeInternal = function() {
-  goog.ui.Container.superClass_.disposeInternal.call(this);
-
-  if (this.keyHandler_) {
-    this.keyHandler_.dispose();
-    this.keyHandler_ = null;
-  }
-
-  this.keyEventTarget_ = null;
-  this.childElementIdMap_ = null;
-  this.openItem_ = null;
-  this.renderer_ = null;
-};
-
-
-// Default event handlers.
-
-
-/**
- * Handles ENTER events raised by child controls when they are navigated to.
- * @param {goog.events.Event} e ENTER event to handle.
- * @return {boolean} Whether to prevent handleMouseOver from handling
- *    the event.
- */
-goog.ui.Container.prototype.handleEnterItem = function(e) {
-  // Allow the Control to highlight itself.
-  return true;
-};
-
-
-/**
- * Handles HIGHLIGHT events dispatched by items in the container when
- * they are highlighted.
- * @param {goog.events.Event} e Highlight event to handle.
- */
-goog.ui.Container.prototype.handleHighlightItem = function(e) {
-  var index = this.indexOfChild(/** @type {goog.ui.Control} */ (e.target));
-  if (index > -1 && index != this.highlightedIndex_) {
-    var item = this.getHighlighted();
-    if (item) {
-      // Un-highlight previously highlighted item.
-      item.setHighlighted(false);
-    }
-
-    this.highlightedIndex_ = index;
-    item = this.getHighlighted();
-
-    if (this.isMouseButtonPressed()) {
-      // Activate item when mouse button is pressed, to allow MacOS-style
-      // dragging to choose menu items.  Although this should only truly
-      // happen if the highlight is due to mouse movements, there is little
-      // harm in doing it for keyboard or programmatic highlights.
-      item.setActive(true);
-    }
-
-    // Update open item if open item needs follow highlight.
-    if (this.openFollowsHighlight_ && this.openItem_ &&
-        item != this.openItem_) {
-      if (item.isSupportedState(goog.ui.Component.State.OPENED)) {
-        item.setOpen(true);
-      } else {
-        this.openItem_.setOpen(false);
-      }
-    }
-  }
-
-  var element = this.getElement();
-  goog.asserts.assert(
-      element, 'The DOM element for the container cannot be null.');
-  if (e.target.getElement() != null) {
-    goog.a11y.aria.setState(
-        element, goog.a11y.aria.State.ACTIVEDESCENDANT,
-        e.target.getElement().id);
-  }
-};
-
-
-/**
- * Handles UNHIGHLIGHT events dispatched by items in the container when
- * they are unhighlighted.
- * @param {goog.events.Event} e Unhighlight event to handle.
- */
-goog.ui.Container.prototype.handleUnHighlightItem = function(e) {
-  if (e.target == this.getHighlighted()) {
-    this.highlightedIndex_ = -1;
-  }
-  var element = this.getElement();
-  goog.asserts.assert(
-      element, 'The DOM element for the container cannot be null.');
-  // Setting certain ARIA attributes to empty strings is problematic.
-  // Just remove the attribute instead.
-  goog.a11y.aria.removeState(element, goog.a11y.aria.State.ACTIVEDESCENDANT);
-};
-
-
-/**
- * Handles OPEN events dispatched by items in the container when they are
- * opened.
- * @param {goog.events.Event} e Open event to handle.
- */
-goog.ui.Container.prototype.handleOpenItem = function(e) {
-  var item = /** @type {goog.ui.Control} */ (e.target);
-  if (item && item != this.openItem_ && item.getParent() == this) {
-    if (this.openItem_) {
-      this.openItem_.setOpen(false);
-    }
-    this.openItem_ = item;
-  }
-};
-
-
-/**
- * Handles CLOSE events dispatched by items in the container when they are
- * closed.
- * @param {goog.events.Event} e Close event to handle.
- */
-goog.ui.Container.prototype.handleCloseItem = function(e) {
-  if (e.target == this.openItem_) {
-    this.openItem_ = null;
-  }
-
-  var element = this.getElement();
-  var targetEl = e.target.getElement();
-  // Set the active descendant to the menu item when its submenu is closed and
-  // it is still highlighted. This can sometimes be called when the menuitem is
-  // unhighlighted because the focus moved elsewhere, do nothing at that point.
-  if (element && e.target.isHighlighted() && targetEl) {
-    goog.a11y.aria.setActiveDescendant(element, targetEl);
-  }
-};
-
-
-/**
- * Handles mousedown events over the container.  The default implementation
- * sets the "mouse button pressed" flag and, if the container is focusable,
- * grabs keyboard focus.
- * @param {goog.events.BrowserEvent} e Mousedown event to handle.
- */
-goog.ui.Container.prototype.handleMouseDown = function(e) {
-  if (this.enabled_) {
-    this.setMouseButtonPressed(true);
-  }
-
-  var keyTarget = this.getKeyEventTarget();
-  if (keyTarget && goog.dom.isFocusableTabIndex(keyTarget)) {
-    // The container is configured to receive keyboard focus.
-    keyTarget.focus();
+Blockly.Flyout.prototype.setBackgroundPath_ = function(width, height) {
+  if (this.horizontalLayout_) {
+    this.setBackgroundPathHorizontal_(width, height);
   } else {
-    // The control isn't configured to receive keyboard focus; prevent it
-    // from stealing focus or destroying the selection.
-    e.preventDefault();
+    this.setBackgroundPathVertical_(width, height);
   }
 };
 
-
 /**
- * Handles mouseup events over the document.  The default implementation
- * clears the "mouse button pressed" flag.
- * @param {goog.events.BrowserEvent} e Mouseup event to handle.
- */
-goog.ui.Container.prototype.handleDocumentMouseUp = function(e) {
-  this.setMouseButtonPressed(false);
-};
-
-
-/**
- * Handles mouse events originating from nodes belonging to the controls hosted
- * in the container.  Locates the child control based on the DOM node that
- * dispatched the event, and forwards the event to the control for handling.
- * @param {goog.events.BrowserEvent} e Mouse event to handle.
- */
-goog.ui.Container.prototype.handleChildMouseEvents = function(e) {
-  var control = this.getOwnerControl(/** @type {Node} */ (e.target));
-  if (control) {
-    // Child control identified; forward the event.
-    switch (e.type) {
-      case goog.events.EventType.MOUSEDOWN:
-        control.handleMouseDown(e);
-        break;
-      case goog.events.EventType.MOUSEUP:
-        control.handleMouseUp(e);
-        break;
-      case goog.events.EventType.MOUSEOVER:
-        control.handleMouseOver(e);
-        break;
-      case goog.events.EventType.MOUSEOUT:
-        control.handleMouseOut(e);
-        break;
-      case goog.events.EventType.CONTEXTMENU:
-        control.handleContextMenu(e);
-        break;
-    }
-  }
-};
-
-
-/**
- * Returns the child control that owns the given DOM node, or null if no such
- * control is found.
- * @param {Node} node DOM node whose owner is to be returned.
- * @return {goog.ui.Control?} Control hosted in the container to which the node
- *     belongs (if found).
- * @protected
- */
-goog.ui.Container.prototype.getOwnerControl = function(node) {
-  // Ensure that this container actually has child controls before
-  // looking up the owner.
-  if (this.childElementIdMap_) {
-    var elem = this.getElement();
-    // See http://b/2964418 . IE9 appears to evaluate '!=' incorrectly, so
-    // using '!==' instead.
-    // TODO(user): Possibly revert this change if/when IE9 fixes the issue.
-    while (node && node !== elem) {
-      var id = node.id;
-      if (id in this.childElementIdMap_) {
-        return this.childElementIdMap_[id];
-      }
-      node = node.parentNode;
-    }
-  }
-  return null;
-};
-
-
-/**
- * Handles focus events raised when the container's key event target receives
- * keyboard focus.
- * @param {goog.events.BrowserEvent} e Focus event to handle.
- */
-goog.ui.Container.prototype.handleFocus = function(e) {
-  // No-op in the base class.
-};
-
-
-/**
- * Handles blur events raised when the container's key event target loses
- * keyboard focus.  The default implementation clears the highlight index.
- * @param {goog.events.BrowserEvent} e Blur event to handle.
- */
-goog.ui.Container.prototype.handleBlur = function(e) {
-  this.setHighlightedIndex(-1);
-  this.setMouseButtonPressed(false);
-  // If the container loses focus, and one of its children is open, close it.
-  if (this.openItem_) {
-    this.openItem_.setOpen(false);
-  }
-};
-
-
-/**
- * Attempts to handle a keyboard event, if the control is enabled, by calling
- * {@link handleKeyEventInternal}.  Considered protected; should only be used
- * within this package and by subclasses.
- * @param {goog.events.KeyEvent} e Key event to handle.
- * @return {boolean} Whether the key event was handled.
- */
-goog.ui.Container.prototype.handleKeyEvent = function(e) {
-  if (this.isEnabled() && this.isVisible() &&
-      (this.getChildCount() != 0 || this.keyEventTarget_) &&
-      this.handleKeyEventInternal(e)) {
-    e.preventDefault();
-    e.stopPropagation();
-    return true;
-  }
-  return false;
-};
-
-
-/**
- * Attempts to handle a keyboard event; returns true if the event was handled,
- * false otherwise.  If the container is enabled, and a child is highlighted,
- * calls the child control's {@code handleKeyEvent} method to give the control
- * a chance to handle the event first.
- * @param {goog.events.KeyEvent} e Key event to handle.
- * @return {boolean} Whether the event was handled by the container (or one of
- *     its children).
- */
-goog.ui.Container.prototype.handleKeyEventInternal = function(e) {
-  // Give the highlighted control the chance to handle the key event.
-  var highlighted = this.getHighlighted();
-  if (highlighted && typeof highlighted.handleKeyEvent == 'function' &&
-      highlighted.handleKeyEvent(e)) {
-    return true;
-  }
-
-  // Give the open control the chance to handle the key event.
-  if (this.openItem_ && this.openItem_ != highlighted &&
-      typeof this.openItem_.handleKeyEvent == 'function' &&
-      this.openItem_.handleKeyEvent(e)) {
-    return true;
-  }
-
-  // Do not handle the key event if any modifier key is pressed.
-  if (e.shiftKey || e.ctrlKey || e.metaKey || e.altKey) {
-    return false;
-  }
-
-  // Either nothing is highlighted, or the highlighted control didn't handle
-  // the key event, so attempt to handle it here.
-  switch (e.keyCode) {
-    case goog.events.KeyCodes.ESC:
-      if (this.isFocusable()) {
-        this.getKeyEventTarget().blur();
-      } else {
-        return false;
-      }
-      break;
-
-    case goog.events.KeyCodes.HOME:
-      this.highlightFirst();
-      break;
-
-    case goog.events.KeyCodes.END:
-      this.highlightLast();
-      break;
-
-    case goog.events.KeyCodes.UP:
-      if (this.orientation_ == goog.ui.Container.Orientation.VERTICAL) {
-        this.highlightPrevious();
-      } else {
-        return false;
-      }
-      break;
-
-    case goog.events.KeyCodes.LEFT:
-      if (this.orientation_ == goog.ui.Container.Orientation.HORIZONTAL) {
-        if (this.isRightToLeft()) {
-          this.highlightNext();
-        } else {
-          this.highlightPrevious();
-        }
-      } else {
-        return false;
-      }
-      break;
-
-    case goog.events.KeyCodes.DOWN:
-      if (this.orientation_ == goog.ui.Container.Orientation.VERTICAL) {
-        this.highlightNext();
-      } else {
-        return false;
-      }
-      break;
-
-    case goog.events.KeyCodes.RIGHT:
-      if (this.orientation_ == goog.ui.Container.Orientation.HORIZONTAL) {
-        if (this.isRightToLeft()) {
-          this.highlightPrevious();
-        } else {
-          this.highlightNext();
-        }
-      } else {
-        return false;
-      }
-      break;
-
-    default:
-      return false;
-  }
-
-  return true;
-};
-
-
-// Child component management.
-
-
-/**
- * Creates a DOM ID for the child control and registers it to an internal
- * hash table to be able to find it fast by id.
- * @param {goog.ui.Component} child The child control. Its root element has
- *     to be created yet.
+ * Create and set the path for the visible boundaries of the flyout in vertical
+ * mode.
+ * @param {number} width The width of the flyout, not including the
+ *     rounded corners.
+ * @param {number} height The height of the flyout, not including
+ *     rounded corners.
  * @private
  */
-goog.ui.Container.prototype.registerChildId_ = function(child) {
-  // Map the DOM ID of the control's root element to the control itself.
-  var childElem = child.getElement();
-
-  // If the control's root element doesn't have a DOM ID assign one.
-  var id = childElem.id || (childElem.id = child.getId());
-
-  // Lazily create the child element ID map on first use.
-  if (!this.childElementIdMap_) {
-    this.childElementIdMap_ = {};
-  }
-  this.childElementIdMap_[id] = child;
+Blockly.Flyout.prototype.setBackgroundPathVertical_ = function(width, height) {
+  var atRight = this.toolboxPosition_ == Blockly.TOOLBOX_AT_RIGHT;
+  // Decide whether to start on the left or right.
+  var path = ['M ' + (atRight ? this.width_ : 0) + ',0'];
+  // Top.
+  path.push('h', width);
+  // Rounded corner.
+  path.push('a', this.CORNER_RADIUS, this.CORNER_RADIUS, 0, 0,
+      atRight ? 0 : 1,
+      atRight ? -this.CORNER_RADIUS : this.CORNER_RADIUS,
+      this.CORNER_RADIUS);
+  // Side closest to workspace.
+  path.push('v', Math.max(0, height - this.CORNER_RADIUS * 2));
+  // Rounded corner.
+  path.push('a', this.CORNER_RADIUS, this.CORNER_RADIUS, 0, 0,
+      atRight ? 0 : 1,
+      atRight ? this.CORNER_RADIUS : -this.CORNER_RADIUS,
+      this.CORNER_RADIUS);
+  // Bottom.
+  path.push('h', -width);
+  path.push('z');
+  this.svgBackground_.setAttribute('d', path.join(' '));
 };
 
-
 /**
- * Adds the specified control as the last child of this container.  See
- * {@link goog.ui.Container#addChildAt} for detailed semantics.
- * @param {goog.ui.Component} child The new child control.
- * @param {boolean=} opt_render Whether the new child should be rendered
- *     immediately after being added (defaults to false).
- * @override
- */
-goog.ui.Container.prototype.addChild = function(child, opt_render) {
-  goog.asserts.assertInstanceof(
-      child, goog.ui.Control, 'The child of a container must be a control');
-  goog.ui.Container.superClass_.addChild.call(this, child, opt_render);
-};
-
-
-/**
- * Overrides {@link goog.ui.Container#getChild} to make it clear that it
- * only returns {@link goog.ui.Control}s.
- * @param {string} id Child component ID.
- * @return {goog.ui.Control} The child with the given ID; null if none.
- * @override
- */
-goog.ui.Container.prototype.getChild;
-
-
-/**
- * Overrides {@link goog.ui.Container#getChildAt} to make it clear that it
- * only returns {@link goog.ui.Control}s.
- * @param {number} index 0-based index.
- * @return {goog.ui.Control} The child with the given ID; null if none.
- * @override
- */
-goog.ui.Container.prototype.getChildAt;
-
-
-/**
- * Adds the control as a child of this container at the given 0-based index.
- * Overrides {@link goog.ui.Component#addChildAt} by also updating the
- * container's highlight index.  Since {@link goog.ui.Component#addChild} uses
- * {@link #addChildAt} internally, we only need to override this method.
- * @param {goog.ui.Component} control New child.
- * @param {number} index Index at which the new child is to be added.
- * @param {boolean=} opt_render Whether the new child should be rendered
- *     immediately after being added (defaults to false).
- * @override
- */
-goog.ui.Container.prototype.addChildAt = function(control, index, opt_render) {
-  goog.asserts.assertInstanceof(control, goog.ui.Control);
-
-  // Make sure the child control dispatches HIGHLIGHT, UNHIGHLIGHT, OPEN, and
-  // CLOSE events, and that it doesn't steal keyboard focus.
-  control.setDispatchTransitionEvents(goog.ui.Component.State.HOVER, true);
-  control.setDispatchTransitionEvents(goog.ui.Component.State.OPENED, true);
-  if (this.isFocusable() || !this.isFocusableChildrenAllowed()) {
-    control.setSupportedState(goog.ui.Component.State.FOCUSED, false);
-  }
-
-  // Disable mouse event handling by child controls.
-  control.setHandleMouseEvents(false);
-
-  var srcIndex =
-      (control.getParent() == this) ? this.indexOfChild(control) : -1;
-
-  // Let the superclass implementation do the work.
-  goog.ui.Container.superClass_.addChildAt.call(
-      this, control, index, opt_render);
-
-  if (control.isInDocument() && this.isInDocument()) {
-    this.registerChildId_(control);
-  }
-
-  this.updateHighlightedIndex_(srcIndex, index);
-};
-
-
-/**
- * Updates the highlighted index when children are added or moved.
- * @param {number} fromIndex Index of the child before it was moved, or -1 if
- *     the child was added.
- * @param {number} toIndex Index of the child after it was moved or added.
+ * Create and set the path for the visible boundaries of the flyout in
+ * horizontal mode.
+ * @param {number} width The width of the flyout, not including the
+ *     rounded corners.
+ * @param {number} height The height of the flyout, not including
+ *     rounded corners.
  * @private
  */
-goog.ui.Container.prototype.updateHighlightedIndex_ = function(
-    fromIndex, toIndex) {
-  if (fromIndex == -1) {
-    fromIndex = this.getChildCount();
+Blockly.Flyout.prototype.setBackgroundPathHorizontal_ =
+    function(width, height) {
+  var atTop = this.toolboxPosition_ == Blockly.TOOLBOX_AT_TOP;
+  // Start at top left.
+  var path = ['M 0,' + (atTop ? 0 : this.CORNER_RADIUS)];
+
+  if (atTop) {
+    // Top.
+    path.push('h', width + this.CORNER_RADIUS);
+    // Right.
+    path.push('v', height);
+    // Bottom.
+    path.push('a', this.CORNER_RADIUS, this.CORNER_RADIUS, 0, 0, 1,
+        -this.CORNER_RADIUS, this.CORNER_RADIUS);
+    path.push('h', -1 * (width - this.CORNER_RADIUS));
+    // Left.
+    path.push('a', this.CORNER_RADIUS, this.CORNER_RADIUS, 0, 0, 1,
+        -this.CORNER_RADIUS, -this.CORNER_RADIUS);
+    path.push('z');
+  } else {
+    // Top.
+    path.push('a', this.CORNER_RADIUS, this.CORNER_RADIUS, 0, 0, 1,
+        this.CORNER_RADIUS, -this.CORNER_RADIUS);
+    path.push('h', width - this.CORNER_RADIUS);
+     // Right.
+    path.push('a', this.CORNER_RADIUS, this.CORNER_RADIUS, 0, 0, 1,
+        this.CORNER_RADIUS, this.CORNER_RADIUS);
+    path.push('v', height - this.CORNER_RADIUS);
+    // Bottom.
+    path.push('h', -width - this.CORNER_RADIUS);
+    // Left.
+    path.push('z');
   }
-  if (fromIndex == this.highlightedIndex_) {
-    // The highlighted element itself was moved.
-    this.highlightedIndex_ = Math.min(this.getChildCount() - 1, toIndex);
-  } else if (
-      fromIndex > this.highlightedIndex_ && toIndex <= this.highlightedIndex_) {
-    // The control was added or moved behind the highlighted index.
-    this.highlightedIndex_++;
-  } else if (
-      fromIndex < this.highlightedIndex_ && toIndex > this.highlightedIndex_) {
-    // The control was moved from before to behind the highlighted index.
-    this.highlightedIndex_--;
-  }
+  this.svgBackground_.setAttribute('d', path.join(' '));
 };
 
+/**
+ * Scroll the flyout to the top.
+ */
+Blockly.Flyout.prototype.scrollToStart = function() {
+  this.scrollbar_.set((this.horizontalLayout_ && this.RTL) ? Infinity : 0);
+};
 
 /**
- * Removes a child control.  Overrides {@link goog.ui.Component#removeChild} by
- * updating the highlight index.  Since {@link goog.ui.Component#removeChildAt}
- * uses {@link #removeChild} internally, we only need to override this method.
- * @param {string|goog.ui.Component} control The ID of the child to remove, or
- *     the control itself.
- * @param {boolean=} opt_unrender Whether to call {@code exitDocument} on the
- *     removed control, and detach its DOM from the document (defaults to
- *     false).
- * @return {goog.ui.Control} The removed control, if any.
- * @override
+ * Scroll the flyout.
+ * @param {!Event} e Mouse wheel scroll event.
+ * @private
  */
-goog.ui.Container.prototype.removeChild = function(control, opt_unrender) {
-  control = goog.isString(control) ? this.getChild(control) : control;
-  goog.asserts.assertInstanceof(control, goog.ui.Control);
+Blockly.Flyout.prototype.wheel_ = function(e) {
+  var delta = this.horizontalLayout_ ? e.deltaX : e.deltaY;
 
-  if (control) {
-    var index = this.indexOfChild(control);
-    if (index != -1) {
-      if (index == this.highlightedIndex_) {
-        control.setHighlighted(false);
-        this.highlightedIndex_ = -1;
-      } else if (index < this.highlightedIndex_) {
-        this.highlightedIndex_--;
-      }
+  if (delta) {
+    if (goog.userAgent.GECKO) {
+      // Firefox's deltas are a tenth that of Chrome/Safari.
+      delta *= 10;
     }
+    var metrics = this.getMetrics_();
+    var pos = this.horizontalLayout_ ? metrics.viewLeft + delta :
+        metrics.viewTop + delta;
+    var limit = this.horizontalLayout_ ?
+        metrics.contentWidth - metrics.viewWidth :
+        metrics.contentHeight - metrics.viewHeight;
+    pos = Math.min(pos, limit);
+    pos = Math.max(pos, 0);
+    this.scrollbar_.set(pos);
+  }
 
-    // Remove the mapping from the child element ID map.
-    var childElem = control.getElement();
-    if (childElem && childElem.id && this.childElementIdMap_) {
-      goog.object.remove(this.childElementIdMap_, childElem.id);
+  // Don't scroll the page.
+  e.preventDefault();
+  // Don't propagate mousewheel event (zooming).
+  e.stopPropagation();
+};
+
+/**
+ * Is the flyout visible?
+ * @return {boolean} True if visible.
+ */
+Blockly.Flyout.prototype.isVisible = function() {
+  return this.svgGroup_ && this.svgGroup_.style.display == 'block';
+};
+
+/**
+ * Hide and empty the flyout.
+ */
+Blockly.Flyout.prototype.hide = function() {
+  if (!this.isVisible()) {
+    return;
+  }
+  this.svgGroup_.style.display = 'none';
+  // Delete all the event listeners.
+  for (var x = 0, listen; listen = this.listeners_[x]; x++) {
+    Blockly.unbindEvent_(listen);
+  }
+  this.listeners_.length = 0;
+  if (this.reflowWrapper_) {
+    this.workspace_.removeChangeListener(this.reflowWrapper_);
+    this.reflowWrapper_ = null;
+  }
+  // Do NOT delete the blocks here.  Wait until Flyout.show.
+  // https://neil.fraser.name/news/2014/08/09/
+};
+
+/**
+ * Show and populate the flyout.
+ * @param {!Array|string} xmlList List of blocks to show.
+ *     Variables and procedures have a custom set of blocks.
+ */
+Blockly.Flyout.prototype.show = function(xmlList) {
+  this.hide();
+  this.clearOldBlocks_();
+
+  if (xmlList == Blockly.Variables.NAME_TYPE) {
+    // Special category for variables.
+    xmlList =
+        Blockly.Variables.flyoutCategory(this.workspace_.targetWorkspace);
+  } else if (xmlList == Blockly.Procedures.NAME_TYPE) {
+    // Special category for procedures.
+    xmlList =
+        Blockly.Procedures.flyoutCategory(this.workspace_.targetWorkspace);
+  }
+
+  this.svgGroup_.style.display = 'block';
+  // Create the blocks to be shown in this flyout.
+  var blocks = [];
+  var gaps = [];
+  this.permanentlyDisabled_.length = 0;
+  for (var i = 0, xml; xml = xmlList[i]; i++) {
+    if (xml.tagName && xml.tagName.toUpperCase() == 'BLOCK') {
+      var curBlock = Blockly.Xml.domToBlock(xml, this.workspace_);
+      if (curBlock.disabled) {
+        // Record blocks that were initially disabled.
+        // Do not enable these blocks as a result of capacity filtering.
+        this.permanentlyDisabled_.push(curBlock);
+      }
+      blocks.push(curBlock);
+      var gap = parseInt(xml.getAttribute('gap'), 10);
+      gaps.push(isNaN(gap) ? this.MARGIN * 3 : gap);
     }
   }
 
-  control = /** @type {!goog.ui.Control} */ (
-      goog.ui.Container.superClass_.removeChild.call(
-          this, control, opt_unrender));
+  this.layoutBlocks_(blocks, gaps);
 
-  // Re-enable mouse event handling (in case the control is reused elsewhere).
-  control.setHandleMouseEvents(true);
-
-  return control;
-};
-
-
-// Container state management.
-
-
-/**
- * Returns the container's orientation.
- * @return {?goog.ui.Container.Orientation} Container orientation.
- */
-goog.ui.Container.prototype.getOrientation = function() {
-  return this.orientation_;
-};
-
-
-/**
- * Sets the container's orientation.
- * @param {goog.ui.Container.Orientation} orientation Container orientation.
- */
-// TODO(attila): Do we need to support containers with dynamic orientation?
-goog.ui.Container.prototype.setOrientation = function(orientation) {
-  if (this.getElement()) {
-    // Too late.
-    throw Error(goog.ui.Component.Error.ALREADY_RENDERED);
-  }
-
-  this.orientation_ = orientation;
-};
-
-
-/**
- * Returns true if the container's visibility is set to visible, false if
- * it is set to hidden.  A container that is set to hidden is guaranteed
- * to be hidden from the user, but the reverse isn't necessarily true.
- * A container may be set to visible but can otherwise be obscured by another
- * element, rendered off-screen, or hidden using direct CSS manipulation.
- * @return {boolean} Whether the container is set to be visible.
- */
-goog.ui.Container.prototype.isVisible = function() {
-  return this.visible_;
-};
-
-
-/**
- * Shows or hides the container.  Does nothing if the container already has
- * the requested visibility.  Otherwise, dispatches a SHOW or HIDE event as
- * appropriate, giving listeners a chance to prevent the visibility change.
- * @param {boolean} visible Whether to show or hide the container.
- * @param {boolean=} opt_force If true, doesn't check whether the container
- *     already has the requested visibility, and doesn't dispatch any events.
- * @return {boolean} Whether the visibility was changed.
- */
-goog.ui.Container.prototype.setVisible = function(visible, opt_force) {
-  if (opt_force || (this.visible_ != visible &&
-                    this.dispatchEvent(
-                        visible ? goog.ui.Component.EventType.SHOW :
-                                  goog.ui.Component.EventType.HIDE))) {
-    this.visible_ = visible;
-
-    var elem = this.getElement();
-    if (elem) {
-      goog.style.setElementShown(elem, visible);
-      if (this.isFocusable()) {
-        // Enable keyboard access only for enabled & visible containers.
-        this.renderer_.enableTabIndex(
-            this.getKeyEventTarget(), this.enabled_ && this.visible_);
-      }
-      if (!opt_force) {
-        this.dispatchEvent(
-            this.visible_ ? goog.ui.Container.EventType.AFTER_SHOW :
-                            goog.ui.Container.EventType.AFTER_HIDE);
-      }
+  // IE 11 is an incompetant browser that fails to fire mouseout events.
+  // When the mouse is over the background, deselect all blocks.
+  var deselectAll = function(e) {
+    var topBlocks = this.workspace_.getTopBlocks(false);
+    for (var i = 0, block; block = topBlocks[i]; i++) {
+      block.removeSelect();
     }
+  };
+  this.listeners_.push(Blockly.bindEvent_(this.svgBackground_, 'mouseover',
+      this, deselectAll));
 
-    return true;
+  if (this.horizontalLayout_) {
+    this.height_ = 0;
+  } else {
+    this.width_ = 0;
   }
+  this.reflow();
 
-  return false;
+  this.offsetHorizontalRtlBlocks(this.workspace_.getTopBlocks(false));
+  this.filterForCapacity_();
+
+  // Fire a resize event to update the flyout's scrollbar.
+  Blockly.svgResize(this.workspace_);
+  this.reflowWrapper_ = this.reflow.bind(this);
+  this.workspace_.addChangeListener(this.reflowWrapper_);
 };
 
-
 /**
- * Returns true if the container is enabled, false otherwise.
- * @return {boolean} Whether the container is enabled.
+ * Lay out the blocks in the flyout.
+ * @param {!Array.<!Blockly.BlockSvg>} blocks The blocks to lay out.
+ * @param {!Array.<number>} gaps The visible gaps between blocks.
+ * @private
  */
-goog.ui.Container.prototype.isEnabled = function() {
-  return this.enabled_;
-};
-
-
-/**
- * Enables/disables the container based on the {@code enable} argument.
- * Dispatches an {@code ENABLED} or {@code DISABLED} event prior to changing
- * the container's state, which may be caught and canceled to prevent the
- * container from changing state.  Also enables/disables child controls.
- * @param {boolean} enable Whether to enable or disable the container.
- */
-goog.ui.Container.prototype.setEnabled = function(enable) {
-  if (this.enabled_ != enable &&
-      this.dispatchEvent(
-          enable ? goog.ui.Component.EventType.ENABLE :
-                   goog.ui.Component.EventType.DISABLE)) {
-    if (enable) {
-      // Flag the container as enabled first, then update children.  This is
-      // because controls can't be enabled if their parent is disabled.
-      this.enabled_ = true;
-      this.forEachChild(function(child) {
-        // Enable child control unless it is flagged.
-        if (child.wasDisabled) {
-          delete child.wasDisabled;
-        } else {
-          child.setEnabled(true);
-        }
-      });
+Blockly.Flyout.prototype.layoutBlocks_ = function(blocks, gaps) {
+  var margin = this.MARGIN * this.workspace_.scale;
+  var cursorX = this.RTL ? margin : margin + Blockly.BlockSvg.TAB_WIDTH;
+  var cursorY = margin;
+  for (var i = 0, block; block = blocks[i]; i++) {
+    var allBlocks = block.getDescendants();
+    for (var j = 0, child; child = allBlocks[j]; j++) {
+      // Mark blocks as being inside a flyout.  This is used to detect and
+      // prevent the closure of the flyout if the user right-clicks on such a
+      // block.
+      child.isInFlyout = true;
+    }
+    block.render();
+    var root = block.getSvgRoot();
+    var blockHW = block.getHeightWidth();
+    var tab = block.outputConnection ? Blockly.BlockSvg.TAB_WIDTH : 0;
+    if (this.horizontalLayout_) {
+      cursorX += tab;
+    }
+    block.moveBy((this.horizontalLayout_ && this.RTL) ? -cursorX : cursorX,
+        cursorY);
+    if (this.horizontalLayout_) {
+      cursorX += (blockHW.width + gaps[i] - tab);
     } else {
-      // Disable children first, then flag the container as disabled.  This is
-      // because controls can't be disabled if their parent is already disabled.
-      this.forEachChild(function(child) {
-        // Disable child control, or flag it if it's already disabled.
-        if (child.isEnabled()) {
-          child.setEnabled(false);
-        } else {
-          child.wasDisabled = true;
+      cursorY += blockHW.height + gaps[i];
+    }
+
+    // Create an invisible rectangle under the block to act as a button.  Just
+    // using the block as a button is poor, since blocks have holes in them.
+    var rect = Blockly.createSvgElement('rect', {'fill-opacity': 0}, null);
+    rect.tooltip = block;
+    Blockly.Tooltip.bindMouseEvents(rect);
+    // Add the rectangles under the blocks, so that the blocks' tooltips work.
+    this.workspace_.getCanvas().insertBefore(rect, block.getSvgRoot());
+    block.flyoutRect_ = rect;
+    this.buttons_[i] = rect;
+
+    this.addBlockListeners_(root, block, rect);
+  }
+};
+
+/**
+ * Delete blocks and background buttons from a previous showing of the flyout.
+ * @private
+ */
+Blockly.Flyout.prototype.clearOldBlocks_ = function() {
+  // Delete any blocks from a previous showing.
+  var oldBlocks = this.workspace_.getTopBlocks(false);
+  for (var i = 0, block; block = oldBlocks[i]; i++) {
+    if (block.workspace == this.workspace_) {
+      block.dispose(false, false);
+    }
+  }
+  // Delete any background buttons from a previous showing.
+  for (var j = 0, rect; rect = this.buttons_[j]; j++) {
+    goog.dom.removeNode(rect);
+  }
+  this.buttons_.length = 0;
+};
+
+/**
+ * Add listeners to a block that has been added to the flyout.
+ * @param {!Element} root The root node of the SVG group the block is in.
+ * @param {!Blockly.Block} block The block to add listeners for.
+ * @param {!Element} rect The invisible rectangle under the block that acts as
+ *     a button for that block.
+ * @private
+ */
+Blockly.Flyout.prototype.addBlockListeners_ = function(root, block, rect) {
+  if (this.autoClose) {
+    this.listeners_.push(Blockly.bindEvent_(root, 'mousedown', null,
+        this.createBlockFunc_(block)));
+    this.listeners_.push(Blockly.bindEvent_(rect, 'mousedown', null,
+        this.createBlockFunc_(block)));
+  } else {
+    this.listeners_.push(Blockly.bindEvent_(root, 'mousedown', null,
+        this.blockMouseDown_(block)));
+    this.listeners_.push(Blockly.bindEvent_(rect, 'mousedown', null,
+        this.blockMouseDown_(block)));
+  }
+  this.listeners_.push(Blockly.bindEvent_(root, 'mouseover', block,
+      block.addSelect));
+  this.listeners_.push(Blockly.bindEvent_(root, 'mouseout', block,
+      block.removeSelect));
+  this.listeners_.push(Blockly.bindEvent_(rect, 'mouseover', block,
+      block.addSelect));
+  this.listeners_.push(Blockly.bindEvent_(rect, 'mouseout', block,
+      block.removeSelect));
+};
+
+/**
+ * Handle a mouse-down on an SVG block in a non-closing flyout.
+ * @param {!Blockly.Block} block The flyout block to copy.
+ * @return {!Function} Function to call when block is clicked.
+ * @private
+ */
+Blockly.Flyout.prototype.blockMouseDown_ = function(block) {
+  var flyout = this;
+  return function(e) {
+    Blockly.terminateDrag_();
+    Blockly.hideChaff();
+    if (Blockly.isRightButton(e)) {
+      // Right-click.
+      block.showContextMenu_(e);
+    } else {
+      // Left-click (or middle click)
+      Blockly.Css.setCursor(Blockly.Css.Cursor.CLOSED);
+      // Record the current mouse position.
+      Blockly.Flyout.startDownEvent_ = e;
+      Blockly.Flyout.startBlock_ = block;
+      Blockly.Flyout.startFlyout_ = flyout;
+      Blockly.Flyout.onMouseUpWrapper_ = Blockly.bindEvent_(document,
+          'mouseup', this, flyout.onMouseUp_);
+      Blockly.Flyout.onMouseMoveBlockWrapper_ = Blockly.bindEvent_(document,
+          'mousemove', this, flyout.onMouseMoveBlock_);
+    }
+    // This event has been handled.  No need to bubble up to the document.
+    e.stopPropagation();
+  };
+};
+
+/**
+ * Mouse down on the flyout background.  Start a vertical scroll drag.
+ * @param {!Event} e Mouse down event.
+ * @private
+ */
+Blockly.Flyout.prototype.onMouseDown_ = function(e) {
+  if (Blockly.isRightButton(e)) {
+    return;
+  }
+  Blockly.hideChaff(true);
+  Blockly.Flyout.terminateDrag_();
+  this.startDragMouseY_ = e.clientY;
+  this.startDragMouseX_ = e.clientX;
+  Blockly.Flyout.onMouseMoveWrapper_ = Blockly.bindEvent_(document, 'mousemove',
+      this, this.onMouseMove_);
+  Blockly.Flyout.onMouseUpWrapper_ = Blockly.bindEvent_(document, 'mouseup',
+      this, Blockly.Flyout.terminateDrag_);
+  // This event has been handled.  No need to bubble up to the document.
+  e.preventDefault();
+  e.stopPropagation();
+};
+
+/**
+ * Handle a mouse-up anywhere in the SVG pane.  Is only registered when a
+ * block is clicked.  We can't use mouseUp on the block since a fast-moving
+ * cursor can briefly escape the block before it catches up.
+ * @param {!Event} e Mouse up event.
+ * @private
+ */
+Blockly.Flyout.prototype.onMouseUp_ = function(e) {
+  if (Blockly.dragMode_ != Blockly.DRAG_FREE &&
+      !Blockly.WidgetDiv.isVisible()) {
+    Blockly.Events.fire(
+        new Blockly.Events.Ui(Blockly.Flyout.startBlock_, 'click',
+                              undefined, undefined));
+  }
+  Blockly.terminateDrag_();
+};
+
+/**
+ * Handle a mouse-move to vertically drag the flyout.
+ * @param {!Event} e Mouse move event.
+ * @private
+ */
+Blockly.Flyout.prototype.onMouseMove_ = function(e) {
+  var metrics = this.getMetrics_();
+  if (this.horizontalLayout_) {
+    if (metrics.contentWidth - metrics.viewWidth < 0) {
+      return;
+    }
+    var dx = e.clientX - this.startDragMouseX_;
+    this.startDragMouseX_ = e.clientX;
+    var x = metrics.viewLeft - dx;
+    x = goog.math.clamp(x, 0, metrics.contentWidth - metrics.viewWidth);
+    this.scrollbar_.set(x);
+  } else {
+    if (metrics.contentHeight - metrics.viewHeight < 0) {
+      return;
+    }
+    var dy = e.clientY - this.startDragMouseY_;
+    this.startDragMouseY_ = e.clientY;
+    var y = metrics.viewTop - dy;
+    y = goog.math.clamp(y, 0, metrics.contentHeight - metrics.viewHeight);
+    this.scrollbar_.set(y);
+  }
+};
+
+/**
+ * Mouse button is down on a block in a non-closing flyout.  Create the block
+ * if the mouse moves beyond a small radius.  This allows one to play with
+ * fields without instantiating blocks that instantly self-destruct.
+ * @param {!Event} e Mouse move event.
+ * @private
+ */
+Blockly.Flyout.prototype.onMouseMoveBlock_ = function(e) {
+  if (e.type == 'mousemove' && e.clientX <= 1 && e.clientY == 0 &&
+      e.button == 0) {
+    /* HACK:
+     Safari Mobile 6.0 and Chrome for Android 18.0 fire rogue mousemove events
+     on certain touch actions. Ignore events with these signatures.
+     This may result in a one-pixel blind spot in other browsers,
+     but this shouldn't be noticable. */
+    e.stopPropagation();
+    return;
+  }
+  var dx = e.clientX - Blockly.Flyout.startDownEvent_.clientX;
+  var dy = e.clientY - Blockly.Flyout.startDownEvent_.clientY;
+  // Still dragging within the sticky DRAG_RADIUS.
+  if (Math.sqrt(dx * dx + dy * dy) > Blockly.DRAG_RADIUS) {
+    // Create the block.
+    Blockly.Flyout.startFlyout_.createBlockFunc_(Blockly.Flyout.startBlock_)(
+        Blockly.Flyout.startDownEvent_);
+  }
+};
+
+/**
+ * Create a copy of this block on the workspace.
+ * @param {!Blockly.Block} originBlock The flyout block to copy.
+ * @return {!Function} Function to call when block is clicked.
+ * @private
+ */
+Blockly.Flyout.prototype.createBlockFunc_ = function(originBlock) {
+  var flyout = this;
+  return function(e) {
+    if (Blockly.isRightButton(e)) {
+      // Right-click.  Don't create a block, let the context menu show.
+      return;
+    }
+    if (originBlock.disabled) {
+      // Beyond capacity.
+      return;
+    }
+    Blockly.Events.disable();
+    var block = flyout.placeNewBlock_(originBlock);
+    Blockly.Events.enable();
+    if (Blockly.Events.isEnabled()) {
+      Blockly.Events.setGroup(true);
+      Blockly.Events.fire(new Blockly.Events.Create(block));
+    }
+    if (flyout.autoClose) {
+      flyout.hide();
+    } else {
+      flyout.filterForCapacity_();
+    }
+    // Start a dragging operation on the new block.
+    block.onMouseDown_(e);
+    Blockly.dragMode_ = Blockly.DRAG_FREE;
+    block.setDragging_(true);
+  };
+};
+
+/**
+ * Copy a block from the flyout to the workspace and position it correctly.
+ * @param {!Blockly.Block} originBlock The flyout block to copy..
+ * @return {!Blockly.Block} The new block in the main workspace.
+ * @private
+ */
+Blockly.Flyout.prototype.placeNewBlock_ = function(originBlock) {
+  var targetWorkspace = this.targetWorkspace_;
+  var svgRootOld = originBlock.getSvgRoot();
+  if (!svgRootOld) {
+    throw 'originBlock is not rendered.';
+  }
+  // Figure out where the original block is on the screen, relative to the upper
+  // left corner of the main workspace.
+  var xyOld = Blockly.getSvgXY_(svgRootOld, targetWorkspace);
+  // Take into account that the flyout might have been scrolled horizontally
+  // (separately from the main workspace).
+  // Generally a no-op in vertical mode but likely to happen in horizontal
+  // mode.
+  var scrollX = this.workspace_.scrollX;
+  var scale = this.workspace_.scale;
+  xyOld.x += scrollX / scale - scrollX;
+  // If the flyout is on the right side, (0, 0) in the flyout is offset to
+  // the right of (0, 0) in the main workspace.  Add an offset to take that
+  // into account.
+  if (this.toolboxPosition_ == Blockly.TOOLBOX_AT_RIGHT) {
+    scrollX = targetWorkspace.getMetrics().viewWidth - this.width_;
+    scale = targetWorkspace.scale;
+    // Scale the scroll (getSvgXY_ did not do this).
+    xyOld.x += scrollX / scale - scrollX;
+  }
+
+  // Take into account that the flyout might have been scrolled vertically
+  // (separately from the main workspace).
+  // Generally a no-op in horizontal mode but likely to happen in vertical
+  // mode.
+  var scrollY = this.workspace_.scrollY;
+  scale = this.workspace_.scale;
+  xyOld.y += scrollY / scale - scrollY;
+  // If the flyout is on the bottom, (0, 0) in the flyout is offset to be below
+  // (0, 0) in the main workspace.  Add an offset to take that into account.
+  if (this.toolboxPosition_ == Blockly.TOOLBOX_AT_BOTTOM) {
+    scrollY = targetWorkspace.getMetrics().viewHeight - this.height_;
+    scale = targetWorkspace.scale;
+    xyOld.y += scrollY / scale - scrollY;
+  }
+
+  // Create the new block by cloning the block in the flyout (via XML).
+  var xml = Blockly.Xml.blockToDom(originBlock);
+  var block = Blockly.Xml.domToBlock(xml, targetWorkspace);
+  var svgRootNew = block.getSvgRoot();
+  if (!svgRootNew) {
+    throw 'block is not rendered.';
+  }
+  // Figure out where the new block got placed on the screen, relative to the
+  // upper left corner of the workspace.  This may not be the same as the
+  // original block because the flyout's origin may not be the same as the
+  // main workspace's origin.
+  var xyNew = Blockly.getSvgXY_(svgRootNew, targetWorkspace);
+  // Scale the scroll (getSvgXY_ did not do this).
+  xyNew.x +=
+      targetWorkspace.scrollX / targetWorkspace.scale - targetWorkspace.scrollX;
+  xyNew.y +=
+      targetWorkspace.scrollY / targetWorkspace.scale - targetWorkspace.scrollY;
+  // If the flyout is collapsible and the workspace can't be scrolled.
+  if (targetWorkspace.toolbox_ && !targetWorkspace.scrollbar) {
+    xyNew.x += targetWorkspace.toolbox_.getWidth() / targetWorkspace.scale;
+    xyNew.y += targetWorkspace.toolbox_.getHeight() / targetWorkspace.scale;
+  }
+
+  // Move the new block to where the old block is.
+  block.moveBy(xyOld.x - xyNew.x, xyOld.y - xyNew.y);
+  return block;
+};
+
+/**
+ * Filter the blocks on the flyout to disable the ones that are above the
+ * capacity limit.
+ * @private
+ */
+Blockly.Flyout.prototype.filterForCapacity_ = function() {
+  var remainingCapacity = this.targetWorkspace_.remainingCapacity();
+  var blocks = this.workspace_.getTopBlocks(false);
+  for (var i = 0, block; block = blocks[i]; i++) {
+    if (this.permanentlyDisabled_.indexOf(block) == -1) {
+      var allBlocks = block.getDescendants();
+      block.setDisabled(allBlocks.length > remainingCapacity);
+    }
+  }
+};
+
+/**
+ * Return the deletion rectangle for this flyout.
+ * @return {goog.math.Rect} Rectangle in which to delete.
+ */
+Blockly.Flyout.prototype.getClientRect = function() {
+  var flyoutRect = this.svgGroup_.getBoundingClientRect();
+  // BIG_NUM is offscreen padding so that blocks dragged beyond the shown flyout
+  // area are still deleted.  Must be larger than the largest screen size,
+  // but be smaller than half Number.MAX_SAFE_INTEGER (not available on IE).
+  var BIG_NUM = 1000000000;
+  var x = flyoutRect.left;
+  var y = flyoutRect.top;
+  var width = flyoutRect.width;
+  var height = flyoutRect.height;
+
+  if (this.toolboxPosition_ == Blockly.TOOLBOX_AT_TOP) {
+    return new goog.math.Rect(-BIG_NUM, y - BIG_NUM, BIG_NUM * 2,
+        BIG_NUM + height);
+  } else if (this.toolboxPosition_ == Blockly.TOOLBOX_AT_BOTTOM) {
+    return new goog.math.Rect(-BIG_NUM, y, BIG_NUM * 2,
+        BIG_NUM + height);
+  } else if (this.toolboxPosition_ == Blockly.TOOLBOX_AT_LEFT) {
+    return new goog.math.Rect(x - BIG_NUM, -BIG_NUM, BIG_NUM + width,
+        BIG_NUM * 2);
+  } else {  // Right
+    return new goog.math.Rect(x, -BIG_NUM, BIG_NUM + width, BIG_NUM * 2);
+  }
+};
+
+/**
+ * Stop binding to the global mouseup and mousemove events.
+ * @private
+ */
+Blockly.Flyout.terminateDrag_ = function() {
+  if (Blockly.Flyout.onMouseUpWrapper_) {
+    Blockly.unbindEvent_(Blockly.Flyout.onMouseUpWrapper_);
+    Blockly.Flyout.onMouseUpWrapper_ = null;
+  }
+  if (Blockly.Flyout.onMouseMoveBlockWrapper_) {
+    Blockly.unbindEvent_(Blockly.Flyout.onMouseMoveBlockWrapper_);
+    Blockly.Flyout.onMouseMoveBlockWrapper_ = null;
+  }
+  if (Blockly.Flyout.onMouseMoveWrapper_) {
+    Blockly.unbindEvent_(Blockly.Flyout.onMouseMoveWrapper_);
+    Blockly.Flyout.onMouseMoveWrapper_ = null;
+  }
+  if (Blockly.Flyout.onMouseUpWrapper_) {
+    Blockly.unbindEvent_(Blockly.Flyout.onMouseUpWrapper_);
+    Blockly.Flyout.onMouseUpWrapper_ = null;
+  }
+  Blockly.Flyout.startDownEvent_ = null;
+  Blockly.Flyout.startBlock_ = null;
+  Blockly.Flyout.startFlyout_ = null;
+};
+
+/**
+ * Compute height of flyout.  Position button under each block.
+ * For RTL: Lay out the blocks right-aligned.
+ * @param {!Array<!Blockly.Block>} blocks The blocks to reflow.
+ */
+Blockly.Flyout.prototype.reflowHorizontal = function(blocks) {
+  this.workspace_.scale = this.targetWorkspace_.scale;
+  var flyoutHeight = 0;
+  for (var i = 0, block; block = blocks[i]; i++) {
+    flyoutHeight = Math.max(flyoutHeight, block.getHeightWidth().height);
+  }
+  flyoutHeight += this.MARGIN * 1.5;
+  flyoutHeight *= this.workspace_.scale;
+  flyoutHeight += Blockly.Scrollbar.scrollbarThickness;
+  if (this.height_ != flyoutHeight) {
+    for (var i = 0, block; block = blocks[i]; i++) {
+      var blockHW = block.getHeightWidth();
+      if (block.flyoutRect_) {
+        block.flyoutRect_.setAttribute('width', blockHW.width);
+        block.flyoutRect_.setAttribute('height', blockHW.height);
+        // Rectangles behind blocks with output tabs are shifted a bit.
+        var tab = block.outputConnection ? Blockly.BlockSvg.TAB_WIDTH : 0;
+        var blockXY = block.getRelativeToSurfaceXY();
+        block.flyoutRect_.setAttribute('y', blockXY.y);
+        block.flyoutRect_.setAttribute('x',
+            this.RTL ? blockXY.x - blockHW.width + tab : blockXY.x - tab);
+        // For hat blocks we want to shift them down by the hat height
+        // since the y coordinate is the corner, not the top of the hat.
+        var hatOffset =
+            block.startHat_ ? Blockly.BlockSvg.START_HAT_HEIGHT : 0;
+        if (hatOffset) {
+          block.moveBy(0, hatOffset);
         }
-      });
-      this.enabled_ = false;
-      this.setMouseButtonPressed(false);
+        block.flyoutRect_.setAttribute('y', blockXY.y);
+      }
+    }
+    // Record the height for .getMetrics_ and .position.
+    this.height_ = flyoutHeight;
+    Blockly.asyncSvgResize(this.workspace_);
+  }
+};
+
+/**
+ * Compute width of flyout.  Position button under each block.
+ * For RTL: Lay out the blocks right-aligned.
+ * @param {!Array<!Blockly.Block>} blocks The blocks to reflow.
+ */
+Blockly.Flyout.prototype.reflowVertical = function(blocks) {
+  this.workspace_.scale = this.targetWorkspace_.scale;
+  var flyoutWidth = 0;
+  for (var i = 0, block; block = blocks[i]; i++) {
+    var width = block.getHeightWidth().width;
+    if (block.outputConnection) {
+      width -= Blockly.BlockSvg.TAB_WIDTH;
+    }
+    flyoutWidth = Math.max(flyoutWidth, width);
+  }
+  flyoutWidth += this.MARGIN * 1.5 + Blockly.BlockSvg.TAB_WIDTH;
+  flyoutWidth *= this.workspace_.scale;
+  flyoutWidth += Blockly.Scrollbar.scrollbarThickness;
+  if (this.width_ != flyoutWidth) {
+    for (var i = 0, block; block = blocks[i]; i++) {
+      var blockHW = block.getHeightWidth();
+      if (this.RTL) {
+        // With the flyoutWidth known, right-align the blocks.
+        var oldX = block.getRelativeToSurfaceXY().x;
+        var dx = flyoutWidth - this.MARGIN;
+        dx /= this.workspace_.scale;
+        dx -= Blockly.BlockSvg.TAB_WIDTH;
+        block.moveBy(dx - oldX, 0);
+      }
+      if (block.flyoutRect_) {
+        block.flyoutRect_.setAttribute('width', blockHW.width);
+        block.flyoutRect_.setAttribute('height', blockHW.height);
+        // Blocks with output tabs are shifted a bit.
+        var tab = block.outputConnection ? Blockly.BlockSvg.TAB_WIDTH : 0;
+        var blockXY = block.getRelativeToSurfaceXY();
+        block.flyoutRect_.setAttribute('x',
+            this.RTL ? blockXY.x - blockHW.width + tab : blockXY.x - tab);
+        // For hat blocks we want to shift them down by the hat height
+        // since the y coordinate is the corner, not the top of the hat.
+        var hatOffset =
+            block.startHat_ ? Blockly.BlockSvg.START_HAT_HEIGHT : 0;
+        if (hatOffset) {
+          block.moveBy(0, hatOffset);
+        }
+        block.flyoutRect_.setAttribute('y', blockXY.y);
+      }
+    }
+    // Record the width for .getMetrics_ and .position.
+    this.width_ = flyoutWidth;
+    Blockly.asyncSvgResize(this.workspace_);
+  }
+};
+
+/**
+ * Reflow blocks and their buttons.
+ */
+Blockly.Flyout.prototype.reflow = function() {
+  var blocks = this.workspace_.getTopBlocks(false);
+  if (this.horizontalLayout_) {
+    this.reflowHorizontal(blocks);
+  } else {
+    this.reflowVertical(blocks);
+  }
+};
+
+/**
+ * In the horizontal RTL case all of the blocks will be laid out to the left of
+ * the origin, but we won't know how big the workspace is until the layout pass
+ * is done.
+ * Now that it's done, shunt all the blocks to be right of the origin.
+ * @param {!Array<!Blockly.Block>} blocks The blocks to reposition.
+ */
+Blockly.Flyout.prototype.offsetHorizontalRtlBlocks = function(blocks) {
+  if (this.horizontalLayout_ && this.RTL) {
+    // We don't know this workspace's view width yet.
+    this.position();
+    try {
+      var optionBox = this.workspace_.getCanvas().getBBox();
+    } catch (e) {
+      // Firefox has trouble with hidden elements (Bug 528969).
+      optionBox = {height: 0, y: 0, width: 0, x: 0};
     }
 
-    if (this.isFocusable()) {
-      // Enable keyboard access only for enabled & visible components.
-      this.renderer_.enableTabIndex(
-          this.getKeyEventTarget(), enable && this.visible_);
+    var offset = Math.max(-optionBox.x + this.MARGIN,
+        this.width_ / this.workspace_.scale);
+
+    for (var i = 0, block; block = blocks[i]; i++) {
+      block.moveBy(offset, 0);
+      if (block.flyoutRect_) {
+        block.flyoutRect_.setAttribute('x',
+            offset + Number(block.flyoutRect_.getAttribute('x')));
+      }
     }
   }
-};
-
-
-/**
- * Returns true if the container is focusable, false otherwise.  The default
- * is true.  Focusable containers always have a tab index and allocate a key
- * handler to handle keyboard events while focused.
- * @return {boolean} Whether the component is focusable.
- */
-goog.ui.Container.prototype.isFocusable = function() {
-  return this.focusable_;
-};
-
-
-/**
- * Sets whether the container is focusable.  The default is true.  Focusable
- * containers always have a tab index and allocate a key handler to handle
- * keyboard events while focused.
- * @param {boolean} focusable Whether the component is to be focusable.
- */
-goog.ui.Container.prototype.setFocusable = function(focusable) {
-  if (focusable != this.focusable_ && this.isInDocument()) {
-    this.enableFocusHandling_(focusable);
-  }
-  this.focusable_ = focusable;
-  if (this.enabled_ && this.visible_) {
-    this.renderer_.enableTabIndex(this.getKeyEventTarget(), focusable);
-  }
-};
-
-
-/**
- * Returns true if the container allows children to be focusable, false
- * otherwise.  Only effective if the container is not focusable.
- * @return {boolean} Whether children should be focusable.
- */
-goog.ui.Container.prototype.isFocusableChildrenAllowed = function() {
-  return this.allowFocusableChildren_;
-};
-
-
-/**
- * Sets whether the container allows children to be focusable, false
- * otherwise.  Only effective if the container is not focusable.
- * @param {boolean} focusable Whether the children should be focusable.
- */
-goog.ui.Container.prototype.setFocusableChildrenAllowed = function(focusable) {
-  this.allowFocusableChildren_ = focusable;
-};
-
-
-/**
- * @return {boolean} Whether highlighting a child component should also open it.
- */
-goog.ui.Container.prototype.isOpenFollowsHighlight = function() {
-  return this.openFollowsHighlight_;
-};
-
-
-/**
- * Sets whether highlighting a child component should also open it.
- * @param {boolean} follow Whether highlighting a child component also opens it.
- */
-goog.ui.Container.prototype.setOpenFollowsHighlight = function(follow) {
-  this.openFollowsHighlight_ = follow;
-};
-
-
-// Highlight management.
-
-
-/**
- * Returns the index of the currently highlighted item (-1 if none).
- * @return {number} Index of the currently highlighted item.
- */
-goog.ui.Container.prototype.getHighlightedIndex = function() {
-  return this.highlightedIndex_;
-};
-
-
-/**
- * Highlights the item at the given 0-based index (if any).  If another item
- * was previously highlighted, it is un-highlighted.
- * @param {number} index Index of item to highlight (-1 removes the current
- *     highlight).
- */
-goog.ui.Container.prototype.setHighlightedIndex = function(index) {
-  var child = this.getChildAt(index);
-  if (child) {
-    child.setHighlighted(true);
-  } else if (this.highlightedIndex_ > -1) {
-    this.getHighlighted().setHighlighted(false);
-  }
-};
-
-
-/**
- * Highlights the given item if it exists and is a child of the container;
- * otherwise un-highlights the currently highlighted item.
- * @param {goog.ui.Control} item Item to highlight.
- */
-goog.ui.Container.prototype.setHighlighted = function(item) {
-  this.setHighlightedIndex(this.indexOfChild(item));
-};
-
-
-/**
- * Returns the currently highlighted item (if any).
- * @return {goog.ui.Control?} Highlighted item (null if none).
- */
-goog.ui.Container.prototype.getHighlighted = function() {
-  return this.getChildAt(this.highlightedIndex_);
-};
-
-
-/**
- * Highlights the first highlightable item in the container
- */
-goog.ui.Container.prototype.highlightFirst = function() {
-  this.highlightHelper(function(index, max) {
-    return (index + 1) % max;
-  }, this.getChildCount() - 1);
-};
-
-
-/**
- * Highlights the last highlightable item in the container.
- */
-goog.ui.Container.prototype.highlightLast = function() {
-  this.highlightHelper(function(index, max) {
-    index--;
-    return index < 0 ? max - 1 : index;
-  }, 0);
-};
-
-
-/**
- * Highlights the next highlightable item (or the first if nothing is currently
- * highlighted).
- */
-goog.ui.Container.prototype.highlightNext = function() {
-  this.highlightHelper(function(index, max) {
-    return (index + 1) % max;
-  }, this.highlightedIndex_);
-};
-
-
-/**
- * Highlights the previous highlightable item (or the last if nothing is
- * currently highlighted).
- */
-goog.ui.Container.prototype.highlightPrevious = function() {
-  this.highlightHelper(function(index, max) {
-    index--;
-    return index < 0 ? max - 1 : index;
-  }, this.highlightedIndex_);
-};
-
-
-/**
- * Helper function that manages the details of moving the highlight among
- * child controls in response to keyboard events.
- * @param {function(this: goog.ui.Container, number, number) : number} fn
- *     Function that accepts the current and maximum indices, and returns the
- *     next index to check.
- * @param {number} startIndex Start index.
- * @return {boolean} Whether the highlight has changed.
- * @protected
- */
-goog.ui.Container.prototype.highlightHelper = function(fn, startIndex) {
-  // If the start index is -1 (meaning there's nothing currently highlighted),
-  // try starting from the currently open item, if any.
-  var curIndex =
-      startIndex < 0 ? this.indexOfChild(this.openItem_) : startIndex;
-  var numItems = this.getChildCount();
-
-  curIndex = fn.call(this, curIndex, numItems);
-  var visited = 0;
-  while (visited <= numItems) {
-    var control = this.getChildAt(curIndex);
-    if (control && this.canHighlightItem(control)) {
-      this.setHighlightedIndexFromKeyEvent(curIndex);
-      return true;
-    }
-    visited++;
-    curIndex = fn.call(this, curIndex, numItems);
-  }
-  return false;
-};
-
-
-/**
- * Returns whether the given item can be highlighted.
- * @param {goog.ui.Control} item The item to check.
- * @return {boolean} Whether the item can be highlighted.
- * @protected
- */
-goog.ui.Container.prototype.canHighlightItem = function(item) {
-  return item.isVisible() && item.isEnabled() &&
-      item.isSupportedState(goog.ui.Component.State.HOVER);
-};
-
-
-/**
- * Helper method that sets the highlighted index to the given index in response
- * to a keyboard event.  The base class implementation simply calls the
- * {@link #setHighlightedIndex} method, but subclasses can override this
- * behavior as needed.
- * @param {number} index Index of item to highlight.
- * @protected
- */
-goog.ui.Container.prototype.setHighlightedIndexFromKeyEvent = function(index) {
-  this.setHighlightedIndex(index);
-};
-
-
-/**
- * Returns the currently open (expanded) control in the container (null if
- * none).
- * @return {goog.ui.Control?} The currently open control.
- */
-goog.ui.Container.prototype.getOpenItem = function() {
-  return this.openItem_;
-};
-
-
-/**
- * Returns true if the mouse button is pressed, false otherwise.
- * @return {boolean} Whether the mouse button is pressed.
- */
-goog.ui.Container.prototype.isMouseButtonPressed = function() {
-  return this.mouseButtonPressed_;
-};
-
-
-/**
- * Sets or clears the "mouse button pressed" flag.
- * @param {boolean} pressed Whether the mouse button is presed.
- */
-goog.ui.Container.prototype.setMouseButtonPressed = function(pressed) {
-  this.mouseButtonPressed_ = pressed;
 };
