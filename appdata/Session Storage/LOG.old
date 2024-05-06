@@ -1,3 +1,9 @@
+<<<<<<< HEAD
 2024/05/01-22:40:41.038 4064 Reusing MANIFEST C:\KidCode\DATN-EasyCode1\appdata\Session Storage/MANIFEST-000001
 2024/05/01-22:40:41.038 4064 Recovering log #3
 2024/05/01-22:40:41.039 4064 Reusing old log C:\KidCode\DATN-EasyCode1\appdata\Session Storage/000003.log 
+=======
+2024/05/02-21:20:04.025 4020 Reusing MANIFEST C:\KidCode\appdata\Session Storage/MANIFEST-000001
+2024/05/02-21:20:04.032 4020 Recovering log #4
+2024/05/02-21:20:04.033 4020 Reusing old log C:\KidCode\appdata\Session Storage/000004.log 
+>>>>>>> 266579dc7e895655fb8eb2307aa685aaa1f51807

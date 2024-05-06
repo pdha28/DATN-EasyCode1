@@ -232,7 +232,7 @@ var pin =this.getFieldValue("PIN") ;
       Blockly.Arduino.addDeclaration('dht11','DHT dht(DHTPIN, DHTTYPE);');
       Blockly.Arduino.addSetup('dht11','dht.begin();',false);
       Blockly.Arduino.addFunction('kcbot_dht11_temp',`
-      double getdht11(int data)
+      int getdht11(int data)
       {
           int readdht11;
           switch (data) {
@@ -865,13 +865,11 @@ Blockly.Arduino.freeRTOS = function(){
   var name_task_unsign = removeVietnameseTones(removeSpaces(this.getFieldValue('Name task')));
   var name_task = this.getFieldValue('Name task');
   var memory_task = this.getFieldValue('Memory task');
-  var priority_task = this.getFieldValue('Priority task');
-  var function_task =Blockly.Arduino.valueToCode(
-    this, 'Text', Blockly.Arduino.ORDER_ATOMIC) || '""';
+  var priority_task = this.getFieldValue('Priority task')
   Blockly.Arduino.addInclude('Library freeRTOS','#include <Arduino_FreeRTOS.h>');
   Blockly.Arduino.addDeclaration('Task','void ' +name_task_unsign+ '(void *pvParameters);',false);
   Blockly.Arduino.addSetup('Setup task','xTaskCreate('+name_task_unsign+',(const portCHAR *)"'+name_task+'",'+memory_task+',NULL,'+priority_task+',NULL);');
-  Blockly.Arduino.addDeclaration('Function of task','void '+removeVietnameseTones(removeSpaces(this.getFieldValue('Name task')))+'(void *pvParameters)\n{\n(void) pvParamemters;\nwhile(1){'+function_task+'}\n};');
+
 
   var code = '// updating';
   return code ;
@@ -882,7 +880,6 @@ Blockly.Arduino.freeRTOS = function(){
 Blockly.Arduino.AirsenseReadDataBME280 = function(){
 var pin_sda = this.getFieldValue('I2C_port_SDA');
 var pin_scl = this.getFieldValue('I2C_port_SCL');
-var type_data = this.getFieldValue('Type data BME280');
 
 Blockly.Arduino.addInclude('bme280','#include <Wire.h>\n#include <Adafruit_Sensor.h>\n#include <Adafruit_BMP280.h>\n');
 Blockly.Arduino.addDeclaration('Line head BME280','//------BME280------\n');
@@ -891,21 +888,13 @@ Blockly.Arduino.addDeclaration('PORT I2C SDA','#define I2C_PORT_SDA  '+pin_sda+'
 Blockly.Arduino.addDeclaration('PORT I2C SCL','#define I2C_PORT_SCL  '+pin_scl+'',false);
 Blockly.Arduino.addDeclaration('BME280_object','Adafruit_BMP280 bmp280;',false);
 Blockly.Arduino.addDeclaration('Line tail BME280','//------BME280------\n');
-Blockly.Arduino.addDeclaration('Function select data',`
-  double selectDataOfBME280(String data){
-    if(data == "Nhiệt độ") return bmp280.readTemperature();
-    if(data == "Độ ẩm") return bmp280.readHumidity();
-    if(data == "Áp suất") return bmp280.readPreassure();
-  }
 
-`)
-
-Blockly.Arduino.addSetup('BME280_setup_PORT_I2C','Wire.begin(I2C_PORT_SDA, I2C_PORT_SCL);',false);
+Blockly.Arduino.addSetup('BME280_setup_PORT_I2C','Wire.begin(I2C_PORT_SDA, I2C_PORT_SC);',false);
 Blockly.Arduino.addSetup('BME280_setup','bmp280.begin(BMP280_I2C_ADDRESS);',false);
 
 
-var code = 'selecDataOfBME280("'+type_data+'")';
-return [code, Blockly.Arduino.ORDER_ADDITIVE];
+var code = '//------BME280------\nfloat temperature = bmp280.readTemperature();\nfloat humidity = bmp280.readHumidity();\nfloat pressure = bmp280.readPressure;\n//------BME280------\n';
+return code;
 };
 
 Blockly.Arduino.AirsenseReadDataPMS7003 = function () {
@@ -913,7 +902,6 @@ var Port_uart = this.getFieldValue('Port uart');
 var Port_rx = this.getFieldValue('Port rx');
 var Port_tx = this.getFieldValue('Port tx');
 var Baud_speed = this.getFieldValue('Baud speed');
-var type_data_PMS7003 = this.getFieldValue('Type data PMS7003');
 
 Blockly.Arduino.addDeclaration('Line head PMS7003','//------PMS7003------\n');
 Blockly.Arduino.addInclude('Library Uart Hardware & PMS7003','#include "PMS.h"\n#include <HardwareSerial.h>');
@@ -924,24 +912,12 @@ Blockly.Arduino.addDeclaration('Initialize PMS1','HardwareSerial SerialPMS(UART_
 Blockly.Arduino.addDeclaration('Initialize PMS2','PMS pms(SerialPMS);',false);
 Blockly.Arduino.addDeclaration('Initialize PMS3','PMS::DATA data;',false);
 Blockly.Arduino.addDeclaration('Line tail PMS7003','//------PMS7003------\n');
-Blockly.Arduino.addDeclaration('Function select type data of PMS7003',`
-  double selectDataOfPMS7003(String type_data, PMS::DATA data){
-    pms.requestRead();
-    if(type_data == "PM1") return data.PM_AE_UG_1_0;
-    if(type_data == "PM2.5") return data.PM_AE_UG_2_5;
-    if(type_data == "PM10") return data.PM_AE_UG_10_0;
-    return -1.0 ;
-  }
-  
-`)
-
-
 Blockly.Arduino.addSetup('Set up pms1','SerialPMS.begin('+Baud_speed+', SERIAL_8N1, RX_PORT_PMS7003, TX_PORT_PMS7003);')
-Blockly.Arduino.addSetup('Set up pms2',`pms.passiveMode();\npms.wakeup();\ndelay(3000);`)
+Blockly.Arduino.addSetup('Set up pms2','pms.passiveMode();')
 
 
-var code = 'selectDataOfPMS7003("'+type_data_PMS7003+'",data)';
-return [code, Blockly.Arduino.ORDER_ADDITIVE];
+var code = '//------PMS7003------\npms.wakeup();\ndelay(3000);\npms.requestRead();\nfloat pm1_0 = data.PM_AE_UG_1_0\nfloat pm2_5 = data.PM_AE_UG_2_5\nfloat pm10_0 = data.PM_AE_UG_10_0\n//------PMS7003------\n';
+return code ;
 
 
 }
@@ -1002,7 +978,7 @@ Blockly.Arduino.addSetup('setup1_mhz14a','SerialMHZ14A.begin('+Baud_speed+');');
 Blockly.Arduino.addSetup('setup2_mhz14a','mhz14a_sensor.begin(SerialMHZ14A,4000);');
 Blockly.Arduino.addSetup('setup3_mhz14a','mhz14a_sensor.setDebug(false);');
 var code =  '//------MHZ14A------\nfloat  CO2 = mhz14a_sensor.readConcentrationPPM(0x01);\n//------MHZ14A------';
-return [code, Blockly.Arduino.ORDER_ADDITIVE];
+return  code  ;
 }
 Blockly.Arduino.SetDateDS3231 = function(){
   var date_Time= this.getFieldValue('DATE')
