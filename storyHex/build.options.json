@@ -1,0 +1,12 @@
+{
+  "additionalFiles": "",
+  "builtInLibrariesFolders": "D:\\kidscode\\kidscode_souce_code_12_6\\kidscode_souce_code\\arduino\\libraries",
+  "builtInToolsFolders": "D:\\kidscode\\kidscode_souce_code_12_6\\kidscode_souce_code\\arduino\\tools-builder,D:\\kidscode\\kidscode_souce_code_12_6\\kidscode_souce_code\\arduino\\hardware\\tools\\avr,C:\\Users\\Admin\\AppData\\Local\\Arduino15\\packages",
+  "compiler.optimization_flags": "",
+  "customBuildProperties": "build.warn_data_percentage=75,runtime.tools.avr-gcc.path=D:\\kidscode\\kidscode_souce_code_12_6\\kidscode_souce_code\\arduino\\hardware\\tools\\avr,runtime.tools.avr-gcc-7.3.0-atmel3.6.1-arduino7.path=D:\\kidscode\\kidscode_souce_code_12_6\\kidscode_souce_code\\arduino\\hardware\\tools\\avr,runtime.tools.arduinoOTA.path=D:\\kidscode\\kidscode_souce_code_12_6\\kidscode_souce_code\\arduino\\hardware\\tools\\avr,runtime.tools.arduinoOTA-1.3.0.path=D:\\kidscode\\kidscode_souce_code_12_6\\kidscode_souce_code\\arduino\\hardware\\tools\\avr,runtime.tools.avrdude.path=D:\\kidscode\\kidscode_souce_code_12_6\\kidscode_souce_code\\arduino\\hardware\\tools\\avr,runtime.tools.avrdude-6.3.0-arduino17.path=D:\\kidscode\\kidscode_souce_code_12_6\\kidscode_souce_code\\arduino\\hardware\\tools\\avr",
+  "fqbn": "arduino:avr:uno",
+  "hardwareFolders": "D:\\kidscode\\kidscode_souce_code_12_6\\kidscode_souce_code\\arduino\\hardware,C:\\Users\\Admin\\AppData\\Local\\Arduino15\\packages",
+  "otherLibrariesFolders": "C:\\Users\\Admin\\Documents\\Arduino\\libraries",
+  "runtime.ide.version": "10813",
+  "sketchLocation": "D:\\kidscode\\kidscode_v2\\KidscodeSketch\\KidscodeSketch.ino"
+}
