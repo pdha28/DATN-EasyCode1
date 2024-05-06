@@ -52,6 +52,15 @@ var Airsense_toolbox =
             '<field name="Time"></field>'+
         '</block>'+
         '<block type="GetDateTimeDS3231">'+
+        '<field name="SDA"> 20 </field>' +
+        '<field name="SCL"> 21 </field>' +
+        '<field name="RS"> 1 </field>' +
+        '<field name="En"> 2 </field>' +
+        '<field name="D1"> 4 </field>' +
+        '<field name="D1"> 5 </field>' +
+        '<field name="D1"> 6 </field>' +
+        '<field name="D1"> 7 </field>' +
+
         '</block>'+
         '<block type="ConnectMQTT">'+
         '</block>'+

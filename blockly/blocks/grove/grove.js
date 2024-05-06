@@ -907,6 +907,24 @@ Blockly.Blocks['GetDateTimeDS3231']={
   init: function() {
     this.appendDummyInput()
         .appendField(Blockly.Msg.GetDateTimeDS3231)
+        .appendField("SDA")
+        .appendField(new Blockly.FieldDropdown(Digital_pin_esp32), "SDA")
+        .appendField("SCL")
+        .appendField(new Blockly.FieldDropdown(Digital_pin_esp32), "SCL")
+    this.appendDummyInput()
+        .appendField("LCD")
+        .appendField("RS")
+        .appendField(new Blockly.FieldDropdown(Digital_pin_esp32), "RS")
+        .appendField("En")
+        .appendField(new Blockly.FieldDropdown(Digital_pin_esp32), "En")
+        .appendField("D1")
+        .appendField(new Blockly.FieldDropdown(Digital_pin_esp32), "D1")
+        .appendField("D2")
+        .appendField(new Blockly.FieldDropdown(Digital_pin_esp32), "D2")
+        .appendField("D3")
+        .appendField(new Blockly.FieldDropdown(Digital_pin_esp32), "D3")
+        .appendField("D4")
+        .appendField(new Blockly.FieldDropdown(Digital_pin_esp32), "D4")
     this.setPreviousStatement(true, null);
     this.setNextStatement(true, null);
     this.setColour('#00abd6');
@@ -917,11 +935,7 @@ Blockly.Blocks['GetDateTimeDS3231']={
 Blockly.Blocks['ConnectMQTT']={
   init: function() {
     this.appendDummyInput()
-        .appendField(Blockly.Msg.SendDataMQTT)
-        .appendField("Wifi ID")
-        .appendField(new Blockly.FieldTextInput(""), "ID")
-        .appendField("PassWord")
-        .appendField(new Blockly.FieldTextInput(""), "PassWord");
+        .appendField(Blockly.Msg.ConnectMQTT)
     this.setPreviousStatement(true, null);
     this.setNextStatement(true, null);
     this.setColour('#00abd6');

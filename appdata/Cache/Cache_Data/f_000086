@@ -1023,10 +1023,21 @@ Blockly.Arduino.SetTimeDS3231 = function(){
 
 }
 Blockly.Arduino.GetDateTimeDS3231 = function(){
+    var SDA_3231=this.getFieldValue('SDA');
+    var SCL_3231=this.getFieldValue('SCL');
+    var rs=this.getFieldValue('RS');
+    var en=this.getFieldValue('En');
+    var d1=this.getFieldValue('D1');
+    var d1=this.getFieldValue('D2');
+    var d1=this.getFieldValue('D3');
+    var d1=this.getFieldValue('D4');
+
     Blockly.Arduino.addInclude('Lib DS3231', '#include <DS3231.h>');
     Blockly.Arduino.addInclude('Lib LiquidCrystal ', '#include <LiquidCrystal.h>');
-    Blockly.Arduino.addDeclaration('DS3231_dec','DS3231  rtc(SDA, SCL);');
-    Blockly.Arduino.addDeclaration('LC_dec','LiquidCrystal lcd(1, 2, 4, 5, 6, 7);');
+    Blockly.Arduino.addDeclaration('DS3231_SDA','#define SDA_DS3231 '+SDA_3231+'');
+    Blockly.Arduino.addDeclaration('DS3231_SCL','#define SCL_DS3231 '+SCL_3231+'');
+    Blockly.Arduino.addDeclaration('DS3231_dec','DS3231  rtc(SDA_DS3231, SCL_DS3231);');
+    Blockly.Arduino.addDeclaration('LC_dec','LiquidCrystal lcd('+rs+','+en+','+d1+','+d2+','+d3+','+d4+');');
     Blockly.Arduino.addSetup('DS3231_setup','rtc.begin();');
     Blockly.Arduino.addSetup('LC_setup',' lcd.begin(16,2);');
     Blockly.Arduino
@@ -1040,10 +1051,8 @@ Blockly.Arduino.ConnectMQTT = function(){
   var PW = this.getFieldValue('PassWord');
   Blockly.Arduino.addInclude('MQTT client', '#include <ArduinoMqttClient.h>');
   Blockly.Arduino.addInclude('WiFiNINA', '#include <WiFiNINA.h>');
-  Blockly.Arduino.addDeclaration('ID Wifi', '#define SECRET_SSID "'+ID+'"');
-  Blockly.Arduino.addDeclaration('PassWord Wifi', '#define SECRET_PASS "'+PW+'"');
-  Blockly.Arduino.addDeclaration('setup ID', 'char ssid[] = SECRET_SSID;');
-  Blockly.Arduino.addDeclaration('setup PW', 'char pass[] = SECRET_PASS;');
+  Blockly.Arduino.addDeclaration('setup ID', 'char ssid[] = SSID;');
+  Blockly.Arduino.addDeclaration('setup PW', 'char pass[] = PASSWORD;');
   Blockly.Arduino.addDeclaration('create wifi client', 'WiFiClient wifiClient;');
   Blockly.Arduino.addDeclaration('connect MQTT client','MqttClient mqttClient(wifiClient);')
 
