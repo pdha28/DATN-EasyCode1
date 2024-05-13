@@ -879,38 +879,30 @@ Blockly.Blocks['AirsenseReadDataMHZ14A'] =  {
   },
 
 }
-Blockly.Blocks['SetDateDS3231'] = {
+Blockly.Blocks['SetUpDS3231'] = {
   init: function() {
     this.appendDummyInput()
-        .appendField(Blockly.Msg.SetDateDS3231)
-        .appendField(new Blockly.FieldTextInput(" "), 'DATE');
-    this.setPreviousStatement(true, null);
-    this.setNextStatement(true, null);
-    this.setColour('#00abd6');
- this.setTooltip("");
- this.setHelpUrl("");
-  }
-};
-Blockly.Blocks['SetTimeDS3231'] = {
-  init: function() {
-    this.appendDummyInput()
-        .appendField(Blockly.Msg.SetTimeDS3231)
+        .appendField("Nhập ngày,tháng,năm : ")
+        .appendField(new Blockly.FieldTextInput(" "), 'DATE')
+        .appendField("Nhập giờ : ")
         .appendField(new Blockly.FieldTextInput(" "), 'TIME');
-    this.setPreviousStatement(true, null);
-    this.setNextStatement(true, null);
-    this.setColour('#00abd6');
- this.setTooltip("");
- this.setHelpUrl("");
-  }
-};
-Blockly.Blocks['GetDateTimeDS3231']={
-  init: function() {
     this.appendDummyInput()
-        .appendField(Blockly.Msg.GetDateTimeDS3231)
         .appendField("SDA")
         .appendField(new Blockly.FieldDropdown(Digital_pin_esp32), "SDA")
         .appendField("SCL")
         .appendField(new Blockly.FieldDropdown(Digital_pin_esp32), "SCL")
+    this.setPreviousStatement(true, null);
+    this.setNextStatement(true, null);
+    this.setColour('#00abd6');
+ this.setTooltip("");
+ this.setHelpUrl("");
+  }
+};
+
+Blockly.Blocks['GetDateTimeDS3231']={
+  init: function() {
+    this.appendDummyInput()
+        .appendField(Blockly.Msg.GetDateTimeDS3231)
     this.appendDummyInput()
         .appendField("LCD")
         .appendField("RS")
@@ -947,6 +939,53 @@ Blockly.Blocks['SendDataMQTT']={
   init: function() {
     this.appendDummyInput()
         .appendField("Gửi dữ liệu thông qua MQTT ");
+    this.setPreviousStatement(true, null);
+    this.setNextStatement(true, null);
+    this.setColour('#00abd6');
+ this.setTooltip("");
+ this.setHelpUrl("");
+}
+};
+Blockly.Blocks['BMEMQTT']={
+  init: function() {
+    this.appendDummyInput()
+        .appendField("Gửi dữ liệu BME qua MQTT ")
+        .appendField(new Blockly.FieldDropdown([["Nhiệt độ","Nhiệt độ"],["Độ ẩm","Độ ẩm"],["Áp suất","Áp suất"]]), "BME280")
+    this.setPreviousStatement(true, null);
+    this.setNextStatement(true, null);
+    this.setColour('#00abd6');
+ this.setTooltip("");
+ this.setHelpUrl("");
+}
+};
+Blockly.Blocks['PMSMQTT']={
+  init: function() {
+    this.appendDummyInput()
+        .appendField("Gửi dữ liệu PMS qua MQTT ")
+        .appendField(new Blockly.FieldDropdown([["PM1","PM1"],["PM2.5","PM2.5"],["PM10","PM10"]]), "PMS7003")
+    this.setPreviousStatement(true, null);
+    this.setNextStatement(true, null);
+    this.setColour('#00abd6');
+ this.setTooltip("");
+ this.setHelpUrl("");
+}
+};
+Blockly.Blocks['MHZMQTT']={
+  init: function() {
+    this.appendDummyInput()
+        .appendField("Gửi dữ liệu MHZ qua MQTT ")
+    this.setPreviousStatement(true, null);
+    this.setNextStatement(true, null);
+    this.setColour('#00abd6');
+ this.setTooltip("");
+ this.setHelpUrl("");
+}
+};
+Blockly.Blocks['ReceiveMQTTData']={
+  init: function() {
+    this.appendDummyInput()
+        .appendField("Nhận dữ liệu qua MQTT ")
+        .appendField(new Blockly.FieldDropdown([["Nhiệt độ","Nhiệt độ"],["Độ ẩm","Độ ẩm"],["Áp suất","Áp suất"],["PM1","PM1"],["PM2.5","PM2.5"],["PM10","PM10"],["MHZ14A","MHZ14A"]]), "type sensor data")
     this.setPreviousStatement(true, null);
     this.setNextStatement(true, null);
     this.setColour('#00abd6');

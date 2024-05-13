@@ -1,4 +1,4 @@
-// Copyright 2007 The Closure Library Authors. All Rights Reserved.
+// Copyright 2014 The Closure Library Authors. All Rights Reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,538 +13,437 @@
 // limitations under the License.
 
 /**
- * @fileoverview This file contains a class for working with keyboard events
- * that repeat consistently across browsers and platforms. It also unifies the
- * key code so that it is the same in all browsers and platforms.
+ * @fileoverview The SafeStyle type and its builders.
  *
- * Different web browsers have very different keyboard event handling. Most
- * importantly is that only certain browsers repeat keydown events:
- * IE, Opera, FF/Win32, and Safari 3 repeat keydown events.
- * FF/Mac and Safari 2 do not.
- *
- * For the purposes of this code, "Safari 3" means WebKit 525+, when WebKit
- * decided that they should try to match IE's key handling behavior.
- * Safari 3.0.4, which shipped with Leopard (WebKit 523), has the
- * Safari 2 behavior.
- *
- * Firefox, Safari, Opera prevent on keypress
- *
- * IE prevents on keydown
- *
- * Firefox does not fire keypress for shift, ctrl, alt
- * Firefox does fire keydown for shift, ctrl, alt, meta
- * Firefox does not repeat keydown for shift, ctrl, alt, meta
- *
- * Firefox does not fire keypress for up and down in an input
- *
- * Opera fires keypress for shift, ctrl, alt, meta
- * Opera does not repeat keypress for shift, ctrl, alt, meta
- *
- * Safari 2 and 3 do not fire keypress for shift, ctrl, alt
- * Safari 2 does not fire keydown for shift, ctrl, alt
- * Safari 3 *does* fire keydown for shift, ctrl, alt
- *
- * IE provides the keycode for keyup/down events and the charcode (in the
- * keycode field) for keypress.
- *
- * Mozilla provides the keycode for keyup/down and the charcode for keypress
- * unless it's a non text modifying key in which case the keycode is provided.
- *
- * Safari 3 provides the keycode and charcode for all events.
- *
- * Opera provides the keycode for keyup/down event and either the charcode or
- * the keycode (in the keycode field) for keypress events.
- *
- * Firefox x11 doesn't fire keydown events if a another key is already held down
- * until the first key is released. This can cause a key event to be fired with
- * a keyCode for the first key and a charCode for the second key.
- *
- * Safari in keypress
- *
- *        charCode keyCode which
- * ENTER:       13      13    13
- * F1:       63236   63236 63236
- * F8:       63243   63243 63243
- * ...
- * p:          112     112   112
- * P:           80      80    80
- *
- * Firefox, keypress:
- *
- *        charCode keyCode which
- * ENTER:        0      13    13
- * F1:           0     112     0
- * F8:           0     119     0
- * ...
- * p:          112       0   112
- * P:           80       0    80
- *
- * Opera, Mac+Win32, keypress:
- *
- *         charCode keyCode which
- * ENTER: undefined      13    13
- * F1:    undefined     112     0
- * F8:    undefined     119     0
- * ...
- * p:     undefined     112   112
- * P:     undefined      80    80
- *
- * IE7, keydown
- *
- *         charCode keyCode     which
- * ENTER: undefined      13 undefined
- * F1:    undefined     112 undefined
- * F8:    undefined     119 undefined
- * ...
- * p:     undefined      80 undefined
- * P:     undefined      80 undefined
- *
- * @author arv@google.com (Erik Arvidsson)
- * @author eae@google.com (Emil A Eklund)
- * @see ../demos/keyhandler.html
+ * TODO(xtof): Link to document stating type contract.
  */
 
-goog.provide('goog.events.KeyEvent');
-goog.provide('goog.events.KeyHandler');
-goog.provide('goog.events.KeyHandler.EventType');
+goog.provide('goog.html.SafeStyle');
 
-goog.require('goog.events');
-goog.require('goog.events.BrowserEvent');
-goog.require('goog.events.EventTarget');
-goog.require('goog.events.EventType');
-goog.require('goog.events.KeyCodes');
-goog.require('goog.userAgent');
+goog.require('goog.array');
+goog.require('goog.asserts');
+goog.require('goog.string');
+goog.require('goog.string.Const');
+goog.require('goog.string.TypedString');
 
 
 
 /**
- * A wrapper around an element that you want to listen to keyboard events on.
- * @param {Element|Document=} opt_element The element or document to listen on.
- * @param {boolean=} opt_capture Whether to listen for browser events in
- *     capture phase (defaults to false).
+ * A string-like object which represents a sequence of CSS declarations
+ * ({@code propertyName1: propertyvalue1; propertyName2: propertyValue2; ...})
+ * and that carries the security type contract that its value, as a string,
+ * will not cause untrusted script execution (XSS) when evaluated as CSS in a
+ * browser.
+ *
+ * Instances of this type must be created via the factory methods
+ * ({@code goog.html.SafeStyle.create} or
+ * {@code goog.html.SafeStyle.fromConstant}) and not by invoking its
+ * constructor. The constructor intentionally takes no parameters and the type
+ * is immutable; hence only a default instance corresponding to the empty string
+ * can be obtained via constructor invocation.
+ *
+ * A SafeStyle's string representation ({@link #getTypedStringValue()}) can
+ * safely:
+ * <ul>
+ *   <li>Be interpolated as the entire content of a *quoted* HTML style
+ *       attribute, or before already existing properties. The SafeStyle string
+ *       *must be HTML-attribute-escaped* (where " and ' are escaped) before
+ *       interpolation.
+ *   <li>Be interpolated as the entire content of a {}-wrapped block within a
+ *       stylesheet, or before already existing properties. The SafeStyle string
+ *       should not be escaped before interpolation. SafeStyle's contract also
+ *       guarantees that the string will not be able to introduce new properties
+ *       or elide existing ones.
+ *   <li>Be assigned to the style property of a DOM node. The SafeStyle string
+ *       should not be escaped before being assigned to the property.
+ * </ul>
+ *
+ * A SafeStyle may never contain literal angle brackets. Otherwise, it could
+ * be unsafe to place a SafeStyle into a &lt;style&gt; tag (where it can't
+ * be HTML escaped). For example, if the SafeStyle containing
+ * "{@code font: 'foo &lt;style/&gt;&lt;script&gt;evil&lt;/script&gt;'}" were
+ * interpolated within a &lt;style&gt; tag, this would then break out of the
+ * style context into HTML.
+ *
+ * A SafeStyle may contain literal single or double quotes, and as such the
+ * entire style string must be escaped when used in a style attribute (if
+ * this were not the case, the string could contain a matching quote that
+ * would escape from the style attribute).
+ *
+ * Values of this type must be composable, i.e. for any two values
+ * {@code style1} and {@code style2} of this type,
+ * {@code goog.html.SafeStyle.unwrap(style1) +
+ * goog.html.SafeStyle.unwrap(style2)} must itself be a value that satisfies
+ * the SafeStyle type constraint. This requirement implies that for any value
+ * {@code style} of this type, {@code goog.html.SafeStyle.unwrap(style)} must
+ * not end in a "property value" or "property name" context. For example,
+ * a value of {@code background:url("} or {@code font-} would not satisfy the
+ * SafeStyle contract. This is because concatenating such strings with a
+ * second value that itself does not contain unsafe CSS can result in an
+ * overall string that does. For example, if {@code javascript:evil())"} is
+ * appended to {@code background:url("}, the resulting string may result in
+ * the execution of a malicious script.
+ *
+ * TODO(user): Consider whether we should implement UTF-8 interchange
+ * validity checks and blacklisting of newlines (including Unicode ones) and
+ * other whitespace characters (\t, \f). Document here if so and also update
+ * SafeStyle.fromConstant().
+ *
+ * The following example values comply with this type's contract:
+ * <ul>
+ *   <li><pre>width: 1em;</pre>
+ *   <li><pre>height:1em;</pre>
+ *   <li><pre>width: 1em;height: 1em;</pre>
+ *   <li><pre>background:url('http://url');</pre>
+ * </ul>
+ * In addition, the empty string is safe for use in a CSS attribute.
+ *
+ * The following example values do NOT comply with this type's contract:
+ * <ul>
+ *   <li><pre>background: red</pre> (missing a trailing semi-colon)
+ *   <li><pre>background:</pre> (missing a value and a trailing semi-colon)
+ *   <li><pre>1em</pre> (missing an attribute name, which provides context for
+ *       the value)
+ * </ul>
+ *
+ * @see goog.html.SafeStyle#create
+ * @see goog.html.SafeStyle#fromConstant
+ * @see http://www.w3.org/TR/css3-syntax/
  * @constructor
- * @extends {goog.events.EventTarget}
  * @final
+ * @struct
+ * @implements {goog.string.TypedString}
  */
-goog.events.KeyHandler = function(opt_element, opt_capture) {
-  goog.events.EventTarget.call(this);
+goog.html.SafeStyle = function() {
+  /**
+   * The contained value of this SafeStyle.  The field has a purposely
+   * ugly name to make (non-compiled) code that attempts to directly access this
+   * field stand out.
+   * @private {string}
+   */
+  this.privateDoNotAccessOrElseSafeStyleWrappedValue_ = '';
 
-  if (opt_element) {
-    this.attach(opt_element, opt_capture);
-  }
-};
-goog.inherits(goog.events.KeyHandler, goog.events.EventTarget);
-
-
-/**
- * This is the element that we will listen to the real keyboard events on.
- * @type {Element|Document|null}
- * @private
- */
-goog.events.KeyHandler.prototype.element_ = null;
-
-
-/**
- * The key for the key press listener.
- * @type {goog.events.Key}
- * @private
- */
-goog.events.KeyHandler.prototype.keyPressKey_ = null;
-
-
-/**
- * The key for the key down listener.
- * @type {goog.events.Key}
- * @private
- */
-goog.events.KeyHandler.prototype.keyDownKey_ = null;
-
-
-/**
- * The key for the key up listener.
- * @type {goog.events.Key}
- * @private
- */
-goog.events.KeyHandler.prototype.keyUpKey_ = null;
-
-
-/**
- * Used to detect keyboard repeat events.
- * @private
- * @type {number}
- */
-goog.events.KeyHandler.prototype.lastKey_ = -1;
-
-
-/**
- * Keycode recorded for key down events. As most browsers don't report the
- * keycode in the key press event we need to record it in the key down phase.
- * @private
- * @type {number}
- */
-goog.events.KeyHandler.prototype.keyCode_ = -1;
-
-
-/**
- * Alt key recorded for key down events. FF on Mac does not report the alt key
- * flag in the key press event, we need to record it in the key down phase.
- * @type {boolean}
- * @private
- */
-goog.events.KeyHandler.prototype.altKey_ = false;
-
-
-/**
- * Enum type for the events fired by the key handler
- * @enum {string}
- */
-goog.events.KeyHandler.EventType = {
-  KEY: 'key'
+  /**
+   * A type marker used to implement additional run-time type checking.
+   * @see goog.html.SafeStyle#unwrap
+   * @const
+   * @private
+   */
+  this.SAFE_STYLE_TYPE_MARKER_GOOG_HTML_SECURITY_PRIVATE_ =
+      goog.html.SafeStyle.TYPE_MARKER_GOOG_HTML_SECURITY_PRIVATE_;
 };
 
 
 /**
- * An enumeration of key codes that Safari 2 does incorrectly
- * @type {Object}
- * @private
+ * @override
+ * @const
  */
-goog.events.KeyHandler.safariKey_ = {
-  '3': goog.events.KeyCodes.ENTER,             // 13
-  '12': goog.events.KeyCodes.NUMLOCK,          // 144
-  '63232': goog.events.KeyCodes.UP,            // 38
-  '63233': goog.events.KeyCodes.DOWN,          // 40
-  '63234': goog.events.KeyCodes.LEFT,          // 37
-  '63235': goog.events.KeyCodes.RIGHT,         // 39
-  '63236': goog.events.KeyCodes.F1,            // 112
-  '63237': goog.events.KeyCodes.F2,            // 113
-  '63238': goog.events.KeyCodes.F3,            // 114
-  '63239': goog.events.KeyCodes.F4,            // 115
-  '63240': goog.events.KeyCodes.F5,            // 116
-  '63241': goog.events.KeyCodes.F6,            // 117
-  '63242': goog.events.KeyCodes.F7,            // 118
-  '63243': goog.events.KeyCodes.F8,            // 119
-  '63244': goog.events.KeyCodes.F9,            // 120
-  '63245': goog.events.KeyCodes.F10,           // 121
-  '63246': goog.events.KeyCodes.F11,           // 122
-  '63247': goog.events.KeyCodes.F12,           // 123
-  '63248': goog.events.KeyCodes.PRINT_SCREEN,  // 44
-  '63272': goog.events.KeyCodes.DELETE,        // 46
-  '63273': goog.events.KeyCodes.HOME,          // 36
-  '63275': goog.events.KeyCodes.END,           // 35
-  '63276': goog.events.KeyCodes.PAGE_UP,       // 33
-  '63277': goog.events.KeyCodes.PAGE_DOWN,     // 34
-  '63289': goog.events.KeyCodes.NUMLOCK,       // 144
-  '63302': goog.events.KeyCodes.INSERT         // 45
-};
+goog.html.SafeStyle.prototype.implementsGoogStringTypedString = true;
 
 
 /**
- * An enumeration of key identifiers currently part of the W3C draft for DOM3
- * and their mappings to keyCodes.
- * http://www.w3.org/TR/DOM-Level-3-Events/keyset.html#KeySet-Set
- * This is currently supported in Safari and should be platform independent.
- * @type {Object}
+ * Type marker for the SafeStyle type, used to implement additional
+ * run-time type checking.
+ * @const {!Object}
  * @private
  */
-goog.events.KeyHandler.keyIdentifier_ = {
-  'Up': goog.events.KeyCodes.UP,               // 38
-  'Down': goog.events.KeyCodes.DOWN,           // 40
-  'Left': goog.events.KeyCodes.LEFT,           // 37
-  'Right': goog.events.KeyCodes.RIGHT,         // 39
-  'Enter': goog.events.KeyCodes.ENTER,         // 13
-  'F1': goog.events.KeyCodes.F1,               // 112
-  'F2': goog.events.KeyCodes.F2,               // 113
-  'F3': goog.events.KeyCodes.F3,               // 114
-  'F4': goog.events.KeyCodes.F4,               // 115
-  'F5': goog.events.KeyCodes.F5,               // 116
-  'F6': goog.events.KeyCodes.F6,               // 117
-  'F7': goog.events.KeyCodes.F7,               // 118
-  'F8': goog.events.KeyCodes.F8,               // 119
-  'F9': goog.events.KeyCodes.F9,               // 120
-  'F10': goog.events.KeyCodes.F10,             // 121
-  'F11': goog.events.KeyCodes.F11,             // 122
-  'F12': goog.events.KeyCodes.F12,             // 123
-  'U+007F': goog.events.KeyCodes.DELETE,       // 46
-  'Home': goog.events.KeyCodes.HOME,           // 36
-  'End': goog.events.KeyCodes.END,             // 35
-  'PageUp': goog.events.KeyCodes.PAGE_UP,      // 33
-  'PageDown': goog.events.KeyCodes.PAGE_DOWN,  // 34
-  'Insert': goog.events.KeyCodes.INSERT        // 45
-};
+goog.html.SafeStyle.TYPE_MARKER_GOOG_HTML_SECURITY_PRIVATE_ = {};
 
 
 /**
- * If true, the KeyEvent fires on keydown. Otherwise, it fires on keypress.
+ * Creates a SafeStyle object from a compile-time constant string.
  *
- * @type {boolean}
- * @private
+ * {@code style} should be in the format
+ * {@code name: value; [name: value; ...]} and must not have any < or >
+ * characters in it. This is so that SafeStyle's contract is preserved,
+ * allowing the SafeStyle to correctly be interpreted as a sequence of CSS
+ * declarations and without affecting the syntactic structure of any
+ * surrounding CSS and HTML.
+ *
+ * This method performs basic sanity checks on the format of {@code style}
+ * but does not constrain the format of {@code name} and {@code value}, except
+ * for disallowing tag characters.
+ *
+ * @param {!goog.string.Const} style A compile-time-constant string from which
+ *     to create a SafeStyle.
+ * @return {!goog.html.SafeStyle} A SafeStyle object initialized to
+ *     {@code style}.
  */
-goog.events.KeyHandler.USES_KEYDOWN_ = goog.userAgent.IE ||
-    goog.userAgent.EDGE ||
-    goog.userAgent.WEBKIT && goog.userAgent.isVersionOrHigher('525');
+goog.html.SafeStyle.fromConstant = function(style) {
+  var styleString = goog.string.Const.unwrap(style);
+  if (styleString.length === 0) {
+    return goog.html.SafeStyle.EMPTY;
+  }
+  goog.html.SafeStyle.checkStyle_(styleString);
+  goog.asserts.assert(
+      goog.string.endsWith(styleString, ';'),
+      'Last character of style string is not \';\': ' + styleString);
+  goog.asserts.assert(
+      goog.string.contains(styleString, ':'),
+      'Style string must contain at least one \':\', to ' +
+          'specify a "name: value" pair: ' + styleString);
+  return goog.html.SafeStyle.createSafeStyleSecurityPrivateDoNotAccessOrElse(
+      styleString);
+};
 
 
 /**
- * If true, the alt key flag is saved during the key down and reused when
- * handling the key press. FF on Mac does not set the alt flag in the key press
- * event.
- * @type {boolean}
+ * Checks if the style definition is valid.
+ * @param {string} style
  * @private
  */
-goog.events.KeyHandler.SAVE_ALT_FOR_KEYPRESS_ =
-    goog.userAgent.MAC && goog.userAgent.GECKO;
+goog.html.SafeStyle.checkStyle_ = function(style) {
+  goog.asserts.assert(
+      !/[<>]/.test(style), 'Forbidden characters in style string: ' + style);
+};
 
 
 /**
- * Records the keycode for browsers that only returns the keycode for key up/
- * down events. For browser/key combinations that doesn't trigger a key pressed
- * event it also fires the patched key event.
- * @param {goog.events.BrowserEvent} e The key down event.
- * @private
+ * Returns this SafeStyle's value as a string.
+ *
+ * IMPORTANT: In code where it is security relevant that an object's type is
+ * indeed {@code SafeStyle}, use {@code goog.html.SafeStyle.unwrap} instead of
+ * this method. If in doubt, assume that it's security relevant. In particular,
+ * note that goog.html functions which return a goog.html type do not guarantee
+ * the returned instance is of the right type. For example:
+ *
+ * <pre>
+ * var fakeSafeHtml = new String('fake');
+ * fakeSafeHtml.__proto__ = goog.html.SafeHtml.prototype;
+ * var newSafeHtml = goog.html.SafeHtml.htmlEscape(fakeSafeHtml);
+ * // newSafeHtml is just an alias for fakeSafeHtml, it's passed through by
+ * // goog.html.SafeHtml.htmlEscape() as fakeSafeHtml
+ * // instanceof goog.html.SafeHtml.
+ * </pre>
+ *
+ * @see goog.html.SafeStyle#unwrap
+ * @override
  */
-goog.events.KeyHandler.prototype.handleKeyDown_ = function(e) {
-  // Ctrl-Tab and Alt-Tab can cause the focus to be moved to another window
-  // before we've caught a key-up event.  If the last-key was one of these we
-  // reset the state.
-  if (goog.userAgent.WEBKIT || goog.userAgent.EDGE) {
-    if (this.lastKey_ == goog.events.KeyCodes.CTRL && !e.ctrlKey ||
-        this.lastKey_ == goog.events.KeyCodes.ALT && !e.altKey ||
-        goog.userAgent.MAC && this.lastKey_ == goog.events.KeyCodes.META &&
-            !e.metaKey) {
-      this.resetState();
-    }
-  }
+goog.html.SafeStyle.prototype.getTypedStringValue = function() {
+  return this.privateDoNotAccessOrElseSafeStyleWrappedValue_;
+};
 
-  if (this.lastKey_ == -1) {
-    if (e.ctrlKey && e.keyCode != goog.events.KeyCodes.CTRL) {
-      this.lastKey_ = goog.events.KeyCodes.CTRL;
-    } else if (e.altKey && e.keyCode != goog.events.KeyCodes.ALT) {
-      this.lastKey_ = goog.events.KeyCodes.ALT;
-    } else if (e.metaKey && e.keyCode != goog.events.KeyCodes.META) {
-      this.lastKey_ = goog.events.KeyCodes.META;
-    }
-  }
 
-  if (goog.events.KeyHandler.USES_KEYDOWN_ &&
-      !goog.events.KeyCodes.firesKeyPressEvent(
-          e.keyCode, this.lastKey_, e.shiftKey, e.ctrlKey, e.altKey)) {
-    this.handleEvent(e);
+if (goog.DEBUG) {
+  /**
+   * Returns a debug string-representation of this value.
+   *
+   * To obtain the actual string value wrapped in a SafeStyle, use
+   * {@code goog.html.SafeStyle.unwrap}.
+   *
+   * @see goog.html.SafeStyle#unwrap
+   * @override
+   */
+  goog.html.SafeStyle.prototype.toString = function() {
+    return 'SafeStyle{' + this.privateDoNotAccessOrElseSafeStyleWrappedValue_ +
+        '}';
+  };
+}
+
+
+/**
+ * Performs a runtime check that the provided object is indeed a
+ * SafeStyle object, and returns its value.
+ *
+ * @param {!goog.html.SafeStyle} safeStyle The object to extract from.
+ * @return {string} The safeStyle object's contained string, unless
+ *     the run-time type check fails. In that case, {@code unwrap} returns an
+ *     innocuous string, or, if assertions are enabled, throws
+ *     {@code goog.asserts.AssertionError}.
+ */
+goog.html.SafeStyle.unwrap = function(safeStyle) {
+  // Perform additional Run-time type-checking to ensure that
+  // safeStyle is indeed an instance of the expected type.  This
+  // provides some additional protection against security bugs due to
+  // application code that disables type checks.
+  // Specifically, the following checks are performed:
+  // 1. The object is an instance of the expected type.
+  // 2. The object is not an instance of a subclass.
+  // 3. The object carries a type marker for the expected type. "Faking" an
+  // object requires a reference to the type marker, which has names intended
+  // to stand out in code reviews.
+  if (safeStyle instanceof goog.html.SafeStyle &&
+      safeStyle.constructor === goog.html.SafeStyle &&
+      safeStyle.SAFE_STYLE_TYPE_MARKER_GOOG_HTML_SECURITY_PRIVATE_ ===
+          goog.html.SafeStyle.TYPE_MARKER_GOOG_HTML_SECURITY_PRIVATE_) {
+    return safeStyle.privateDoNotAccessOrElseSafeStyleWrappedValue_;
   } else {
-    this.keyCode_ = goog.events.KeyCodes.normalizeKeyCode(e.keyCode);
-    if (goog.events.KeyHandler.SAVE_ALT_FOR_KEYPRESS_) {
-      this.altKey_ = e.altKey;
-    }
+    goog.asserts.fail('expected object of type SafeStyle, got \'' +
+        safeStyle + '\' of type ' + goog.typeOf(safeStyle));
+    return 'type_error:SafeStyle';
   }
 };
 
 
 /**
- * Resets the stored previous values. Needed to be called for webkit which will
- * not generate a key up for meta key operations. This should only be called
- * when having finished with repeat key possiblities.
+ * Package-internal utility method to create SafeStyle instances.
+ *
+ * @param {string} style The string to initialize the SafeStyle object with.
+ * @return {!goog.html.SafeStyle} The initialized SafeStyle object.
+ * @package
  */
-goog.events.KeyHandler.prototype.resetState = function() {
-  this.lastKey_ = -1;
-  this.keyCode_ = -1;
+goog.html.SafeStyle.createSafeStyleSecurityPrivateDoNotAccessOrElse = function(
+    style) {
+  return new goog.html.SafeStyle().initSecurityPrivateDoNotAccessOrElse_(style);
 };
 
 
 /**
- * Clears the stored previous key value, resetting the key repeat status. Uses
- * -1 because the Safari 3 Windows beta reports 0 for certain keys (like Home
- * and End.)
- * @param {goog.events.BrowserEvent} e The keyup event.
+ * Called from createSafeStyleSecurityPrivateDoNotAccessOrElse(). This
+ * method exists only so that the compiler can dead code eliminate static
+ * fields (like EMPTY) when they're not accessed.
+ * @param {string} style
+ * @return {!goog.html.SafeStyle}
  * @private
  */
-goog.events.KeyHandler.prototype.handleKeyup_ = function(e) {
-  this.resetState();
-  this.altKey_ = e.altKey;
+goog.html.SafeStyle.prototype.initSecurityPrivateDoNotAccessOrElse_ = function(
+    style) {
+  this.privateDoNotAccessOrElseSafeStyleWrappedValue_ = style;
+  return this;
 };
 
 
 /**
- * Handles the events on the element.
- * @param {goog.events.BrowserEvent} e  The keyboard event sent from the
- *     browser.
+ * A SafeStyle instance corresponding to the empty string.
+ * @const {!goog.html.SafeStyle}
  */
-goog.events.KeyHandler.prototype.handleEvent = function(e) {
-  var be = e.getBrowserEvent();
-  var keyCode, charCode;
-  var altKey = be.altKey;
+goog.html.SafeStyle.EMPTY =
+    goog.html.SafeStyle.createSafeStyleSecurityPrivateDoNotAccessOrElse('');
 
-  // IE reports the character code in the keyCode field for keypress events.
-  // There are two exceptions however, Enter and Escape.
-  if (goog.userAgent.IE && e.type == goog.events.EventType.KEYPRESS) {
-    keyCode = this.keyCode_;
-    charCode = keyCode != goog.events.KeyCodes.ENTER &&
-            keyCode != goog.events.KeyCodes.ESC ?
-        be.keyCode :
-        0;
 
-    // Safari reports the character code in the keyCode field for keypress
-    // events but also has a charCode field.
-  } else if (
-      (goog.userAgent.WEBKIT || goog.userAgent.EDGE) &&
-      e.type == goog.events.EventType.KEYPRESS) {
-    keyCode = this.keyCode_;
-    charCode = be.charCode >= 0 && be.charCode < 63232 &&
-            goog.events.KeyCodes.isCharacterKey(keyCode) ?
-        be.charCode :
-        0;
+/**
+ * The innocuous string generated by goog.html.SafeUrl.create when passed
+ * an unsafe value.
+ * @const {string}
+ */
+goog.html.SafeStyle.INNOCUOUS_STRING = 'zClosurez';
 
-    // Opera reports the keycode or the character code in the keyCode field.
-  } else if (goog.userAgent.OPERA && !goog.userAgent.WEBKIT) {
-    keyCode = this.keyCode_;
-    charCode = goog.events.KeyCodes.isCharacterKey(keyCode) ? be.keyCode : 0;
 
-    // Mozilla reports the character code in the charCode field.
-  } else {
-    keyCode = be.keyCode || this.keyCode_;
-    charCode = be.charCode || 0;
-    if (goog.events.KeyHandler.SAVE_ALT_FOR_KEYPRESS_) {
-      altKey = this.altKey_;
+/**
+ * Mapping of property names to their values.
+ * @typedef {!Object<string, goog.string.Const|string>}
+ */
+goog.html.SafeStyle.PropertyMap;
+
+
+/**
+ * Creates a new SafeStyle object from the properties specified in the map.
+ * @param {goog.html.SafeStyle.PropertyMap} map Mapping of property names to
+ *     their values, for example {'margin': '1px'}. Names must consist of
+ *     [-_a-zA-Z0-9]. Values might be strings consisting of
+ *     [-,.'"%_!# a-zA-Z0-9], where " and ' must be properly balanced.
+ *     Other values must be wrapped in goog.string.Const. Null value causes
+ *     skipping the property.
+ * @return {!goog.html.SafeStyle}
+ * @throws {Error} If invalid name is provided.
+ * @throws {goog.asserts.AssertionError} If invalid value is provided. With
+ *     disabled assertions, invalid value is replaced by
+ *     goog.html.SafeStyle.INNOCUOUS_STRING.
+ */
+goog.html.SafeStyle.create = function(map) {
+  var style = '';
+  for (var name in map) {
+    if (!/^[-_a-zA-Z0-9]+$/.test(name)) {
+      throw Error('Name allows only [-_a-zA-Z0-9], got: ' + name);
     }
-    // On the Mac, shift-/ triggers a question mark char code and no key code
-    // (normalized to WIN_KEY), so we synthesize the latter.
-    if (goog.userAgent.MAC && charCode == goog.events.KeyCodes.QUESTION_MARK &&
-        keyCode == goog.events.KeyCodes.WIN_KEY) {
-      keyCode = goog.events.KeyCodes.SLASH;
+    var value = map[name];
+    if (value == null) {
+      continue;
+    }
+    if (value instanceof goog.string.Const) {
+      value = goog.string.Const.unwrap(value);
+      // These characters can be used to change context and we don't want that
+      // even with const values.
+      goog.asserts.assert(!/[{;}]/.test(value), 'Value does not allow [{;}].');
+    } else if (!goog.html.SafeStyle.VALUE_RE_.test(value)) {
+      goog.asserts.fail(
+          'String value allows only [-,."\'%_!# a-zA-Z0-9], rgb() and ' +
+          'rgba(), got: ' + value);
+      value = goog.html.SafeStyle.INNOCUOUS_STRING;
+    } else if (!goog.html.SafeStyle.hasBalancedQuotes_(value)) {
+      goog.asserts.fail('String value requires balanced quotes, got: ' + value);
+      value = goog.html.SafeStyle.INNOCUOUS_STRING;
+    }
+    style += name + ':' + value + ';';
+  }
+  if (!style) {
+    return goog.html.SafeStyle.EMPTY;
+  }
+  goog.html.SafeStyle.checkStyle_(style);
+  return goog.html.SafeStyle.createSafeStyleSecurityPrivateDoNotAccessOrElse(
+      style);
+};
+
+
+/**
+ * Checks that quotes (" and ') are properly balanced inside a string. Assumes
+ * that neither escape (\) nor any other character that could result in
+ * breaking out of a string parsing context are allowed;
+ * see http://www.w3.org/TR/css3-syntax/#string-token-diagram.
+ * @param {string} value Untrusted CSS property value.
+ * @return {boolean} True if property value is safe with respect to quote
+ *     balancedness.
+ * @private
+ */
+goog.html.SafeStyle.hasBalancedQuotes_ = function(value) {
+  var outsideSingle = true;
+  var outsideDouble = true;
+  for (var i = 0; i < value.length; i++) {
+    var c = value.charAt(i);
+    if (c == "'" && outsideDouble) {
+      outsideSingle = !outsideSingle;
+    } else if (c == '"' && outsideSingle) {
+      outsideDouble = !outsideDouble;
     }
   }
+  return outsideSingle && outsideDouble;
+};
 
-  keyCode = goog.events.KeyCodes.normalizeKeyCode(keyCode);
-  var key = keyCode;
-  var keyIdentifier = be.keyIdentifier;
 
-  // Correct the key value for certain browser-specific quirks.
-  if (keyCode) {
-    if (keyCode >= 63232 && keyCode in goog.events.KeyHandler.safariKey_) {
-      // NOTE(nicksantos): Safari 3 has fixed this problem,
-      // this is only needed for Safari 2.
-      key = goog.events.KeyHandler.safariKey_[keyCode];
+// Keep in sync with the error string in create().
+/**
+ * Regular expression for safe values.
+ *
+ * Quotes (" and ') are allowed, but a check must be done elsewhere to ensure
+ * they're balanced.
+ *
+ * ',' allows multiple values to be assigned to the same property
+ * (e.g. background-attachment or font-family) and hence could allow
+ * multiple values to get injected, but that should pose no risk of XSS.
+ *
+ * The rgb() and rgba() expression checks only for XSS safety, not for CSS
+ * validity.
+ * @const {!RegExp}
+ * @private
+ */
+goog.html.SafeStyle.VALUE_RE_ =
+    /^([-,."'%_!# a-zA-Z0-9]+|(?:rgb|hsl)a?\([0-9.%, ]+\))$/;
+
+
+/**
+ * Creates a new SafeStyle object by concatenating the values.
+ * @param {...(!goog.html.SafeStyle|!Array<!goog.html.SafeStyle>)} var_args
+ *     SafeStyles to concatenate.
+ * @return {!goog.html.SafeStyle}
+ */
+goog.html.SafeStyle.concat = function(var_args) {
+  var style = '';
+
+  /**
+   * @param {!goog.html.SafeStyle|!Array<!goog.html.SafeStyle>} argument
+   */
+  var addArgument = function(argument) {
+    if (goog.isArray(argument)) {
+      goog.array.forEach(argument, addArgument);
     } else {
-      // Safari returns 25 for Shift+Tab instead of 9.
-      if (keyCode == 25 && e.shiftKey) {
-        key = 9;
-      }
+      style += goog.html.SafeStyle.unwrap(argument);
     }
-  } else if (
-      keyIdentifier && keyIdentifier in goog.events.KeyHandler.keyIdentifier_) {
-    // This is needed for Safari Windows because it currently doesn't give a
-    // keyCode/which for non printable keys.
-    key = goog.events.KeyHandler.keyIdentifier_[keyIdentifier];
+  };
+
+  goog.array.forEach(arguments, addArgument);
+  if (!style) {
+    return goog.html.SafeStyle.EMPTY;
   }
-
-  // If we get the same keycode as a keydown/keypress without having seen a
-  // keyup event, then this event was caused by key repeat.
-  var repeat = key == this.lastKey_;
-  this.lastKey_ = key;
-
-  var event = new goog.events.KeyEvent(key, charCode, repeat, be);
-  event.altKey = altKey;
-  this.dispatchEvent(event);
+  return goog.html.SafeStyle.createSafeStyleSecurityPrivateDoNotAccessOrElse(
+      style);
 };
-
-
-/**
- * Returns the element listened on for the real keyboard events.
- * @return {Element|Document|null} The element listened on for the real
- *     keyboard events.
- */
-goog.events.KeyHandler.prototype.getElement = function() {
-  return this.element_;
-};
-
-
-/**
- * Adds the proper key event listeners to the element.
- * @param {Element|Document} element The element to listen on.
- * @param {boolean=} opt_capture Whether to listen for browser events in
- *     capture phase (defaults to false).
- */
-goog.events.KeyHandler.prototype.attach = function(element, opt_capture) {
-  if (this.keyUpKey_) {
-    this.detach();
-  }
-
-  this.element_ = element;
-
-  this.keyPressKey_ = goog.events.listen(
-      this.element_, goog.events.EventType.KEYPRESS, this, opt_capture);
-
-  // Most browsers (Safari 2 being the notable exception) doesn't include the
-  // keyCode in keypress events (IE has the char code in the keyCode field and
-  // Mozilla only included the keyCode if there's no charCode). Thus we have to
-  // listen for keydown to capture the keycode.
-  this.keyDownKey_ = goog.events.listen(
-      this.element_, goog.events.EventType.KEYDOWN, this.handleKeyDown_,
-      opt_capture, this);
-
-
-  this.keyUpKey_ = goog.events.listen(
-      this.element_, goog.events.EventType.KEYUP, this.handleKeyup_,
-      opt_capture, this);
-};
-
-
-/**
- * Removes the listeners that may exist.
- */
-goog.events.KeyHandler.prototype.detach = function() {
-  if (this.keyPressKey_) {
-    goog.events.unlistenByKey(this.keyPressKey_);
-    goog.events.unlistenByKey(this.keyDownKey_);
-    goog.events.unlistenByKey(this.keyUpKey_);
-    this.keyPressKey_ = null;
-    this.keyDownKey_ = null;
-    this.keyUpKey_ = null;
-  }
-  this.element_ = null;
-  this.lastKey_ = -1;
-  this.keyCode_ = -1;
-};
-
-
-/** @override */
-goog.events.KeyHandler.prototype.disposeInternal = function() {
-  goog.events.KeyHandler.superClass_.disposeInternal.call(this);
-  this.detach();
-};
-
-
-
-/**
- * This class is used for the goog.events.KeyHandler.EventType.KEY event and
- * it overrides the key code with the fixed key code.
- * @param {number} keyCode The adjusted key code.
- * @param {number} charCode The unicode character code.
- * @param {boolean} repeat Whether this event was generated by keyboard repeat.
- * @param {Event} browserEvent Browser event object.
- * @constructor
- * @extends {goog.events.BrowserEvent}
- * @final
- */
-goog.events.KeyEvent = function(keyCode, charCode, repeat, browserEvent) {
-  goog.events.BrowserEvent.call(this, browserEvent);
-  this.type = goog.events.KeyHandler.EventType.KEY;
-
-  /**
-   * Keycode of key press.
-   * @type {number}
-   */
-  this.keyCode = keyCode;
-
-  /**
-   * Unicode character code.
-   * @type {number}
-   */
-  this.charCode = charCode;
-
-  /**
-   * True if this event was generated by keyboard auto-repeat (i.e., the user is
-   * holding the key down.)
-   * @type {boolean}
-   */
-  this.repeat = repeat;
-};
-goog.inherits(goog.events.KeyEvent, goog.events.BrowserEvent);

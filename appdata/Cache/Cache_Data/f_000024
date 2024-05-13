@@ -1,4 +1,4 @@
-// Copyright 2006 The Closure Library Authors. All Rights Reserved.
+// Copyright 2005 The Closure Library Authors. All Rights Reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,645 +13,450 @@
 // limitations under the License.
 
 /**
- * @fileoverview Logging and debugging utilities.
+ * @fileoverview Class to create objects which want to handle multiple events
+ * and have their listeners easily cleaned up via a dispose method.
  *
- * @see ../demos/debug.html
+ * Example:
+ * <pre>
+ * function Something() {
+ *   Something.base(this);
+ *
+ *   ... set up object ...
+ *
+ *   // Add event listeners
+ *   this.listen(this.starEl, goog.events.EventType.CLICK, this.handleStar);
+ *   this.listen(this.headerEl, goog.events.EventType.CLICK, this.expand);
+ *   this.listen(this.collapseEl, goog.events.EventType.CLICK, this.collapse);
+ *   this.listen(this.infoEl, goog.events.EventType.MOUSEOVER, this.showHover);
+ *   this.listen(this.infoEl, goog.events.EventType.MOUSEOUT, this.hideHover);
+ * }
+ * goog.inherits(Something, goog.events.EventHandler);
+ *
+ * Something.prototype.disposeInternal = function() {
+ *   Something.base(this, 'disposeInternal');
+ *   goog.dom.removeNode(this.container);
+ * };
+ *
+ *
+ * // Then elsewhere:
+ *
+ * var activeSomething = null;
+ * function openSomething() {
+ *   activeSomething = new Something();
+ * }
+ *
+ * function closeSomething() {
+ *   if (activeSomething) {
+ *     activeSomething.dispose();  // Remove event listeners
+ *     activeSomething = null;
+ *   }
+ * }
+ * </pre>
+ *
  */
 
-goog.provide('goog.debug');
+goog.provide('goog.events.EventHandler');
 
-goog.require('goog.array');
-goog.require('goog.html.SafeHtml');
-goog.require('goog.html.SafeUrl');
-goog.require('goog.html.uncheckedconversions');
-goog.require('goog.string.Const');
-goog.require('goog.structs.Set');
-goog.require('goog.userAgent');
+goog.require('goog.Disposable');
+goog.require('goog.events');
+goog.require('goog.object');
 
+goog.forwardDeclare('goog.events.EventWrapper');
 
-/** @define {boolean} Whether logging should be enabled. */
-goog.define('goog.debug.LOGGING_ENABLED', goog.DEBUG);
-
-
-/** @define {boolean} Whether to force "sloppy" stack building. */
-goog.define('goog.debug.FORCE_SLOPPY_STACKS', false);
 
 
 /**
- * Catches onerror events fired by windows and similar objects.
- * @param {function(Object)} logFunc The function to call with the error
- *    information.
- * @param {boolean=} opt_cancel Whether to stop the error from reaching the
- *    browser.
- * @param {Object=} opt_target Object that fires onerror events.
+ * Super class for objects that want to easily manage a number of event
+ * listeners.  It allows a short cut to listen and also provides a quick way
+ * to remove all events listeners belonging to this object.
+ * @param {SCOPE=} opt_scope Object in whose scope to call the listeners.
+ * @constructor
+ * @extends {goog.Disposable}
+ * @template SCOPE
  */
-goog.debug.catchErrors = function(logFunc, opt_cancel, opt_target) {
-  var target = opt_target || goog.global;
-  var oldErrorHandler = target.onerror;
-  var retVal = !!opt_cancel;
-
-  // Chrome interprets onerror return value backwards (http://crbug.com/92062)
-  // until it was fixed in webkit revision r94061 (Webkit 535.3). This
-  // workaround still needs to be skipped in Safari after the webkit change
-  // gets pushed out in Safari.
-  // See https://bugs.webkit.org/show_bug.cgi?id=67119
-  if (goog.userAgent.WEBKIT && !goog.userAgent.isVersionOrHigher('535.3')) {
-    retVal = !retVal;
-  }
+goog.events.EventHandler = function(opt_scope) {
+  goog.Disposable.call(this);
+  // TODO(mknichel): Rename this to this.scope_ and fix the classes in google3
+  // that access this private variable. :(
+  this.handler_ = opt_scope;
 
   /**
-   * New onerror handler for this target. This onerror handler follows the spec
-   * according to
-   * http://www.whatwg.org/specs/web-apps/current-work/#runtime-script-errors
-   * The spec was changed in August 2013 to support receiving column information
-   * and an error object for all scripts on the same origin or cross origin
-   * scripts with the proper headers. See
-   * https://mikewest.org/2013/08/debugging-runtime-errors-with-window-onerror
-   *
-   * @param {string} message The error message. For cross-origin errors, this
-   *     will be scrubbed to just "Script error.". For new browsers that have
-   *     updated to follow the latest spec, errors that come from origins that
-   *     have proper cross origin headers will not be scrubbed.
-   * @param {string} url The URL of the script that caused the error. The URL
-   *     will be scrubbed to "" for cross origin scripts unless the script has
-   *     proper cross origin headers and the browser has updated to the latest
-   *     spec.
-   * @param {number} line The line number in the script that the error
-   *     occurred on.
-   * @param {number=} opt_col The optional column number that the error
-   *     occurred on. Only browsers that have updated to the latest spec will
-   *     include this.
-   * @param {Error=} opt_error The optional actual error object for this
-   *     error that should include the stack. Only browsers that have updated
-   *     to the latest spec will inlude this parameter.
-   * @return {boolean} Whether to prevent the error from reaching the browser.
+   * Keys for events that are being listened to.
+   * @type {!Object<!goog.events.Key>}
+   * @private
    */
-  target.onerror = function(message, url, line, opt_col, opt_error) {
-    if (oldErrorHandler) {
-      oldErrorHandler(message, url, line, opt_col, opt_error);
-    }
-    logFunc({
-      message: message,
-      fileName: url,
-      line: line,
-      col: opt_col,
-      error: opt_error
-    });
-    return retVal;
-  };
+  this.keys_ = {};
 };
+goog.inherits(goog.events.EventHandler, goog.Disposable);
 
 
 /**
- * Creates a string representing an object and all its properties.
- * @param {Object|null|undefined} obj Object to expose.
- * @param {boolean=} opt_showFn Show the functions as well as the properties,
- *     default is false.
- * @return {string} The string representation of {@code obj}.
- */
-goog.debug.expose = function(obj, opt_showFn) {
-  if (typeof obj == 'undefined') {
-    return 'undefined';
-  }
-  if (obj == null) {
-    return 'NULL';
-  }
-  var str = [];
-
-  for (var x in obj) {
-    if (!opt_showFn && goog.isFunction(obj[x])) {
-      continue;
-    }
-    var s = x + ' = ';
-    /** @preserveTry */
-    try {
-      s += obj[x];
-    } catch (e) {
-      s += '*** ' + e + ' ***';
-    }
-    str.push(s);
-  }
-  return str.join('\n');
-};
-
-
-/**
- * Creates a string representing a given primitive or object, and for an
- * object, all its properties and nested objects.  WARNING: If an object is
- * given, it and all its nested objects will be modified.  To detect reference
- * cycles, this method identifies objects using goog.getUid() which mutates the
- * object.
- * @param {*} obj Object to expose.
- * @param {boolean=} opt_showFn Also show properties that are functions (by
- *     default, functions are omitted).
- * @return {string} A string representation of {@code obj}.
- */
-goog.debug.deepExpose = function(obj, opt_showFn) {
-  var str = [];
-
-  var helper = function(obj, space, parentSeen) {
-    var nestspace = space + '  ';
-    var seen = new goog.structs.Set(parentSeen);
-
-    var indentMultiline = function(str) {
-      return str.replace(/\n/g, '\n' + space);
-    };
-
-    /** @preserveTry */
-    try {
-      if (!goog.isDef(obj)) {
-        str.push('undefined');
-      } else if (goog.isNull(obj)) {
-        str.push('NULL');
-      } else if (goog.isString(obj)) {
-        str.push('"' + indentMultiline(obj) + '"');
-      } else if (goog.isFunction(obj)) {
-        str.push(indentMultiline(String(obj)));
-      } else if (goog.isObject(obj)) {
-        if (seen.contains(obj)) {
-          str.push('*** reference loop detected ***');
-        } else {
-          seen.add(obj);
-          str.push('{');
-          for (var x in obj) {
-            if (!opt_showFn && goog.isFunction(obj[x])) {
-              continue;
-            }
-            str.push('\n');
-            str.push(nestspace);
-            str.push(x + ' = ');
-            helper(obj[x], nestspace, seen);
-          }
-          str.push('\n' + space + '}');
-        }
-      } else {
-        str.push(obj);
-      }
-    } catch (e) {
-      str.push('*** ' + e + ' ***');
-    }
-  };
-
-  helper(obj, '', new goog.structs.Set());
-  return str.join('');
-};
-
-
-/**
- * Recursively outputs a nested array as a string.
- * @param {Array<?>} arr The array.
- * @return {string} String representing nested array.
- */
-goog.debug.exposeArray = function(arr) {
-  var str = [];
-  for (var i = 0; i < arr.length; i++) {
-    if (goog.isArray(arr[i])) {
-      str.push(goog.debug.exposeArray(arr[i]));
-    } else {
-      str.push(arr[i]);
-    }
-  }
-  return '[ ' + str.join(', ') + ' ]';
-};
-
-
-/**
- * Exposes an exception that has been caught by a try...catch and outputs the
- * error as HTML with a stack trace.
- * @param {Object} err Error object or string.
- * @param {Function=} opt_fn Optional function to start stack trace from.
- * @return {string} Details of exception, as HTML.
- */
-goog.debug.exposeException = function(err, opt_fn) {
-  var html = goog.debug.exposeExceptionAsHtml(err, opt_fn);
-  return goog.html.SafeHtml.unwrap(html);
-};
-
-
-/**
- * Exposes an exception that has been caught by a try...catch and outputs the
- * error with a stack trace.
- * @param {Object} err Error object or string.
- * @param {Function=} opt_fn Optional function to start stack trace from.
- * @return {!goog.html.SafeHtml} Details of exception.
- */
-goog.debug.exposeExceptionAsHtml = function(err, opt_fn) {
-  /** @preserveTry */
-  try {
-    var e = goog.debug.normalizeErrorObject(err);
-    // Create the error message
-    var viewSourceUrl = goog.debug.createViewSourceUrl_(e.fileName);
-    var error = goog.html.SafeHtml.concat(
-        goog.html.SafeHtml.htmlEscapePreservingNewlinesAndSpaces(
-            'Message: ' + e.message + '\nUrl: '),
-        goog.html.SafeHtml.create(
-            'a', {href: viewSourceUrl, target: '_new'}, e.fileName),
-        goog.html.SafeHtml.htmlEscapePreservingNewlinesAndSpaces(
-            '\nLine: ' + e.lineNumber + '\n\nBrowser stack:\n' + e.stack +
-            '-> ' +
-            '[end]\n\nJS stack traversal:\n' +
-            goog.debug.getStacktrace(opt_fn) + '-> '));
-    return error;
-  } catch (e2) {
-    return goog.html.SafeHtml.htmlEscapePreservingNewlinesAndSpaces(
-        'Exception trying to expose exception! You win, we lose. ' + e2);
-  }
-};
-
-
-/**
- * @param {?string=} opt_fileName
- * @return {!goog.html.SafeUrl} SafeUrl with view-source scheme, pointing at
- *     fileName.
+ * Utility array used to unify the cases of listening for an array of types
+ * and listening for a single event, without using recursion or allocating
+ * an array each time.
+ * @type {!Array<string>}
+ * @const
  * @private
  */
-goog.debug.createViewSourceUrl_ = function(opt_fileName) {
-  if (!goog.isDefAndNotNull(opt_fileName)) {
-    opt_fileName = '';
-  }
-  if (!/^https?:\/\//i.test(opt_fileName)) {
-    return goog.html.SafeUrl.fromConstant(
-        goog.string.Const.from('sanitizedviewsrc'));
-  }
-  var sanitizedFileName = goog.html.SafeUrl.sanitize(opt_fileName);
-  return goog.html.uncheckedconversions
-      .safeUrlFromStringKnownToSatisfyTypeContract(
-          goog.string.Const.from('view-source scheme plus HTTP/HTTPS URL'),
-          'view-source:' + goog.html.SafeUrl.unwrap(sanitizedFileName));
+goog.events.EventHandler.typeArray_ = [];
+
+
+/**
+ * Listen to an event on a Listenable.  If the function is omitted then the
+ * EventHandler's handleEvent method will be used.
+ * @param {goog.events.ListenableType} src Event source.
+ * @param {string|Array<string>|
+ *     !goog.events.EventId<EVENTOBJ>|!Array<!goog.events.EventId<EVENTOBJ>>}
+ *     type Event type to listen for or array of event types.
+ * @param {function(this:SCOPE, EVENTOBJ):?|{handleEvent:function(?):?}|null=}
+ *     opt_fn Optional callback function to be used as the listener or an object
+ *     with handleEvent function.
+ * @param {boolean=} opt_capture Optional whether to use capture phase.
+ * @return {!goog.events.EventHandler<SCOPE>} This object, allowing for
+ *     chaining of calls.
+ * @template EVENTOBJ
+ */
+goog.events.EventHandler.prototype.listen = function(
+    src, type, opt_fn, opt_capture) {
+  return this.listen_(src, type, opt_fn, opt_capture);
 };
 
 
 /**
- * Normalizes the error/exception object between browsers.
- * @param {Object} err Raw error object.
- * @return {!Object} Normalized error object.
+ * Listen to an event on a Listenable.  If the function is omitted then the
+ * EventHandler's handleEvent method will be used.
+ * @param {goog.events.ListenableType} src Event source.
+ * @param {string|Array<string>|
+ *     !goog.events.EventId<EVENTOBJ>|!Array<!goog.events.EventId<EVENTOBJ>>}
+ *     type Event type to listen for or array of event types.
+ * @param {function(this:T, EVENTOBJ):?|{handleEvent:function(this:T, ?):?}|
+ *     null|undefined} fn Optional callback function to be used as the
+ *     listener or an object with handleEvent function.
+ * @param {boolean|undefined} capture Optional whether to use capture phase.
+ * @param {T} scope Object in whose scope to call the listener.
+ * @return {!goog.events.EventHandler<SCOPE>} This object, allowing for
+ *     chaining of calls.
+ * @template T,EVENTOBJ
  */
-goog.debug.normalizeErrorObject = function(err) {
-  var href = goog.getObjectByName('window.location.href');
-  if (goog.isString(err)) {
-    return {
-      'message': err,
-      'name': 'Unknown error',
-      'lineNumber': 'Not available',
-      'fileName': href,
-      'stack': 'Not available'
-    };
-  }
-
-  var lineNumber, fileName;
-  var threwError = false;
-
-  try {
-    lineNumber = err.lineNumber || err.line || 'Not available';
-  } catch (e) {
-    // Firefox 2 sometimes throws an error when accessing 'lineNumber':
-    // Message: Permission denied to get property UnnamedClass.lineNumber
-    lineNumber = 'Not available';
-    threwError = true;
-  }
-
-  try {
-    fileName = err.fileName || err.filename || err.sourceURL ||
-        // $googDebugFname may be set before a call to eval to set the filename
-        // that the eval is supposed to present.
-        goog.global['$googDebugFname'] || href;
-  } catch (e) {
-    // Firefox 2 may also throw an error when accessing 'filename'.
-    fileName = 'Not available';
-    threwError = true;
-  }
-
-  // The IE Error object contains only the name and the message.
-  // The Safari Error object uses the line and sourceURL fields.
-  if (threwError || !err.lineNumber || !err.fileName || !err.stack ||
-      !err.message || !err.name) {
-    return {
-      'message': err.message || 'Not available',
-      'name': err.name || 'UnknownError',
-      'lineNumber': lineNumber,
-      'fileName': fileName,
-      'stack': err.stack || 'Not available'
-    };
-  }
-
-  // Standards error object
-  return err;
+goog.events.EventHandler.prototype.listenWithScope = function(
+    src, type, fn, capture, scope) {
+  // TODO(mknichel): Deprecate this function.
+  return this.listen_(src, type, fn, capture, scope);
 };
 
 
 /**
- * Converts an object to an Error if it's a String,
- * adds a stacktrace if there isn't one,
- * and optionally adds an extra message.
- * @param {Error|string} err  the original thrown object or string.
- * @param {string=} opt_message  optional additional message to add to the
- *     error.
- * @return {!Error} If err is a string, it is used to create a new Error,
- *     which is enhanced and returned.  Otherwise err itself is enhanced
- *     and returned.
- */
-goog.debug.enhanceError = function(err, opt_message) {
-  var error;
-  if (typeof err == 'string') {
-    error = Error(err);
-    if (Error.captureStackTrace) {
-      // Trim this function off the call stack, if we can.
-      Error.captureStackTrace(error, goog.debug.enhanceError);
-    }
-  } else {
-    error = err;
-  }
-
-  if (!error.stack) {
-    error.stack = goog.debug.getStacktrace(goog.debug.enhanceError);
-  }
-  if (opt_message) {
-    // find the first unoccupied 'messageX' property
-    var x = 0;
-    while (error['message' + x]) {
-      ++x;
-    }
-    error['message' + x] = String(opt_message);
-  }
-  return error;
-};
-
-
-/**
- * Gets the current stack trace. Simple and iterative - doesn't worry about
- * catching circular references or getting the args.
- * @param {number=} opt_depth Optional maximum depth to trace back to.
- * @return {string} A string with the function names of all functions in the
- *     stack, separated by \n.
- * @suppress {es5Strict}
- */
-goog.debug.getStacktraceSimple = function(opt_depth) {
-  if (!goog.debug.FORCE_SLOPPY_STACKS) {
-    var stack = goog.debug.getNativeStackTrace_(goog.debug.getStacktraceSimple);
-    if (stack) {
-      return stack;
-    }
-    // NOTE: browsers that have strict mode support also have native "stack"
-    // properties.  Fall-through for legacy browser support.
-  }
-
-  var sb = [];
-  var fn = arguments.callee.caller;
-  var depth = 0;
-
-  while (fn && (!opt_depth || depth < opt_depth)) {
-    sb.push(goog.debug.getFunctionName(fn));
-    sb.push('()\n');
-    /** @preserveTry */
-    try {
-      fn = fn.caller;
-    } catch (e) {
-      sb.push('[exception trying to get caller]\n');
-      break;
-    }
-    depth++;
-    if (depth >= goog.debug.MAX_STACK_DEPTH) {
-      sb.push('[...long stack...]');
-      break;
-    }
-  }
-  if (opt_depth && depth >= opt_depth) {
-    sb.push('[...reached max depth limit...]');
-  } else {
-    sb.push('[end]');
-  }
-
-  return sb.join('');
-};
-
-
-/**
- * Max length of stack to try and output
- * @type {number}
- */
-goog.debug.MAX_STACK_DEPTH = 50;
-
-
-/**
- * @param {Function} fn The function to start getting the trace from.
- * @return {?string}
+ * Listen to an event on a Listenable.  If the function is omitted then the
+ * EventHandler's handleEvent method will be used.
+ * @param {goog.events.ListenableType} src Event source.
+ * @param {string|Array<string>|
+ *     !goog.events.EventId<EVENTOBJ>|!Array<!goog.events.EventId<EVENTOBJ>>}
+ *     type Event type to listen for or array of event types.
+ * @param {function(EVENTOBJ):?|{handleEvent:function(?):?}|null=} opt_fn
+ *     Optional callback function to be used as the listener or an object with
+ *     handleEvent function.
+ * @param {boolean=} opt_capture Optional whether to use capture phase.
+ * @param {Object=} opt_scope Object in whose scope to call the listener.
+ * @return {!goog.events.EventHandler<SCOPE>} This object, allowing for
+ *     chaining of calls.
+ * @template EVENTOBJ
  * @private
  */
-goog.debug.getNativeStackTrace_ = function(fn) {
-  var tempErr = new Error();
-  if (Error.captureStackTrace) {
-    Error.captureStackTrace(tempErr, fn);
-    return String(tempErr.stack);
-  } else {
-    // IE10, only adds stack traces when an exception is thrown.
-    try {
-      throw tempErr;
-    } catch (e) {
-      tempErr = e;
+goog.events.EventHandler.prototype.listen_ = function(
+    src, type, opt_fn, opt_capture, opt_scope) {
+  if (!goog.isArray(type)) {
+    if (type) {
+      goog.events.EventHandler.typeArray_[0] = type.toString();
     }
-    var stack = tempErr.stack;
-    if (stack) {
-      return String(stack);
-    }
+    type = goog.events.EventHandler.typeArray_;
   }
-  return null;
+  for (var i = 0; i < type.length; i++) {
+    var listenerObj = goog.events.listen(
+        src, type[i], opt_fn || this.handleEvent, opt_capture || false,
+        opt_scope || this.handler_ || this);
+
+    if (!listenerObj) {
+      // When goog.events.listen run on OFF_AND_FAIL or OFF_AND_SILENT
+      // (goog.events.CaptureSimulationMode) in IE8-, it will return null
+      // value.
+      return this;
+    }
+
+    var key = listenerObj.key;
+    this.keys_[key] = listenerObj;
+  }
+
+  return this;
 };
 
 
 /**
- * Gets the current stack trace, either starting from the caller or starting
- * from a specified function that's currently on the call stack.
- * @param {Function=} opt_fn Optional function to start getting the trace from.
- *     If not provided, defaults to the function that called this.
- * @return {string} Stack trace.
- * @suppress {es5Strict}
+ * Listen to an event on a Listenable.  If the function is omitted, then the
+ * EventHandler's handleEvent method will be used. After the event has fired the
+ * event listener is removed from the target. If an array of event types is
+ * provided, each event type will be listened to once.
+ * @param {goog.events.ListenableType} src Event source.
+ * @param {string|Array<string>|
+ *     !goog.events.EventId<EVENTOBJ>|!Array<!goog.events.EventId<EVENTOBJ>>}
+ *     type Event type to listen for or array of event types.
+ * @param {function(this:SCOPE, EVENTOBJ):?|{handleEvent:function(?):?}|null=}
+ * opt_fn
+ *    Optional callback function to be used as the listener or an object with
+ *    handleEvent function.
+ * @param {boolean=} opt_capture Optional whether to use capture phase.
+ * @return {!goog.events.EventHandler<SCOPE>} This object, allowing for
+ *     chaining of calls.
+ * @template EVENTOBJ
  */
-goog.debug.getStacktrace = function(opt_fn) {
-  var stack;
-  if (!goog.debug.FORCE_SLOPPY_STACKS) {
-    // Try to get the stack trace from the environment if it is available.
-    var contextFn = opt_fn || goog.debug.getStacktrace;
-    stack = goog.debug.getNativeStackTrace_(contextFn);
-  }
-  if (!stack) {
-    // NOTE: browsers that have strict mode support also have native "stack"
-    // properties. This function will throw in strict mode.
-    stack =
-        goog.debug.getStacktraceHelper_(opt_fn || arguments.callee.caller, []);
-  }
-  return stack;
+goog.events.EventHandler.prototype.listenOnce = function(
+    src, type, opt_fn, opt_capture) {
+  return this.listenOnce_(src, type, opt_fn, opt_capture);
 };
 
 
 /**
- * Private helper for getStacktrace().
- * @param {Function} fn Function to start getting the trace from.
- * @param {Array<!Function>} visited List of functions visited so far.
- * @return {string} Stack trace starting from function fn.
- * @suppress {es5Strict}
+ * Listen to an event on a Listenable.  If the function is omitted, then the
+ * EventHandler's handleEvent method will be used. After the event has fired the
+ * event listener is removed from the target. If an array of event types is
+ * provided, each event type will be listened to once.
+ * @param {goog.events.ListenableType} src Event source.
+ * @param {string|Array<string>|
+ *     !goog.events.EventId<EVENTOBJ>|!Array<!goog.events.EventId<EVENTOBJ>>}
+ *     type Event type to listen for or array of event types.
+ * @param {function(this:T, EVENTOBJ):?|{handleEvent:function(this:T, ?):?}|
+ *     null|undefined} fn Optional callback function to be used as the
+ *     listener or an object with handleEvent function.
+ * @param {boolean|undefined} capture Optional whether to use capture phase.
+ * @param {T} scope Object in whose scope to call the listener.
+ * @return {!goog.events.EventHandler<SCOPE>} This object, allowing for
+ *     chaining of calls.
+ * @template T,EVENTOBJ
+ */
+goog.events.EventHandler.prototype.listenOnceWithScope = function(
+    src, type, fn, capture, scope) {
+  // TODO(mknichel): Deprecate this function.
+  return this.listenOnce_(src, type, fn, capture, scope);
+};
+
+
+/**
+ * Listen to an event on a Listenable.  If the function is omitted, then the
+ * EventHandler's handleEvent method will be used. After the event has fired
+ * the event listener is removed from the target. If an array of event types is
+ * provided, each event type will be listened to once.
+ * @param {goog.events.ListenableType} src Event source.
+ * @param {string|Array<string>|
+ *     !goog.events.EventId<EVENTOBJ>|!Array<!goog.events.EventId<EVENTOBJ>>}
+ *     type Event type to listen for or array of event types.
+ * @param {function(EVENTOBJ):?|{handleEvent:function(?):?}|null=} opt_fn
+ *    Optional callback function to be used as the listener or an object with
+ *    handleEvent function.
+ * @param {boolean=} opt_capture Optional whether to use capture phase.
+ * @param {Object=} opt_scope Object in whose scope to call the listener.
+ * @return {!goog.events.EventHandler<SCOPE>} This object, allowing for
+ *     chaining of calls.
+ * @template EVENTOBJ
  * @private
  */
-goog.debug.getStacktraceHelper_ = function(fn, visited) {
-  var sb = [];
-
-  // Circular reference, certain functions like bind seem to cause a recursive
-  // loop so we need to catch circular references
-  if (goog.array.contains(visited, fn)) {
-    sb.push('[...circular reference...]');
-
-    // Traverse the call stack until function not found or max depth is reached
-  } else if (fn && visited.length < goog.debug.MAX_STACK_DEPTH) {
-    sb.push(goog.debug.getFunctionName(fn) + '(');
-    var args = fn.arguments;
-    // Args may be null for some special functions such as host objects or eval.
-    for (var i = 0; args && i < args.length; i++) {
-      if (i > 0) {
-        sb.push(', ');
-      }
-      var argDesc;
-      var arg = args[i];
-      switch (typeof arg) {
-        case 'object':
-          argDesc = arg ? 'object' : 'null';
-          break;
-
-        case 'string':
-          argDesc = arg;
-          break;
-
-        case 'number':
-          argDesc = String(arg);
-          break;
-
-        case 'boolean':
-          argDesc = arg ? 'true' : 'false';
-          break;
-
-        case 'function':
-          argDesc = goog.debug.getFunctionName(arg);
-          argDesc = argDesc ? argDesc : '[fn]';
-          break;
-
-        case 'undefined':
-        default:
-          argDesc = typeof arg;
-          break;
-      }
-
-      if (argDesc.length > 40) {
-        argDesc = argDesc.substr(0, 40) + '...';
-      }
-      sb.push(argDesc);
+goog.events.EventHandler.prototype.listenOnce_ = function(
+    src, type, opt_fn, opt_capture, opt_scope) {
+  if (goog.isArray(type)) {
+    for (var i = 0; i < type.length; i++) {
+      this.listenOnce_(src, type[i], opt_fn, opt_capture, opt_scope);
     }
-    visited.push(fn);
-    sb.push(')\n');
-    /** @preserveTry */
-    try {
-      sb.push(goog.debug.getStacktraceHelper_(fn.caller, visited));
-    } catch (e) {
-      sb.push('[exception trying to get caller]\n');
-    }
-
-  } else if (fn) {
-    sb.push('[...long stack...]');
   } else {
-    sb.push('[end]');
-  }
-  return sb.join('');
-};
-
-
-/**
- * Set a custom function name resolver.
- * @param {function(Function): string} resolver Resolves functions to their
- *     names.
- */
-goog.debug.setFunctionResolver = function(resolver) {
-  goog.debug.fnNameResolver_ = resolver;
-};
-
-
-/**
- * Gets a function name
- * @param {Function} fn Function to get name of.
- * @return {string} Function's name.
- */
-goog.debug.getFunctionName = function(fn) {
-  if (goog.debug.fnNameCache_[fn]) {
-    return goog.debug.fnNameCache_[fn];
-  }
-  if (goog.debug.fnNameResolver_) {
-    var name = goog.debug.fnNameResolver_(fn);
-    if (name) {
-      goog.debug.fnNameCache_[fn] = name;
-      return name;
+    var listenerObj = goog.events.listenOnce(
+        src, type, opt_fn || this.handleEvent, opt_capture,
+        opt_scope || this.handler_ || this);
+    if (!listenerObj) {
+      // When goog.events.listen run on OFF_AND_FAIL or OFF_AND_SILENT
+      // (goog.events.CaptureSimulationMode) in IE8-, it will return null
+      // value.
+      return this;
     }
+
+    var key = listenerObj.key;
+    this.keys_[key] = listenerObj;
   }
 
-  // Heuristically determine function name based on code.
-  var functionSource = String(fn);
-  if (!goog.debug.fnNameCache_[functionSource]) {
-    var matches = /function ([^\(]+)/.exec(functionSource);
-    if (matches) {
-      var method = matches[1];
-      goog.debug.fnNameCache_[functionSource] = method;
-    } else {
-      goog.debug.fnNameCache_[functionSource] = '[Anonymous]';
-    }
-  }
-
-  return goog.debug.fnNameCache_[functionSource];
+  return this;
 };
 
 
 /**
- * Makes whitespace visible by replacing it with printable characters.
- * This is useful in finding diffrences between the expected and the actual
- * output strings of a testcase.
- * @param {string} string whose whitespace needs to be made visible.
- * @return {string} string whose whitespace is made visible.
- */
-goog.debug.makeWhitespaceVisible = function(string) {
-  return string.replace(/ /g, '[_]')
-      .replace(/\f/g, '[f]')
-      .replace(/\n/g, '[n]\n')
-      .replace(/\r/g, '[r]')
-      .replace(/\t/g, '[t]');
-};
-
-
-/**
- * Returns the type of a value. If a constructor is passed, and a suitable
- * string cannot be found, 'unknown type name' will be returned.
+ * Adds an event listener with a specific event wrapper on a DOM Node or an
+ * object that has implemented {@link goog.events.EventTarget}. A listener can
+ * only be added once to an object.
  *
- * <p>Forked rather than moved from {@link goog.asserts.getType_}
- * to avoid adding a dependency to goog.asserts.
- * @param {*} value A constructor, object, or primitive.
- * @return {string} The best display name for the value, or 'unknown type name'.
+ * @param {EventTarget|goog.events.EventTarget} src The node to listen to
+ *     events on.
+ * @param {goog.events.EventWrapper} wrapper Event wrapper to use.
+ * @param {function(this:SCOPE, ?):?|{handleEvent:function(?):?}|null} listener
+ *     Callback method, or an object with a handleEvent function.
+ * @param {boolean=} opt_capt Whether to fire in capture phase (defaults to
+ *     false).
+ * @return {!goog.events.EventHandler<SCOPE>} This object, allowing for
+ *     chaining of calls.
  */
-goog.debug.runtimeType = function(value) {
-  if (value instanceof Function) {
-    return value.displayName || value.name || 'unknown type name';
-  } else if (value instanceof Object) {
-    return value.constructor.displayName || value.constructor.name ||
-        Object.prototype.toString.call(value);
-  } else {
-    return value === null ? 'null' : typeof value;
-  }
+goog.events.EventHandler.prototype.listenWithWrapper = function(
+    src, wrapper, listener, opt_capt) {
+  // TODO(mknichel): Remove the opt_scope from this function and then
+  // templatize it.
+  return this.listenWithWrapper_(src, wrapper, listener, opt_capt);
 };
 
 
 /**
- * Hash map for storing function names that have already been looked up.
- * @type {Object}
- * @private
+ * Adds an event listener with a specific event wrapper on a DOM Node or an
+ * object that has implemented {@link goog.events.EventTarget}. A listener can
+ * only be added once to an object.
+ *
+ * @param {EventTarget|goog.events.EventTarget} src The node to listen to
+ *     events on.
+ * @param {goog.events.EventWrapper} wrapper Event wrapper to use.
+ * @param {function(this:T, ?):?|{handleEvent:function(this:T, ?):?}|null}
+ *     listener Optional callback function to be used as the
+ *     listener or an object with handleEvent function.
+ * @param {boolean|undefined} capture Optional whether to use capture phase.
+ * @param {T} scope Object in whose scope to call the listener.
+ * @return {!goog.events.EventHandler<SCOPE>} This object, allowing for
+ *     chaining of calls.
+ * @template T
  */
-goog.debug.fnNameCache_ = {};
+goog.events.EventHandler.prototype.listenWithWrapperAndScope = function(
+    src, wrapper, listener, capture, scope) {
+  // TODO(mknichel): Deprecate this function.
+  return this.listenWithWrapper_(src, wrapper, listener, capture, scope);
+};
 
 
 /**
- * Resolves functions to their names.  Resolved function names will be cached.
- * @type {function(Function):string}
+ * Adds an event listener with a specific event wrapper on a DOM Node or an
+ * object that has implemented {@link goog.events.EventTarget}. A listener can
+ * only be added once to an object.
+ *
+ * @param {EventTarget|goog.events.EventTarget} src The node to listen to
+ *     events on.
+ * @param {goog.events.EventWrapper} wrapper Event wrapper to use.
+ * @param {function(?):?|{handleEvent:function(?):?}|null} listener Callback
+ *     method, or an object with a handleEvent function.
+ * @param {boolean=} opt_capt Whether to fire in capture phase (defaults to
+ *     false).
+ * @param {Object=} opt_scope Element in whose scope to call the listener.
+ * @return {!goog.events.EventHandler<SCOPE>} This object, allowing for
+ *     chaining of calls.
  * @private
  */
-goog.debug.fnNameResolver_;
+goog.events.EventHandler.prototype.listenWithWrapper_ = function(
+    src, wrapper, listener, opt_capt, opt_scope) {
+  wrapper.listen(
+      src, listener, opt_capt, opt_scope || this.handler_ || this, this);
+  return this;
+};
+
+
+/**
+ * @return {number} Number of listeners registered by this handler.
+ */
+goog.events.EventHandler.prototype.getListenerCount = function() {
+  var count = 0;
+  for (var key in this.keys_) {
+    if (Object.prototype.hasOwnProperty.call(this.keys_, key)) {
+      count++;
+    }
+  }
+  return count;
+};
+
+
+/**
+ * Unlistens on an event.
+ * @param {goog.events.ListenableType} src Event source.
+ * @param {string|Array<string>|
+ *     !goog.events.EventId<EVENTOBJ>|!Array<!goog.events.EventId<EVENTOBJ>>}
+ *     type Event type or array of event types to unlisten to.
+ * @param {function(EVENTOBJ):?|{handleEvent:function(?):?}|null=} opt_fn
+ *     Optional callback function to be used as the listener or an object with
+ *     handleEvent function.
+ * @param {boolean=} opt_capture Optional whether to use capture phase.
+ * @param {Object=} opt_scope Object in whose scope to call the listener.
+ * @return {!goog.events.EventHandler} This object, allowing for chaining of
+ *     calls.
+ * @template EVENTOBJ
+ */
+goog.events.EventHandler.prototype.unlisten = function(
+    src, type, opt_fn, opt_capture, opt_scope) {
+  if (goog.isArray(type)) {
+    for (var i = 0; i < type.length; i++) {
+      this.unlisten(src, type[i], opt_fn, opt_capture, opt_scope);
+    }
+  } else {
+    var listener = goog.events.getListener(
+        src, type, opt_fn || this.handleEvent, opt_capture,
+        opt_scope || this.handler_ || this);
+
+    if (listener) {
+      goog.events.unlistenByKey(listener);
+      delete this.keys_[listener.key];
+    }
+  }
+
+  return this;
+};
+
+
+/**
+ * Removes an event listener which was added with listenWithWrapper().
+ *
+ * @param {EventTarget|goog.events.EventTarget} src The target to stop
+ *     listening to events on.
+ * @param {goog.events.EventWrapper} wrapper Event wrapper to use.
+ * @param {function(?):?|{handleEvent:function(?):?}|null} listener The
+ *     listener function to remove.
+ * @param {boolean=} opt_capt In DOM-compliant browsers, this determines
+ *     whether the listener is fired during the capture or bubble phase of the
+ *     event.
+ * @param {Object=} opt_scope Element in whose scope to call the listener.
+ * @return {!goog.events.EventHandler} This object, allowing for chaining of
+ *     calls.
+ */
+goog.events.EventHandler.prototype.unlistenWithWrapper = function(
+    src, wrapper, listener, opt_capt, opt_scope) {
+  wrapper.unlisten(
+      src, listener, opt_capt, opt_scope || this.handler_ || this, this);
+  return this;
+};
+
+
+/**
+ * Unlistens to all events.
+ */
+goog.events.EventHandler.prototype.removeAll = function() {
+  goog.object.forEach(this.keys_, function(listenerObj, key) {
+    if (this.keys_.hasOwnProperty(key)) {
+      goog.events.unlistenByKey(listenerObj);
+    }
+  }, this);
+
+  this.keys_ = {};
+};
+
+
+/**
+ * Disposes of this EventHandler and removes all listeners that it registered.
+ * @override
+ * @protected
+ */
+goog.events.EventHandler.prototype.disposeInternal = function() {
+  goog.events.EventHandler.superClass_.disposeInternal.call(this);
+  this.removeAll();
+};
+
+
+/**
+ * Default event handler
+ * @param {goog.events.Event} e Event object.
+ */
+goog.events.EventHandler.prototype.handleEvent = function(e) {
+  throw Error('EventHandler.handleEvent not implemented');
+};

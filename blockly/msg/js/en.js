@@ -634,7 +634,5 @@ Blockly.Msg.freeRTOS = "Create Task";
 Blockly.Msg.AirsenseReadDataPMS7003 = "Read data PMS7003" ;
 Blockly.Msg.ESP32_wifi = "Connect wifi";
 Blockly.Msg.AirsenseReadDataMHZ14A = "Read  data MHZ14A"
-Blockly.Msg.SetDateDS3231="DD,MM,YY : "
-Blockly.Msg.SetTimeDS3231="Time : "
 Blockly.Msg.GetDateTimeDS3231="Date-Time"
 Blockly.Msg.ConnectMQTT="Connect MQTT Client"

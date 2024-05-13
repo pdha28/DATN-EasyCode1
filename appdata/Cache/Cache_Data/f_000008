@@ -1,567 +1,874 @@
-// Copyright 2006 The Closure Library Authors. All Rights Reserved.
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//      http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS-IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-
 /**
- * @fileoverview Rendering engine detection.
- * @see <a href="http://www.useragentstring.com/">User agent strings</a>
- * For information on the browser brand (such as Safari versus Chrome), see
- * goog.userAgent.product.
- * @author arv@google.com (Erik Arvidsson)
- * @see ../demos/useragent.html
- */
-
-goog.provide('goog.userAgent');
-
-goog.require('goog.labs.userAgent.browser');
-goog.require('goog.labs.userAgent.engine');
-goog.require('goog.labs.userAgent.platform');
-goog.require('goog.labs.userAgent.util');
-goog.require('goog.string');
-
-
-/**
- * @define {boolean} Whether we know at compile-time that the browser is IE.
- */
-goog.define('goog.userAgent.ASSUME_IE', false);
-
-
-/**
- * @define {boolean} Whether we know at compile-time that the browser is EDGE.
- */
-goog.define('goog.userAgent.ASSUME_EDGE', false);
-
-
-/**
- * @define {boolean} Whether we know at compile-time that the browser is GECKO.
- */
-goog.define('goog.userAgent.ASSUME_GECKO', false);
-
-
-/**
- * @define {boolean} Whether we know at compile-time that the browser is WEBKIT.
- */
-goog.define('goog.userAgent.ASSUME_WEBKIT', false);
-
-
-/**
- * @define {boolean} Whether we know at compile-time that the browser is a
- *     mobile device running WebKit e.g. iPhone or Android.
- */
-goog.define('goog.userAgent.ASSUME_MOBILE_WEBKIT', false);
-
-
-/**
- * @define {boolean} Whether we know at compile-time that the browser is OPERA.
- */
-goog.define('goog.userAgent.ASSUME_OPERA', false);
-
-
-/**
- * @define {boolean} Whether the
- *     {@code goog.userAgent.isVersionOrHigher}
- *     function will return true for any version.
- */
-goog.define('goog.userAgent.ASSUME_ANY_VERSION', false);
-
-
-/**
- * Whether we know the browser engine at compile-time.
- * @type {boolean}
- * @private
- */
-goog.userAgent.BROWSER_KNOWN_ = goog.userAgent.ASSUME_IE ||
-    goog.userAgent.ASSUME_EDGE || goog.userAgent.ASSUME_GECKO ||
-    goog.userAgent.ASSUME_MOBILE_WEBKIT || goog.userAgent.ASSUME_WEBKIT ||
-    goog.userAgent.ASSUME_OPERA;
-
-
-/**
- * Returns the userAgent string for the current browser.
+ * @license
+ * Visual Blocks Editor
  *
- * @return {string} The userAgent string.
- */
-goog.userAgent.getUserAgentString = function() {
-  return goog.labs.userAgent.util.getUserAgent();
-};
-
-
-/**
- * TODO(nnaze): Change type to "Navigator" and update compilation targets.
- * @return {Object} The native navigator object.
- */
-goog.userAgent.getNavigator = function() {
-  // Need a local navigator reference instead of using the global one,
-  // to avoid the rare case where they reference different objects.
-  // (in a WorkerPool, for example).
-  return goog.global['navigator'] || null;
-};
-
-
-/**
- * Whether the user agent is Opera.
- * @type {boolean}
- */
-goog.userAgent.OPERA = goog.userAgent.BROWSER_KNOWN_ ?
-    goog.userAgent.ASSUME_OPERA :
-    goog.labs.userAgent.browser.isOpera();
-
-
-/**
- * Whether the user agent is Internet Explorer.
- * @type {boolean}
- */
-goog.userAgent.IE = goog.userAgent.BROWSER_KNOWN_ ?
-    goog.userAgent.ASSUME_IE :
-    goog.labs.userAgent.browser.isIE();
-
-
-/**
- * Whether the user agent is Microsoft Edge.
- * @type {boolean}
- */
-goog.userAgent.EDGE = goog.userAgent.BROWSER_KNOWN_ ?
-    goog.userAgent.ASSUME_EDGE :
-    goog.labs.userAgent.engine.isEdge();
-
-
-/**
- * Whether the user agent is MS Internet Explorer or MS Edge.
- * @type {boolean}
- */
-goog.userAgent.EDGE_OR_IE = goog.userAgent.EDGE || goog.userAgent.IE;
-
-
-/**
- * Whether the user agent is Gecko. Gecko is the rendering engine used by
- * Mozilla, Firefox, and others.
- * @type {boolean}
- */
-goog.userAgent.GECKO = goog.userAgent.BROWSER_KNOWN_ ?
-    goog.userAgent.ASSUME_GECKO :
-    goog.labs.userAgent.engine.isGecko();
-
-
-/**
- * Whether the user agent is WebKit. WebKit is the rendering engine that
- * Safari, Android and others use.
- * @type {boolean}
- */
-goog.userAgent.WEBKIT = goog.userAgent.BROWSER_KNOWN_ ?
-    goog.userAgent.ASSUME_WEBKIT || goog.userAgent.ASSUME_MOBILE_WEBKIT :
-    goog.labs.userAgent.engine.isWebKit();
-
-
-/**
- * Whether the user agent is running on a mobile device.
+ * Copyright 2012 Google Inc.
+ * https://developers.google.com/blockly/
  *
- * This is a separate function so that the logic can be tested.
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
  *
- * TODO(nnaze): Investigate swapping in goog.labs.userAgent.device.isMobile().
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * @return {boolean} Whether the user agent is running on a mobile device.
- * @private
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
  */
-goog.userAgent.isMobile_ = function() {
-  return goog.userAgent.WEBKIT &&
-      goog.labs.userAgent.util.matchUserAgent('Mobile');
-};
+
+/**
+ * @fileoverview Procedure blocks for Blockly.
+ * @author fraser@google.com (Neil Fraser)
+ */
+'use strict';
+
+goog.provide('Blockly.Blocks.procedures');
+
+goog.require('Blockly.Blocks');
+goog.require('Blockly.Types');
 
 
 /**
- * Whether the user agent is running on a mobile device.
- *
- * TODO(nnaze): Consider deprecating MOBILE when labs.userAgent
- *   is promoted as the gecko/webkit logic is likely inaccurate.
- *
- * @type {boolean}
+ * Common HSV hue for all blocks in this category.
  */
-goog.userAgent.MOBILE =
-    goog.userAgent.ASSUME_MOBILE_WEBKIT || goog.userAgent.isMobile_();
+Blockly.Blocks.procedures.HUE = '#FF6680';
 
-
-/**
- * Used while transitioning code to use WEBKIT instead.
- * @type {boolean}
- * @deprecated Use {@link goog.userAgent.product.SAFARI} instead.
- * TODO(nicksantos): Delete this from goog.userAgent.
- */
-goog.userAgent.SAFARI = goog.userAgent.WEBKIT;
-
-
-/**
- * @return {string} the platform (operating system) the user agent is running
- *     on. Default to empty string because navigator.platform may not be defined
- *     (on Rhino, for example).
- * @private
- */
-goog.userAgent.determinePlatform_ = function() {
-  var navigator = goog.userAgent.getNavigator();
-  return navigator && navigator.platform || '';
-};
-
-
-/**
- * The platform (operating system) the user agent is running on. Default to
- * empty string because navigator.platform may not be defined (on Rhino, for
- * example).
- * @type {string}
- */
-goog.userAgent.PLATFORM = goog.userAgent.determinePlatform_();
-
-
-/**
- * @define {boolean} Whether the user agent is running on a Macintosh operating
- *     system.
- */
-goog.define('goog.userAgent.ASSUME_MAC', false);
-
-
-/**
- * @define {boolean} Whether the user agent is running on a Windows operating
- *     system.
- */
-goog.define('goog.userAgent.ASSUME_WINDOWS', false);
-
-
-/**
- * @define {boolean} Whether the user agent is running on a Linux operating
- *     system.
- */
-goog.define('goog.userAgent.ASSUME_LINUX', false);
-
-
-/**
- * @define {boolean} Whether the user agent is running on a X11 windowing
- *     system.
- */
-goog.define('goog.userAgent.ASSUME_X11', false);
-
-
-/**
- * @define {boolean} Whether the user agent is running on Android.
- */
-goog.define('goog.userAgent.ASSUME_ANDROID', false);
-
-
-/**
- * @define {boolean} Whether the user agent is running on an iPhone.
- */
-goog.define('goog.userAgent.ASSUME_IPHONE', false);
-
-
-/**
- * @define {boolean} Whether the user agent is running on an iPad.
- */
-goog.define('goog.userAgent.ASSUME_IPAD', false);
-
-
-/**
- * @type {boolean}
- * @private
- */
-goog.userAgent.PLATFORM_KNOWN_ = goog.userAgent.ASSUME_MAC ||
-    goog.userAgent.ASSUME_WINDOWS || goog.userAgent.ASSUME_LINUX ||
-    goog.userAgent.ASSUME_X11 || goog.userAgent.ASSUME_ANDROID ||
-    goog.userAgent.ASSUME_IPHONE || goog.userAgent.ASSUME_IPAD;
-
-
-/**
- * Whether the user agent is running on a Macintosh operating system.
- * @type {boolean}
- */
-goog.userAgent.MAC = goog.userAgent.PLATFORM_KNOWN_ ?
-    goog.userAgent.ASSUME_MAC :
-    goog.labs.userAgent.platform.isMacintosh();
-
-
-/**
- * Whether the user agent is running on a Windows operating system.
- * @type {boolean}
- */
-goog.userAgent.WINDOWS = goog.userAgent.PLATFORM_KNOWN_ ?
-    goog.userAgent.ASSUME_WINDOWS :
-    goog.labs.userAgent.platform.isWindows();
-
-
-/**
- * Whether the user agent is Linux per the legacy behavior of
- * goog.userAgent.LINUX, which considered ChromeOS to also be
- * Linux.
- * @return {boolean}
- * @private
- */
-goog.userAgent.isLegacyLinux_ = function() {
-  return goog.labs.userAgent.platform.isLinux() ||
-      goog.labs.userAgent.platform.isChromeOS();
-};
-
-
-/**
- * Whether the user agent is running on a Linux operating system.
- *
- * Note that goog.userAgent.LINUX considers ChromeOS to be Linux,
- * while goog.labs.userAgent.platform considers ChromeOS and
- * Linux to be different OSes.
- *
- * @type {boolean}
- */
-goog.userAgent.LINUX = goog.userAgent.PLATFORM_KNOWN_ ?
-    goog.userAgent.ASSUME_LINUX :
-    goog.userAgent.isLegacyLinux_();
-
-
-/**
- * @return {boolean} Whether the user agent is an X11 windowing system.
- * @private
- */
-goog.userAgent.isX11_ = function() {
-  var navigator = goog.userAgent.getNavigator();
-  return !!navigator &&
-      goog.string.contains(navigator['appVersion'] || '', 'X11');
-};
-
-
-/**
- * Whether the user agent is running on a X11 windowing system.
- * @type {boolean}
- */
-goog.userAgent.X11 = goog.userAgent.PLATFORM_KNOWN_ ?
-    goog.userAgent.ASSUME_X11 :
-    goog.userAgent.isX11_();
-
-
-/**
- * Whether the user agent is running on Android.
- * @type {boolean}
- */
-goog.userAgent.ANDROID = goog.userAgent.PLATFORM_KNOWN_ ?
-    goog.userAgent.ASSUME_ANDROID :
-    goog.labs.userAgent.platform.isAndroid();
-
-
-/**
- * Whether the user agent is running on an iPhone.
- * @type {boolean}
- */
-goog.userAgent.IPHONE = goog.userAgent.PLATFORM_KNOWN_ ?
-    goog.userAgent.ASSUME_IPHONE :
-    goog.labs.userAgent.platform.isIphone();
-
-
-/**
- * Whether the user agent is running on an iPad.
- * @type {boolean}
- */
-goog.userAgent.IPAD = goog.userAgent.PLATFORM_KNOWN_ ?
-    goog.userAgent.ASSUME_IPAD :
-    goog.labs.userAgent.platform.isIpad();
-
-
-/**
- * @return {string} The string that describes the version number of the user
- *     agent.
- * Assumes user agent is opera.
- * @private
- */
-goog.userAgent.operaVersion_ = function() {
-  var version = goog.global.opera.version;
-  try {
-    return version();
-  } catch (e) {
-    return version;
-  }
-};
-
-
-/**
- * @return {string} The string that describes the version number of the user
- *     agent.
- * @private
- */
-goog.userAgent.determineVersion_ = function() {
-  // All browsers have different ways to detect the version and they all have
-  // different naming schemes.
-
-  if (goog.userAgent.OPERA && goog.global['opera']) {
-    return goog.userAgent.operaVersion_();
-  }
-
-  // version is a string rather than a number because it may contain 'b', 'a',
-  // and so on.
-  var version = '';
-  var arr = goog.userAgent.getVersionRegexResult_();
-  if (arr) {
-    version = arr ? arr[1] : '';
-  }
-
-  if (goog.userAgent.IE) {
-    // IE9 can be in document mode 9 but be reporting an inconsistent user agent
-    // version.  If it is identifying as a version lower than 9 we take the
-    // documentMode as the version instead.  IE8 has similar behavior.
-    // It is recommended to set the X-UA-Compatible header to ensure that IE9
-    // uses documentMode 9.
-    var docMode = goog.userAgent.getDocumentMode_();
-    if (docMode > parseFloat(version)) {
-      return String(docMode);
+Blockly.Blocks['procedures_defnoreturn'] = {
+  /**
+   * Block for defining a procedure with no return value.
+   * @this Blockly.Block
+   */
+  init: function() {
+    var nameField = new Blockly.FieldTextInput(
+        Blockly.Msg.PROCEDURES_DEFNORETURN_PROCEDURE,
+        Blockly.Procedures.rename);
+    nameField.setSpellcheck(false);
+    this.appendDummyInput()
+        .appendField(Blockly.Msg.PROCEDURES_DEFNORETURN_TITLE)
+        .appendField(nameField, 'NAME')
+        .appendField('', 'PARAMS');
+    this.setMutator(new Blockly.Mutator(['procedures_mutatorarg']));
+    if (Blockly.Msg.PROCEDURES_DEFNORETURN_COMMENT) {
+      this.setCommentText(Blockly.Msg.PROCEDURES_DEFNORETURN_COMMENT);
     }
-  }
+    this.setColour('#FF6680');
+    this.setTooltip(Blockly.Msg.PROCEDURES_DEFNORETURN_TOOLTIP);
+    this.setHelpUrl(Blockly.Msg.PROCEDURES_DEFNORETURN_HELPURL);
+    this.arguments_ = [];
+    this.setStatements_(true);
+    this.statementConnection_ = null;
+  },
+  /**
+   * Initialization of the block has completed, clean up anything that may be
+   * inconsistent as a result of the XML loading.
+   * @this Blockly.Block
+   */
+  validate: function () {
+    var name = Blockly.Procedures.findLegalName(
+        this.getFieldValue('NAME'), this);
+    this.setFieldValue(name, 'NAME');
+  },
+  /**
+   * Add or remove the statement block from this function definition.
+   * @param {boolean} hasStatements True if a statement block is needed.
+   * @this Blockly.Block
+   */
+  setStatements_: function(hasStatements) {
+    if (this.hasStatements_ === hasStatements) {
+      return;
+    }
+    if (hasStatements) {
+      this.appendStatementInput('STACK')
+          .appendField(Blockly.Msg.PROCEDURES_DEFNORETURN_DO);
+      if (this.getInput('RETURN')) {
+        this.moveInputBefore('STACK', 'RETURN');
+      }
+    } else {
+      this.removeInput('STACK', true);
+    }
+    this.hasStatements_ = hasStatements;
+  },
+  /**
+   * Update the display of parameters for this procedure definition block.
+   * Display a warning if there are duplicately named parameters.
+   * @private
+   * @this Blockly.Block
+   */
+  updateParams_: function() {
+    // Check for duplicated arguments.
+    var badArg = false;
+    var hash = {};
+    for (var i = 0; i < this.arguments_.length; i++) {
+      if (hash['arg_' + this.arguments_[i].toLowerCase()]) {
+        badArg = true;
+        break;
+      }
+      hash['arg_' + this.arguments_[i].toLowerCase()] = true;
+    }
+    if (badArg) {
+      this.setWarningText(Blockly.Msg.PROCEDURES_DEF_DUPLICATE_WARNING);
+    } else {
+      this.setWarningText(null);
+    }
+    // Merge the arguments into a human-readable list.
+    var paramString = '';
+    if (this.arguments_.length) {
+      paramString = Blockly.Msg.PROCEDURES_BEFORE_PARAMS +
+          ' ' + this.arguments_.join(', ');
+    }
+    // The params field is deterministic based on the mutation,
+    // no need to fire a change event.
+    Blockly.Events.disable();
+    this.setFieldValue(paramString, 'PARAMS');
+    Blockly.Events.enable();
+  },
+  /**
+   * Create XML to represent the argument inputs.
+   * @param {=boolean} opt_paramIds If true include the IDs of the parameter
+   *     quarks.  Used by Blockly.Procedures.mutateCallers for reconnection.
+   * @return {!Element} XML storage element.
+   * @this Blockly.Block
+   */
+  mutationToDom: function(opt_paramIds) {
+    var container = document.createElement('mutation');
+    if (opt_paramIds) {
+      container.setAttribute('name', this.getFieldValue('NAME'));
+      container.setAttribute('type',this.getFieldValue("TYPE"));//add
+    }
+    for (var i = 0; i < this.arguments_.length; i++) {
+      var parameter = document.createElement('arg');
+      parameter.setAttribute('name', this.arguments_[i]);
+      if (opt_paramIds && this.paramIds_) {
+        parameter.setAttribute('paramId', this.paramIds_[i]);
+      }
+      container.appendChild(parameter);
+    }
 
-  return version;
+    // Save whether the statement input is visible.
+    if (!this.hasStatements_) {
+      container.setAttribute('statements', 'false');
+    }
+    return container;
+  },
+  /**
+   * Parse XML to restore the argument inputs.
+   * @param {!Element} xmlElement XML storage element.
+   * @this Blockly.Block
+   */
+  domToMutation: function(xmlElement) {
+    this.arguments_ = [];
+    for (var i = 0, childNode; childNode = xmlElement.childNodes[i]; i++) {
+      if (childNode.nodeName.toLowerCase() == 'arg') {
+        this.arguments_.push(childNode.getAttribute('name'));
+      }
+    }
+    this.updateParams_();
+    Blockly.Procedures.mutateCallers(this);
+
+    // Show or hide the statement input.
+    this.setStatements_(xmlElement.getAttribute('statements') !== 'false');
+  },
+  /**
+   * Populate the mutator's dialog with this block's components.
+   * @param {!Blockly.Workspace} workspace Mutator's workspace.
+   * @return {!Blockly.Block} Root block in mutator.
+   * @this Blockly.Block
+   */
+  decompose: function(workspace) {
+    var containerBlock = workspace.newBlock('procedures_mutatorcontainer');
+    containerBlock.initSvg();
+
+    // Check/uncheck the allow statement box.
+    if (this.getInput('RETURN')) {
+      containerBlock.setFieldValue(this.hasStatements_ ? 'TRUE' : 'FALSE',
+                                   'STATEMENTS');
+    } else {
+      containerBlock.getInput('STATEMENT_INPUT').setVisible(false);
+    }
+
+    // Parameter list.
+    var connection = containerBlock.getInput('STACK').connection;
+    for (var i = 0; i < this.arguments_.length; i++) {
+      var paramBlock = workspace.newBlock('procedures_mutatorarg');
+      paramBlock.initSvg();
+      paramBlock.setFieldValue(this.arguments_[i], 'NAME');
+      // Store the old location.
+      paramBlock.oldLocation = i;
+      connection.connect(paramBlock.previousConnection);
+      connection = paramBlock.nextConnection;
+    }
+    // Initialize procedure's callers with blank IDs.
+    Blockly.Procedures.mutateCallers(this);
+    return containerBlock;
+  },
+  /**
+   * Reconfigure this block based on the mutator dialog's components.
+   * @param {!Blockly.Block} containerBlock Root block in mutator.
+   * @this Blockly.Block
+   */
+  compose: function(containerBlock) {
+    // Parameter list.
+    this.arguments_ = [];
+    this.paramIds_ = [];
+    this.argumentsType_=[];
+    var paramBlock = containerBlock.getInputTargetBlock('STACK');
+    while (paramBlock) {
+      this.arguments_.push(paramBlock.getFieldValue('NAME'));
+      this.argumentsType_.push(paramBlock.getFieldValue('TYPE'));
+      this.paramIds_.push(paramBlock.id);
+      paramBlock = paramBlock.nextConnection &&
+          paramBlock.nextConnection.targetBlock();
+    }
+    this.updateParams_();
+    Blockly.Procedures.mutateCallers(this);
+
+    // Show/hide the statement input.
+    var hasStatements = containerBlock.getFieldValue('STATEMENTS');
+    if (hasStatements !== null) {
+      hasStatements = hasStatements == 'TRUE';
+      if (this.hasStatements_ != hasStatements) {
+        if (hasStatements) {
+          this.setStatements_(true);
+          // Restore the stack, if one was saved.
+          Blockly.Mutator.reconnect(this.statementConnection_, this, 'STACK');
+          this.statementConnection_ = null;
+        } else {
+          // Save the stack, then disconnect it.
+          var stackConnection = this.getInput('STACK').connection;
+          this.statementConnection_ = stackConnection.targetConnection;
+          if (this.statementConnection_) {
+            var stackBlock = stackConnection.targetBlock();
+            stackBlock.unplug();
+            stackBlock.bumpNeighbours_();
+          }
+          this.setStatements_(false);
+        }
+      }
+    }
+  },
+  /**
+   * Dispose of any callers.
+   * @this Blockly.Block
+   */
+  dispose: function() {
+    var name = this.getFieldValue('NAME');
+    Blockly.Procedures.disposeCallers(name, this.workspace);
+    // Call parent's destructor.
+    this.constructor.prototype.dispose.apply(this, arguments);
+  },
+  /**
+   * Return the signature of this procedure definition.
+   * @return {!Array} Tuple containing three elements:
+   *     - the name of the defined procedure,
+   *     - a list of all its arguments,
+   *     - that it DOES NOT have a return value.
+   * @this Blockly.Block
+   */
+  getProcedureDef: function() {
+    return [this.getFieldValue('NAME'), this.arguments_, false];
+  },
+  /**
+   * Return all variables referenced by this block.
+   * @return {!Array.<string>} List of variable names.
+   * @this Blockly.Block
+   */
+  getVars: function() {
+    return this.arguments_;
+  },
+  /**
+   * Notification that a variable is renaming.
+   * If the name matches one of this block's variables, rename it.
+   * @param {string} oldName Previous name of variable.
+   * @param {string} newName Renamed variable.
+   * @this Blockly.Block
+   */
+  renameVar: function(oldName, newName) {
+    var change = false;
+    for (var i = 0; i < this.arguments_.length; i++) {
+      if (Blockly.Names.equals(oldName, this.arguments_[i])) {
+        this.arguments_[i] = newName;
+        change = true;
+      }
+    }
+    if (change) {
+      this.updateParams_();
+      // Update the mutator's variables if the mutator is open.
+      if (this.mutator.isVisible()) {
+        var blocks = this.mutator.workspace_.getAllBlocks();
+        for (var i = 0, block; block = blocks[i]; i++) {
+          if (block.type == 'procedures_mutatorarg' &&
+              Blockly.Names.equals(oldName, block.getFieldValue('NAME'))) {
+            block.setFieldValue(newName, 'NAME');
+          }
+        }
+      }
+    }
+  },
+  /**
+   * Add custom menu options to this block's context menu.
+   * @param {!Array} options List of menu options to add to.
+   * @this Blockly.Block
+   */
+  customContextMenu: function(options) {
+    // Add option to create caller.
+    var option = {enabled: true};
+    var name = this.getFieldValue('NAME');
+    option.text = Blockly.Msg.PROCEDURES_CREATE_DO.replace('%1', name);
+    var xmlMutation = goog.dom.createDom('mutation');
+    xmlMutation.setAttribute('name', name);
+    for (var i = 0; i < this.arguments_.length; i++) {
+      var xmlArg = goog.dom.createDom('arg');
+      xmlArg.setAttribute('name', this.arguments_[i]);
+      xmlMutation.appendChild(xmlArg);
+    }
+    var xmlBlock = goog.dom.createDom('block', null, xmlMutation);
+    xmlBlock.setAttribute('type', this.callType_);
+    option.callback = Blockly.ContextMenu.callbackFactory(this, xmlBlock);
+    options.push(option);
+
+    // Add options to create getters for each parameter.
+    if (!this.isCollapsed()) {
+      for (var i = 0; i < this.arguments_.length; i++) {
+        var option = {enabled: true};
+        var name = this.arguments_[i];
+        option.text = Blockly.Msg.VARIABLES_SET_CREATE_GET.replace('%1', name);
+        var xmlField = goog.dom.createDom('field', null, name);
+        xmlField.setAttribute('name', 'VAR');
+        var xmlBlock = goog.dom.createDom('block', null, xmlField);
+        xmlBlock.setAttribute('type', 'variables_get');
+        option.callback = Blockly.ContextMenu.callbackFactory(this, xmlBlock);
+        options.push(option);
+      }
+    }
+  },
+  callType_: 'procedures_callnoreturn',
+  /** @return {!string} This block does not define type, so 'undefined' */
+  getVarType: function(varName) {
+    return Blockly.Types.UNDEF;
+  },
+  /** Contains the type of the arguments added with mutators. */
+  argsTypes: {},
+  /**
+   * Searches through a list of variables with type to assign the type of the
+   * arguments.
+   * @this Blockly.Block
+   * @param {Array<string>} existingVars Associative array variable already
+   *     defined, names as key, type as value.
+   */
+  setArgsType: function(existingVars) {
+    var varNames = this.arguments_;
+
+    // Check if variable has been defined already and save type
+    for (var name in existingVars) {
+      for (var i = 0, length_ = varNames.length; i < length_; i++) {
+        if (name === varNames[i]) {
+          this.argsTypes[name] = existingVars[name];
+        }
+      }
+    }
+  },
+  /**
+   * Retrieves the type of the arguments, types defined at setArgsType.
+   * @this Blockly.Block
+   * @return {string} Type of the argument indicated in the input.
+   */
+  getArgType: function(varName) {
+    for (var name in this.argsTypes) {
+      if (name == varName) {
+        return this.argsTypes[varName];
+      }
+    }
+    return null;
+  }
 };
 
-
-/**
- * @return {Array|undefined} The version regex matches from parsing the user
- *     agent string. These regex statements must be executed inline so they can
- *     be compiled out by the closure compiler with the rest of the useragent
- *     detection logic when ASSUME_* is specified.
- * @private
- */
-goog.userAgent.getVersionRegexResult_ = function() {
-  var userAgent = goog.userAgent.getUserAgentString();
-  if (goog.userAgent.GECKO) {
-    return /rv\:([^\);]+)(\)|;)/.exec(userAgent);
-  }
-  if (goog.userAgent.EDGE) {
-    return /Edge\/([\d\.]+)/.exec(userAgent);
-  }
-  if (goog.userAgent.IE) {
-    return /\b(?:MSIE|rv)[: ]([^\);]+)(\)|;)/.exec(userAgent);
-  }
-  if (goog.userAgent.WEBKIT) {
-    // WebKit/125.4
-    return /WebKit\/(\S+)/.exec(userAgent);
+Blockly.Blocks['procedures_defreturn'] = {
+  /**
+   * Block for defining a procedure with a return value.
+   * @this Blockly.Block
+   */
+  init: function() {
+    var nameField = new Blockly.FieldTextInput(
+        Blockly.Msg.PROCEDURES_DEFRETURN_PROCEDURE,
+        Blockly.Procedures.rename);
+    nameField.setSpellcheck(false);
+    this.appendDummyInput()
+        .appendField(Blockly.Msg.PROCEDURES_DEFRETURN_TITLE)
+        .appendField(nameField, 'NAME')
+        .appendField('', 'PARAMS');
+    this.appendValueInput('RETURN')
+        .setAlign(Blockly.ALIGN_RIGHT)
+        .appendField(Blockly.Msg.PROCEDURES_DEFRETURN_RETURN);
+    this.setMutator(new Blockly.Mutator(['procedures_mutatorarg']));
+    if (Blockly.Msg.PROCEDURES_DEFRETURN_COMMENT) {
+      this.setCommentText(Blockly.Msg.PROCEDURES_DEFRETURN_COMMENT);
+    }
+    this.setColour('#FF6680');
+    this.setTooltip(Blockly.Msg.PROCEDURES_DEFRETURN_TOOLTIP);
+    this.setHelpUrl(Blockly.Msg.PROCEDURES_DEFRETURN_HELPURL);
+    this.arguments_ = [];
+    this.setStatements_(true);
+    this.statementConnection_ = null;
+  },
+  setStatements_: Blockly.Blocks['procedures_defnoreturn'].setStatements_,
+  validate: Blockly.Blocks['procedures_defnoreturn'].validate,
+  updateParams_: Blockly.Blocks['procedures_defnoreturn'].updateParams_,
+  mutationToDom: Blockly.Blocks['procedures_defnoreturn'].mutationToDom,
+  domToMutation: Blockly.Blocks['procedures_defnoreturn'].domToMutation,
+  decompose: Blockly.Blocks['procedures_defnoreturn'].decompose,
+  compose: Blockly.Blocks['procedures_defnoreturn'].compose,
+  dispose: Blockly.Blocks['procedures_defnoreturn'].dispose,
+  /**
+   * Return the signature of this procedure definition.
+   * @return {!Array} Tuple containing three elements:
+   *     - the name of the defined procedure,
+   *     - a list of all its arguments,
+   *     - that it DOES have a return value.
+   * @this Blockly.Block
+   */
+  getProcedureDef: function() {
+    return [this.getFieldValue('NAME'), this.arguments_, true];
+  },
+  getVars: Blockly.Blocks['procedures_defnoreturn'].getVars,
+  renameVar: Blockly.Blocks['procedures_defnoreturn'].renameVar,
+  customContextMenu: Blockly.Blocks['procedures_defnoreturn'].customContextMenu,
+  callType_: 'procedures_callreturn',
+  getVarType: Blockly.Blocks['procedures_defnoreturn'].getVarType,
+  argsTypes: {},
+  setArgsType: Blockly.Blocks['procedures_defnoreturn'].setArgsType,
+  getArgType: Blockly.Blocks['procedures_defnoreturn'].getArgType,
+  /**
+   * Searches through the nested blocks in the return input to find a variable
+   * type or returns NULL.
+   * @this Blockly.Block
+   * @return {string} String to indicate the type or NULL.
+   */
+  getReturnType: function() {
+    var returnType = Blockly.Types.NULL;
+    var returnBlock = this.getInputTargetBlock('RETURN');
+    if (returnBlock) {
+      // First check if the block itself has a type already
+      if (returnBlock.getBlockType) {
+        returnType = returnBlock.getBlockType();
+      } else {
+        returnType = Blockly.Types.getChildBlockType(returnBlock);
+      }
+    }
+    return returnType;
   }
 };
 
-
-/**
- * @return {number|undefined} Returns the document mode (for testing).
- * @private
- */
-goog.userAgent.getDocumentMode_ = function() {
-  // NOTE(user): goog.userAgent may be used in context where there is no DOM.
-  var doc = goog.global['document'];
-  return doc ? doc['documentMode'] : undefined;
-};
-
-
-/**
- * The version of the user agent. This is a string because it might contain
- * 'b' (as in beta) as well as multiple dots.
- * @type {string}
- */
-goog.userAgent.VERSION = goog.userAgent.determineVersion_();
-
-
-/**
- * Compares two version numbers.
- *
- * @param {string} v1 Version of first item.
- * @param {string} v2 Version of second item.
- *
- * @return {number}  1 if first argument is higher
- *                   0 if arguments are equal
- *                  -1 if second argument is higher.
- * @deprecated Use goog.string.compareVersions.
- */
-goog.userAgent.compare = function(v1, v2) {
-  return goog.string.compareVersions(v1, v2);
-};
-
-
-/**
- * Cache for {@link goog.userAgent.isVersionOrHigher}.
- * Calls to compareVersions are surprisingly expensive and, as a browser's
- * version number is unlikely to change during a session, we cache the results.
- * @const
- * @private
- */
-goog.userAgent.isVersionOrHigherCache_ = {};
-
-
-/**
- * Whether the user agent version is higher or the same as the given version.
- * NOTE: When checking the version numbers for Firefox and Safari, be sure to
- * use the engine's version, not the browser's version number.  For example,
- * Firefox 3.0 corresponds to Gecko 1.9 and Safari 3.0 to Webkit 522.11.
- * Opera and Internet Explorer versions match the product release number.<br>
- * @see <a href="http://en.wikipedia.org/wiki/Safari_version_history">
- *     Webkit</a>
- * @see <a href="http://en.wikipedia.org/wiki/Gecko_engine">Gecko</a>
- *
- * @param {string|number} version The version to check.
- * @return {boolean} Whether the user agent version is higher or the same as
- *     the given version.
- */
-goog.userAgent.isVersionOrHigher = function(version) {
-  return goog.userAgent.ASSUME_ANY_VERSION ||
-      goog.userAgent.isVersionOrHigherCache_[version] ||
-      (goog.userAgent.isVersionOrHigherCache_[version] =
-           goog.string.compareVersions(goog.userAgent.VERSION, version) >= 0);
-};
-
-
-/**
- * Deprecated alias to {@code goog.userAgent.isVersionOrHigher}.
- * @param {string|number} version The version to check.
- * @return {boolean} Whether the user agent version is higher or the same as
- *     the given version.
- * @deprecated Use goog.userAgent.isVersionOrHigher().
- */
-goog.userAgent.isVersion = goog.userAgent.isVersionOrHigher;
-
-
-/**
- * Whether the IE effective document mode is higher or the same as the given
- * document mode version.
- * NOTE: Only for IE, return false for another browser.
- *
- * @param {number} documentMode The document mode version to check.
- * @return {boolean} Whether the IE effective document mode is higher or the
- *     same as the given version.
- */
-goog.userAgent.isDocumentModeOrHigher = function(documentMode) {
-  return Number(goog.userAgent.DOCUMENT_MODE) >= documentMode;
-};
-
-
-/**
- * Deprecated alias to {@code goog.userAgent.isDocumentModeOrHigher}.
- * @param {number} version The version to check.
- * @return {boolean} Whether the IE effective document mode is higher or the
- *      same as the given version.
- * @deprecated Use goog.userAgent.isDocumentModeOrHigher().
- */
-goog.userAgent.isDocumentMode = goog.userAgent.isDocumentModeOrHigher;
-
-
-/**
- * For IE version < 7, documentMode is undefined, so attempt to use the
- * CSS1Compat property to see if we are in standards mode. If we are in
- * standards mode, treat the browser version as the document mode. Otherwise,
- * IE is emulating version 5.
- * @type {number|undefined}
- * @const
- */
-goog.userAgent.DOCUMENT_MODE = (function() {
-  var doc = goog.global['document'];
-  var mode = goog.userAgent.getDocumentMode_();
-  if (!doc || !goog.userAgent.IE) {
-    return undefined;
+Blockly.Blocks['procedures_mutatorcontainer'] = {
+  /**
+   * Mutator block for procedure container.
+   * @this Blockly.Block
+   */
+  init: function() {
+    this.appendDummyInput()
+        .appendField(Blockly.Msg.PROCEDURES_MUTATORCONTAINER_TITLE);
+    this.appendStatementInput('STACK');
+    this.appendDummyInput('STATEMENT_INPUT')
+        .appendField(Blockly.Msg.PROCEDURES_ALLOW_STATEMENTS)
+        .appendField(new Blockly.FieldCheckbox('TRUE'), 'STATEMENTS');
+    this.setColour('#FF6680');
+    this.setTooltip(Blockly.Msg.PROCEDURES_MUTATORCONTAINER_TOOLTIP);
+    this.contextMenu = false;
   }
-  return mode || (doc['compatMode'] == 'CSS1Compat' ?
-                      parseInt(goog.userAgent.VERSION, 10) :
-                      5);
-})();
+};
+
+Blockly.Blocks['procedures_mutatorarg'] = {
+  /**
+   * Mutator block for procedure argument.
+   * @this Blockly.Block
+   */
+  init: function() {
+    this.appendDummyInput()
+        .appendField(Blockly.Msg.PROCEDURES_MUTATORARG_TITLE)
+        .appendField(new Blockly.FieldTextInput('int x', this.validator_), 'NAME');
+        
+    this.setPreviousStatement(true);
+    this.setNextStatement(true);
+    this.setColour('#FF6680');
+    this.setTooltip(Blockly.Msg.PROCEDURES_MUTATORARG_TOOLTIP);
+    this.contextMenu = false;
+  },
+  /**
+   * Obtain a valid name for the procedure.
+   * Merge runs of whitespace.  Strip leading and trailing whitespace.
+   * Beyond this, all names are legal.
+   * @param {string} newVar User-supplied name.
+   * @return {?string} Valid name, or null if a name was not specified.
+   * @private
+   * @this Blockly.Block
+   */
+  validator_: function(newVar) {
+    newVar = newVar.replace(/[\s\xa0]+/g, ' ').replace(/^ | $/g, '');
+    return newVar || null;
+  }
+};
+
+Blockly.Blocks['procedures_callnoreturn'] = {
+  /**
+   * Block for calling a procedure with no return value.
+   * @this Blockly.Block
+   */
+  init: function() {
+    this.appendDummyInput('TOPROW')
+        .appendField(this.id, 'NAME');
+    this.setPreviousStatement(true);
+    this.setNextStatement(true);
+    this.setColour('#FF6680');
+    // Tooltip is set in renameProcedure.
+    this.setHelpUrl(Blockly.Msg.PROCEDURES_CALLNORETURN_HELPURL);
+    this.arguments_ = [];
+    this.quarkConnections_ = {};
+    this.quarkIds_ = null;
+  },
+  /**
+   * Returns the name of the procedure this block calls.
+   * @return {string} Procedure name.
+   * @this Blockly.Block
+   */
+  getProcedureCall: function() {
+    // The NAME field is guaranteed to exist, null will never be returned.
+    return /** @type {string} */ (this.getFieldValue('NAME'));
+  },
+  /**
+   * Notification that a procedure is renaming.
+   * If the name matches this block's procedure, rename it.
+   * @param {string} oldName Previous name of procedure.
+   * @param {string} newName Renamed procedure.
+   * @this Blockly.Block
+   */
+  renameProcedure: function(oldName, newName) {
+    if (Blockly.Names.equals(oldName, this.getProcedureCall())) {
+      this.setFieldValue(newName, 'NAME');
+      this.setTooltip(
+          (this.outputConnection ? Blockly.Msg.PROCEDURES_CALLRETURN_TOOLTIP :
+           Blockly.Msg.PROCEDURES_CALLNORETURN_TOOLTIP)
+          .replace('%1', newName));
+    }
+  },
+  /**
+   * Notification that the procedure's parameters have changed.
+   * @param {!Array.<string>} paramNames New param names, e.g. ['x', 'y', 'z'].
+   * @param {!Array.<string>} paramIds IDs of params (consistent for each
+   *     parameter through the life of a mutator, regardless of param renaming),
+   *     e.g. ['piua', 'f8b_', 'oi.o'].
+   * @private
+   * @this Blockly.Block
+   */
+  setProcedureParameters_: function(paramNames, paramIds) {
+    // Data structures:
+    // this.arguments = ['x', 'y']
+    //     Existing param names.
+    // this.quarkConnections_ {piua: null, f8b_: Blockly.Connection}
+    //     Look-up of paramIds to connections plugged into the call block.
+    // this.quarkIds_ = ['piua', 'f8b_']
+    //     Existing param IDs.
+    // Note that quarkConnections_ may include IDs that no longer exist, but
+    // which might reappear if a param is reattached in the mutator.
+    var defBlock = Blockly.Procedures.getDefinition(this.getProcedureCall(),
+        this.workspace);
+    var mutatorOpen = defBlock && defBlock.mutator &&
+        defBlock.mutator.isVisible();
+    if (!mutatorOpen) {
+      this.quarkConnections_ = {};
+      this.quarkIds_ = null;
+    }
+    if (!paramIds) {
+      // Reset the quarks (a mutator is about to open).
+      return;
+    }
+    if (goog.array.equals(this.arguments_, paramNames)) {
+      // No change.
+      this.quarkIds_ = paramIds;
+      return;
+    }
+    if (paramIds.length != paramNames.length) {
+      throw 'Error: paramNames and paramIds must be the same length.';
+    }
+    this.setCollapsed(false);
+    if (!this.quarkIds_) {
+      // Initialize tracking for this block.
+      this.quarkConnections_ = {};
+      if (paramNames.join('\n') == this.arguments_.join('\n')) {
+        // No change to the parameters, allow quarkConnections_ to be
+        // populated with the existing connections.
+        this.quarkIds_ = paramIds;
+      } else {
+        this.quarkIds_ = [];
+      }
+    }
+    // Switch off rendering while the block is rebuilt.
+    var savedRendered = this.rendered;
+    this.rendered = false;
+    // Update the quarkConnections_ with existing connections.
+    for (var i = 0; i < this.arguments_.length; i++) {
+      var input = this.getInput('ARG' + i);
+      if (input) {
+        var connection = input.connection.targetConnection;
+        this.quarkConnections_[this.quarkIds_[i]] = connection;
+        if (mutatorOpen && connection &&
+            paramIds.indexOf(this.quarkIds_[i]) == -1) {
+          // This connection should no longer be attached to this block.
+          connection.disconnect();
+          connection.getSourceBlock().bumpNeighbours_();
+        }
+      }
+    }
+    // Rebuild the block's arguments.
+    this.arguments_ = [].concat(paramNames);
+    this.updateShape_();
+    this.quarkIds_ = paramIds;
+    // Reconnect any child blocks.
+    if (this.quarkIds_) {
+      for (var i = 0; i < this.arguments_.length; i++) {
+        var quarkId = this.quarkIds_[i];
+        if (quarkId in this.quarkConnections_) {
+          var connection = this.quarkConnections_[quarkId];
+          if (!Blockly.Mutator.reconnect(connection, this, 'ARG' + i)) {
+            // Block no longer exists or has been attached elsewhere.
+            delete this.quarkConnections_[quarkId];
+          }
+        }
+      }
+    }
+    // Restore rendering and show the changes.
+    this.rendered = savedRendered;
+    if (this.rendered) {
+      this.render();
+    }
+  },
+  /**
+   * Modify this block to have the correct number of arguments.
+   * @private
+   * @this Blockly.Block
+   */
+  updateShape_: function() {
+    for (var i = 0; i < this.arguments_.length; i++) {
+      var field = this.getField('ARGNAME' + i);
+      if (field) {
+        // Ensure argument name is up to date.
+        // The argument name field is deterministic based on the mutation,
+        // no need to fire a change event.
+        Blockly.Events.disable();
+        field.setValue(this.arguments_[i]);
+        Blockly.Events.enable();
+      } else {
+        // Add new input.
+        field = new Blockly.FieldLabel(this.arguments_[i]);
+        var input = this.appendValueInput('ARG' + i)
+            .setAlign(Blockly.ALIGN_RIGHT)
+            .appendField(field, 'ARGNAME' + i);
+        input.init();
+      }
+    }
+    // Remove deleted inputs.
+    while (this.getInput('ARG' + i)) {
+      this.removeInput('ARG' + i);
+      i++;
+    }
+    // Add 'with:' if there are parameters, remove otherwise.
+    var topRow = this.getInput('TOPROW');
+    if (topRow) {
+      if (this.arguments_.length) {
+        if (!this.getField('WITH')) {
+          topRow.appendField(Blockly.Msg.PROCEDURES_CALL_BEFORE_PARAMS, 'WITH');
+          topRow.init();
+        }
+      } else {
+        if (this.getField('WITH')) {
+          topRow.removeField('WITH');
+        }
+      }
+    }
+  },
+  /**
+   * Create XML to represent the (non-editable) name and arguments.
+   * @return {!Element} XML storage element.
+   * @this Blockly.Block
+   */
+  mutationToDom: function() {
+    var container = document.createElement('mutation');
+    container.setAttribute('name', this.getProcedureCall());
+    for (var i = 0; i < this.arguments_.length; i++) {
+      var parameter = document.createElement('arg');
+      parameter.setAttribute('name', this.arguments_[i]);
+      container.appendChild(parameter);
+    }
+    return container;
+  },
+  /**
+   * Parse XML to restore the (non-editable) name and parameters.
+   * @param {!Element} xmlElement XML storage element.
+   * @this Blockly.Block
+   */
+  domToMutation: function(xmlElement) {
+    var name = xmlElement.getAttribute('name');
+    this.renameProcedure(this.getProcedureCall(), name);
+    var args = [];
+    var paramIds = [];
+    for (var i = 0, childNode; childNode = xmlElement.childNodes[i]; i++) {
+      if (childNode.nodeName.toLowerCase() == 'arg') {
+        args.push(childNode.getAttribute('name'));
+        paramIds.push(childNode.getAttribute('paramId'));
+      }
+    }
+    this.setProcedureParameters_(args, paramIds);
+  },
+  /**
+   * Notification that a variable is renaming.
+   * If the name matches one of this block's variables, rename it.
+   * @param {string} oldName Previous name of variable.
+   * @param {string} newName Renamed variable.
+   * @this Blockly.Block
+   */
+  renameVar: function(oldName, newName) {
+    for (var i = 0; i < this.arguments_.length; i++) {
+      if (Blockly.Names.equals(oldName, this.arguments_[i])) {
+        this.arguments_[i] = newName;
+        this.getField('ARGNAME' + i).setValue(newName);
+      }
+    }
+  },
+  /**
+   * Add menu option to find the definition block for this call.
+   * @param {!Array} options List of menu options to add to.
+   * @this Blockly.Block
+   */
+  customContextMenu: function(options) {
+    var option = {enabled: true};
+    option.text = Blockly.Msg.PROCEDURES_HIGHLIGHT_DEF;
+    var name = this.getProcedureCall();
+    var workspace = this.workspace;
+    option.callback = function() {
+      var def = Blockly.Procedures.getDefinition(name, workspace);
+      def && def.select();
+    };
+    options.push(option);
+  }
+};
+
+Blockly.Blocks['procedures_callreturn'] = {
+  /**
+   * Block for calling a procedure with a return value.
+   * @this Blockly.Block
+   */
+  init: function() {
+    this.appendDummyInput('TOPROW')
+        .appendField('', 'NAME');
+    this.setOutput(true);
+    this.setColour('#FF6680');
+    // Tooltip is set in domToMutation.
+    this.setHelpUrl(Blockly.Msg.PROCEDURES_CALLRETURN_HELPURL);
+    this.arguments_ = [];
+    this.quarkConnections_ = {};
+    this.quarkIds_ = null;
+  },
+  getProcedureCall: Blockly.Blocks['procedures_callnoreturn'].getProcedureCall,
+  renameProcedure: Blockly.Blocks['procedures_callnoreturn'].renameProcedure,
+  setProcedureParameters_:
+      Blockly.Blocks['procedures_callnoreturn'].setProcedureParameters_,
+  updateShape_: Blockly.Blocks['procedures_callnoreturn'].updateShape_,
+  mutationToDom: Blockly.Blocks['procedures_callnoreturn'].mutationToDom,
+  domToMutation: Blockly.Blocks['procedures_callnoreturn'].domToMutation,
+  renameVar: Blockly.Blocks['procedures_callnoreturn'].renameVar,
+  customContextMenu:
+      Blockly.Blocks['procedures_callnoreturn'].customContextMenu,
+  /** @return {!string} Return value type from the function definition block. */
+  getBlockType: function() {
+    var defBlock = Blockly.Procedures.getDefinition(this.getProcedureCall(),
+        this.workspace);
+    return defBlock.getReturnType();
+  }
+};
+
+Blockly.Blocks['procedures_ifreturn'] = {
+  /**
+   * Block for conditionally returning a value from a procedure.
+   * @this Blockly.Block
+   */
+  init: function() {
+    this.appendValueInput('CONDITION')
+        .setCheck(Blockly.Types.BOOLEAN.checkList)
+        .appendField(Blockly.Msg.CONTROLS_IF_MSG_IF);
+    this.appendValueInput('VALUE')
+        .appendField(Blockly.Msg.PROCEDURES_DEFRETURN_RETURN);
+    this.setInputsInline(true);
+    this.setPreviousStatement(true);
+    this.setNextStatement(true);
+    this.setColour('#FF6680');
+    this.setTooltip(Blockly.Msg.PROCEDURES_IFRETURN_TOOLTIP);
+    this.setHelpUrl(Blockly.Msg.PROCEDURES_IFRETURN_HELPURL);
+    this.hasReturnValue_ = true;
+  },
+  /**
+   * Create XML to represent whether this block has a return value.
+   * @return {!Element} XML storage element.
+   * @this Blockly.Block
+   */
+  mutationToDom: function() {
+    var container = document.createElement('mutation');
+    container.setAttribute('value', Number(this.hasReturnValue_));
+    return container;
+  },
+  /**
+   * Parse XML to restore whether this block has a return value.
+   * @param {!Element} xmlElement XML storage element.
+   * @this Blockly.Block
+   */
+  domToMutation: function(xmlElement) {
+    var value = xmlElement.getAttribute('value');
+    this.hasReturnValue_ = (value == 1);
+    if (!this.hasReturnValue_) {
+      this.removeInput('VALUE');
+      this.appendDummyInput('VALUE')
+        .appendField(Blockly.Msg.PROCEDURES_DEFRETURN_RETURN);
+    }
+  },
+  /**
+   * Called whenever anything on the workspace changes.
+   * Add warning if this flow block is not nested inside a loop.
+   * @param {!Blockly.Events.Abstract} e Change event.
+   * @this Blockly.Block
+   */
+  onchange: function(e) {
+    var legal = false;
+    // Is the block nested in a procedure?
+    var block = this;
+    do {
+      if (this.FUNCTION_TYPES.indexOf(block.type) != -1) {
+        legal = true;
+        break;
+      }
+      block = block.getSurroundParent();
+    } while (block);
+    if (legal) {
+      // If needed, toggle whether this block has a return value.
+      if (block.type == 'procedures_defnoreturn' && this.hasReturnValue_) {
+        this.removeInput('VALUE');
+        this.appendDummyInput('VALUE')
+          .appendField(Blockly.Msg.PROCEDURES_DEFRETURN_RETURN);
+        this.hasReturnValue_ = false;
+      } else if (block.type == 'procedures_defreturn' &&
+                 !this.hasReturnValue_) {
+        this.removeInput('VALUE');
+        this.appendValueInput('VALUE')
+          .appendField(Blockly.Msg.PROCEDURES_DEFRETURN_RETURN);
+        this.hasReturnValue_ = true;
+      }
+      this.setWarningText(null);
+    } else {
+      this.setWarningText(Blockly.Msg.PROCEDURES_IFRETURN_WARNING);
+    }
+  },
+  /**
+   * List of block types that are functions and thus do not need warnings.
+   * To add a new function type add this to your code:
+   * Blockly.Blocks['procedures_ifreturn'].FUNCTION_TYPES.push('custom_func');
+   */
+  FUNCTION_TYPES: ['procedures_defnoreturn', 'procedures_defreturn']
+};

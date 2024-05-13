@@ -1004,43 +1004,37 @@ Blockly.Arduino.addSetup('setup3_mhz14a','mhz14a_sensor.setDebug(false);');
 var code =  '//------MHZ14A------\nfloat  CO2 = mhz14a_sensor.readConcentrationPPM(0x01);\n//------MHZ14A------';
 return [code, Blockly.Arduino.ORDER_ADDITIVE];
 }
-Blockly.Arduino.SetDateDS3231 = function(){
+Blockly.Arduino.SetUpDS3231 = function(){
   var date_Time= this.getFieldValue('DATE')
+  var time_Time= this.getFieldValue('TIME')
+  var SDA_3231=this.getFieldValue('SDA');
+  var SCL_3231=this.getFieldValue('SCL');
     Blockly.Arduino.addInclude('Lib DS3231', '#include <DS3231.h>');
+    Blockly.Arduino.addDeclaration('DS3231_SDA','#define SDA_DS3231 '+SDA_3231+'');
+    Blockly.Arduino.addDeclaration('DS3231_SCL','#define SCL_DS3231 '+SCL_3231+'');
     Blockly.Arduino.addSetup('DS3231_setup','rtc.begin();');
     Blockly.Arduino.addSetup('Date_setup', 'rtc.setDate(' + date_Time + ');');
-    var code = '';
-    return code;
-
-}
-Blockly.Arduino.SetTimeDS3231 = function(){
-  var time_Time= this.getFieldValue('TIME')
-    Blockly.Arduino.addInclude('Lib DS3231', '#include <DS3231.h>');
-    Blockly.Arduino.addSetup('DS3231_setup','rtc.begin();');
     Blockly.Arduino.addSetup('Time_setup', 'rtc.setTime(' + time_Time + ');');
     var code = '';
     return code;
 
 }
+
 Blockly.Arduino.GetDateTimeDS3231 = function(){
-    var SDA_3231=this.getFieldValue('SDA');
-    var SCL_3231=this.getFieldValue('SCL');
+
     var rs=this.getFieldValue('RS');
     var en=this.getFieldValue('En');
     var d1=this.getFieldValue('D1');
-    var d1=this.getFieldValue('D2');
-    var d1=this.getFieldValue('D3');
-    var d1=this.getFieldValue('D4');
+    var d2=this.getFieldValue('D2');
+    var d3=this.getFieldValue('D3');
+    var d4=this.getFieldValue('D4');
 
     Blockly.Arduino.addInclude('Lib DS3231', '#include <DS3231.h>');
     Blockly.Arduino.addInclude('Lib LiquidCrystal ', '#include <LiquidCrystal.h>');
-    Blockly.Arduino.addDeclaration('DS3231_SDA','#define SDA_DS3231 '+SDA_3231+'');
-    Blockly.Arduino.addDeclaration('DS3231_SCL','#define SCL_DS3231 '+SCL_3231+'');
     Blockly.Arduino.addDeclaration('DS3231_dec','DS3231  rtc(SDA_DS3231, SCL_DS3231);');
     Blockly.Arduino.addDeclaration('LC_dec','LiquidCrystal lcd('+rs+','+en+','+d1+','+d2+','+d3+','+d4+');');
     Blockly.Arduino.addSetup('DS3231_setup','rtc.begin();');
     Blockly.Arduino.addSetup('LC_setup',' lcd.begin(16,2);');
-    Blockly.Arduino
 
     var code = ' lcd.setCursor(0,0);\nlcd.print("Time:  ");\nlcd.print(rtc.getTimeStr());\nlcd.setCursor(0,1);\nlcd.print("Date: ");\nlcd.print(rtc.getDateStr());\ndelay(1000); ';
     return code;
@@ -1055,7 +1049,148 @@ Blockly.Arduino.ConnectMQTT = function(){
   Blockly.Arduino.addDeclaration('setup PW', 'char pass[] = PASSWORD;');
   Blockly.Arduino.addDeclaration('create wifi client', 'WiFiClient wifiClient;');
   Blockly.Arduino.addDeclaration('connect MQTT client','MqttClient mqttClient(wifiClient);')
+  Blockly.Arduino.addSetup('MQTT setup',
+`
+//Initialize serial and wait for port to open:
+  Serial.begin(9600);
+  while (!Serial) {
+    ; // wait for serial port to connect. Needed for native USB port only
+  }
 
+  // attempt to connect to Wifi network:
+  Serial.print("Attempting to connect to WPA SSID: ");
+  Serial.println(ssid);
+  while (WiFi.begin(ssid, pass) != WL_CONNECTED) {
+    // failed, retry
+    Serial.print(".");
+    delay(5000);
+  }
+
+  Serial.println("You're connected to the network");
+  Serial.println();
+
+  Serial.print("Attempting to connect to the MQTT broker: ");
+  Serial.println(broker);
+
+  if (!mqttClient.connect(broker, port)) {
+    Serial.print("MQTT connection failed! Error code = ");
+    Serial.println(mqttClient.connectError());
+
+    while (1);
+  }
+
+  Serial.println("You're connected to the MQTT broker!");
+  Serial.println();
+}
+`
+  )
   var code ='';
   return code;
+}
+Blockly.Arduino.BMEMQTT=function(){
+  var type_data=this.getFieldValue('BME280');
+  Blockly.Arduino.addDeclaration('Broker','const char broker[] = "test.mosquitto.org";')
+  Blockly.Arduino.addDeclaration('Port','int        port     = 1883;')
+  Blockly.Arduino.addDeclaration('set interval','const long interval = 8000;\nunsigned long previousMillis = 0;')
+  Blockly.Arduino.addDeclaration('BME Topic','const char BME[]  = "Dữ liệu '+type_data+'";')
+  var code = 
+  `
+  mqttClient.poll();
+  double BME_data= selectDataofBME280("`+type_data+`");
+  unsigned long currentMillis = millis();
+
+  if (currentMillis - previousMillis >= interval) {
+    previousMillis = currentMillis;
+
+    // send message, the Print interface can be used to set the message contents
+    mqttClient.beginMessage(BME);
+    mqttClient.print(BME_Data);
+    mqttClient.endMessage();
+
+    Serial.println();
+  }
+}
+  `;
+  return code;
+
+}
+Blockly.Arduino.PMSMQTT=function(){
+  var type_data=this.getFieldValue('PMS7003');
+  Blockly.Arduino.addDeclaration('Broker','const char broker[] = "test.mosquitto.org";')
+  Blockly.Arduino.addDeclaration('Port','int        port     = 1883;')
+  Blockly.Arduino.addDeclaration('set interval','const long interval = 8000;\nunsigned long previousMillis = 0;')
+  Blockly.Arduino.addDeclaration('PMS Topic','const char PMS[]  = "Dữ liệu '+type_data+'";')
+  var code = 
+  `
+  mqttClient.poll();
+  double PMS_data= selectDataofPMS7003("`+type_data+`",data); 
+  unsigned long currentMillis = millis();
+
+  if (currentMillis - previousMillis >= interval) {
+    previousMillis = currentMillis;
+
+    // send message, the Print interface can be used to set the message contents
+    mqttClient.beginMessage(PMS);
+    mqttClient.print(PMS_data);
+    mqttClient.endMessage();
+
+    Serial.println();
+  }
+}
+  `;
+  return code;
+
+}
+Blockly.Arduino.MHZMQTT=function(){
+  Blockly.Arduino.addDeclaration('Broker','const char broker[] = "test.mosquitto.org";')
+  Blockly.Arduino.addDeclaration('Port','int        port     = 1883;')
+  Blockly.Arduino.addDeclaration('set interval','const long interval = 8000;\nunsigned long previousMillis = 0;')
+  Blockly.Arduino.addDeclaration('MHZ Topic','const char MHZ[]  = "Dữ liệu MHZ";')
+  var code = 
+  `
+  mqttClient.poll();
+  float MHZ_data=mhz14a_sensor.readConcentrationPPM(0x01);
+  unsigned long currentMillis = millis();
+
+  if (currentMillis - previousMillis >= interval) {
+    previousMillis = currentMillis;
+
+    // send message, the Print interface can be used to set the message contents
+    mqttClient.beginMessage(MHZ);
+    mqttClient.print(MHZ_data);
+    mqttClient.endMessage();
+
+    Serial.println();
+  }
+}
+  `;
+  return code;
+
+}
+Blockly.Arduino.ReceiveMQTTData=function(){
+  var type_sensor=this.getFieldValue("type sensor data")
+  Blockly.Arduino.addDeclaration('Broker','const char broker[] = "test.mosquitto.org";')
+  Blockly.Arduino.addDeclaration('Port','int        port     = 1883;')
+  Blockly.Arduino.addDeclaration('set interval','const long interval = 8000;\nunsigned long previousMillis = 0;')
+  Blockly.Arduino.addDeclaration('Topic','const char sensor[]  = "Dữ liệu '+type_sensor+'";')
+  Blockly.Arduino.addSetup('Receive sensor','mqttClient.onMessage(onMqttMessage);')
+  Blockly.Arduino.addSetup('Sub sensor',' mqttClient.subscribe(sensor);')
+  Blockly.Arduino.addFunction('Rec func',
+    `
+    void onMqttMessage(int messageSize) {
+      // we received a message, print out the topic and contents
+      Serial.println("Nhận dữ liệu từ : '");
+      Serial.print(mqttClient.messageTopic());
+         
+      // use the Stream interface to print the contents
+      while (mqttClient.available()) {
+        Serial.print((char)mqttClient.read());
+      }
+      Serial.println();
+    }
+    `
+  )
+  var code = 'mqttClient.poll();';
+  return code;
+
 }

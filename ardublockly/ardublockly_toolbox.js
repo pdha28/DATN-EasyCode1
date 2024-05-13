@@ -45,26 +45,31 @@ var Airsense_toolbox =
          '<field name="Port tx"> 27 </field>' +
          '<field name="Baud speed"> 9600 </field>' +
          '</block>' +
-         '<block type="SetDateDS3231">'+
-            '<field name="Date"></field>'+
-        '</block>'+
-        '<block type="SetTimeDS3231">'+
-            '<field name="Time"></field>'+
+         '<block type="SetUpDS3231">'+
+            '<field name="DATE"></field>'+
+            '<field name="TIME"></field>'+
+            '<field name="SDA"> 20 </field>' +
+            '<field name="SCL"> 21 </field>' +
+            
         '</block>'+
         '<block type="GetDateTimeDS3231">'+
-        '<field name="SDA"> 20 </field>' +
-        '<field name="SCL"> 21 </field>' +
         '<field name="RS"> 1 </field>' +
         '<field name="En"> 2 </field>' +
         '<field name="D1"> 4 </field>' +
-        '<field name="D1"> 5 </field>' +
-        '<field name="D1"> 6 </field>' +
-        '<field name="D1"> 7 </field>' +
+        '<field name="D2"> 5 </field>' +
+        '<field name="D3"> 6 </field>' +
+        '<field name="D4"> 7 </field>' +
 
         '</block>'+
         '<block type="ConnectMQTT">'+
         '</block>'+
-        '<block type="SendDataMQTT">'+
+        '<block type="BMEMQTT">'+
+        '</block>'+
+        '<block type="PMSMQTT">'+
+        '</block>'+
+        '<block type="MHZMQTT">'+
+        '</block>'+
+        '<block type="ReceiveMQTTData">'+
         '</block>'+
 
 
