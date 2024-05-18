@@ -932,25 +932,96 @@ Blockly.Blocks['GetDateTimeDS3231']={
  this.setHelpUrl("");
 }
 };
-Blockly.Blocks['ConnectMQTT']={
+
+
+Blockly.Blocks['ConnectMQTT'] = {
   init: function() {
     this.appendDummyInput()
-        .appendField(Blockly.Msg.ConnectMQTT)
+        .appendField("Kết nối MQTT");
+    this.appendDummyInput()
+        .appendField("IP:")
+        .appendField(new Blockly.FieldTextInput("ip mqtt"), "IP");
+    this.appendDummyInput()
+        .appendField("PORT:")
+        .appendField(new Blockly.FieldTextInput("port mqtt"), "PORT");
+    this.appendDummyInput()
+        .appendField("ID:")
+        .appendField(new Blockly.FieldTextInput("ssid mqtt"), "ID");
+    this.appendDummyInput()
+        .appendField("Password:")
+        .appendField(new Blockly.FieldTextInput("password mqtt"), "PassWord");
+    this.setInputsInline(true);
     this.setPreviousStatement(true, null);
     this.setNextStatement(true, null);
-    this.setColour('#00abd6');
- this.setTooltip("");
- this.setHelpUrl("");
-}
+    this.setColour('#00abd6'); // assuming you want to use the same color as serial blocks
+    this.setTooltip("Connect to MQTT broker");
+    this.setHelpUrl("");
+  },
+  onchange: function(event) {
+    if (!this.workspace || event.type == Blockly.Events.MOVE ||
+        event.type == Blockly.Events.UI) {
+        return;  // Block deleted or irrelevant event
+    }
+    // Check if there's a wifi setup block
+    var blocks = Blockly.mainWorkspace.getTopBlocks();
+    var wifiSetupPresent = false;
+    for (var x = 0; x < blocks.length; x++) {
+      if (blocks[x].type == 'ESP32_wireless') {
+        wifiSetupPresent = true;
+        break;
+      }
+    }
+    if (!wifiSetupPresent) {
+      this.setWarningText("ConnectMQTT block requires ESP32 wireless setup", 'wifi_setup');
+    } else {
+      this.setWarningText(null, 'wifi_setup');
+    }
+  }
 };
-Blockly.Blocks['SendDataMQTT']={
+
+
+
+
+
+Blockly.Blocks['SendDataMQTT'] = {
   init: function() {
     this.appendDummyInput()
-        .appendField("Gửi dữ liệu thông qua MQTT ");
+        .appendField("Gửi dữ liệu thông qua MQTT");
+    this.appendDummyInput()
+      .appendField("TOPIC:")
+      .appendField(new Blockly.FieldTextInput("topic"), "TOPIC");
+    this.appendDummyInput()
+      .appendField("Dung lượng dữ liệu:")
+      .appendField(new Blockly.FieldTextInput(""), "Cap_data");
+    this.appendValueInput("Text")
+      .setCheck(null)
+      .appendField("Dữ liệu")
+    
+    this.setInputsInline(true);
     this.setPreviousStatement(true, null);
     this.setNextStatement(true, null);
     this.setColour('#00abd6');
- this.setTooltip("");
- this.setHelpUrl("");
-}
+    this.setTooltip("");
+    this.setHelpUrl("");
+  },
+  onchange: function(event) {
+    if (!this.workspace || event.type == Blockly.Events.MOVE ||
+        event.type == Blockly.Events.UI) {
+        return;  // Block deleted or irrelevant event
+    }
+    // Check if there's a ConnectMQTT block
+    var blocks = Blockly.mainWorkspace.getTopBlocks();
+    var connectMQTTPresent = false;
+    for (var x = 0; x < blocks.length; x++) {
+      if (blocks[x].type == 'ConnectMQTT') {
+        connectMQTTPresent = true;
+        break;
+      }
+    }
+    if (!connectMQTTPresent) {
+      this.setWarningText("SendDataMQTT block requires ConnectMQTT setup", 'connect_mqtt');
+    } else {
+      this.setWarningText(null, 'connect_mqtt');
+    }
+  }
 };

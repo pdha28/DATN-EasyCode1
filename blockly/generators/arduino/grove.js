@@ -1047,15 +1047,29 @@ Blockly.Arduino.GetDateTimeDS3231 = function(){
 
 }
 Blockly.Arduino.ConnectMQTT = function(){
+  var Port = this.getFieldValue('PORT');
+  var IP = this.getFieldValue('IP');
   var ID = this.getFieldValue('ID');
   var PW = this.getFieldValue('PassWord');
-  Blockly.Arduino.addInclude('MQTT client', '#include <ArduinoMqttClient.h>');
-  Blockly.Arduino.addInclude('WiFiNINA', '#include <WiFiNINA.h>');
-  Blockly.Arduino.addDeclaration('setup ID', 'char ssid[] = SSID;');
-  Blockly.Arduino.addDeclaration('setup PW', 'char pass[] = PASSWORD;');
-  Blockly.Arduino.addDeclaration('create wifi client', 'WiFiClient wifiClient;');
-  Blockly.Arduino.addDeclaration('connect MQTT client','MqttClient mqttClient(wifiClient);')
+  Blockly.Arduino.addInclude('MQTT client', '#include <PubSubClient.h>');
+  Blockly.Arduino.addDeclaration('Setup IP','#define MQTT_SEVER = "'+IP+'"');
+  Blockly.Arduino.addDeclaration('Setup port','#define PORT = "'+Port+'"');
+  Blockly.Arduino.addDeclaration('setup ID', '#define SSID_MQTT = "'+ID+'"');
+  Blockly.Arduino.addDeclaration('setup PW', '#define PASSWORD_MQTT = "'+PW+'"');
+  Blockly.Arduino.addDeclaration('create wifi client', 'WiFiClient espClient;');
+  Blockly.Arduino.addDeclaration('connect MQTT client','PubSubClient client(espClient);');
+  Blockly.Arduino.addSetup('ConnectMQTT',`while (!client.connected()) {client.connect("ESP32Client", mqtt_user, mqtt_password);}`)
 
-  var code ='';
+  var code ='client.loop()';
+  return code;
+}
+
+Blockly.Arduino.SendDataMQTT = function(){
+  var data_MQTT = this.getFieldValue('text');
+  var topic_mqtt = this.getFieldValue('TOPIC'); 
+  var Cap_data = this.getFieldValue('Cap_data');
+  Blockly.Arduino.addDeclaration('variable','char data_mqtt['+Cap_data+']');
+  Blockly.Arduino.addDeclaration('ConverChar','sprintf(data_mqtt,"%d",'+data_MQTT+')');
+  var code ='client.publish("'+topic_mqtt+'",data_mqtt)';
   return code;
 }
