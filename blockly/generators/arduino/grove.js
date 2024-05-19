@@ -1055,22 +1055,12 @@ Blockly.Arduino.ConnectMQTT = function(){
     Serial.print("Can't connect to wifi");
     delay(5000);
   }
-  Serial.println("You're connected to the network");
-  Serial.println();
-
-  Serial.print("Attempting to connect to the MQTT broker: ");
-  Serial.println(broker);
-
   if (!mqttClient.connect(broker, port)) {
     Serial.print("MQTT connection failed! Error code = ");
     Serial.println(mqttClient.connectError());
 
     while (1);
   }
-
-  Serial.println("You're connected to the MQTT broker!");
-  Serial.println();
-}
 `
   )
   var code ='mqttClient.poll();';
