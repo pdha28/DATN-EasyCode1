@@ -866,12 +866,13 @@ Blockly.Arduino.freeRTOS = function(){
   var name_task = this.getFieldValue('Name task');
   var memory_task = this.getFieldValue('Memory task');
   var priority_task = this.getFieldValue('Priority task');
-  var function_task =Blockly.Arduino.valueToCode(
+  var function_task = Blockly.Arduino.valueToCode(
     this, 'Text', Blockly.Arduino.ORDER_ATOMIC) || '""';
   Blockly.Arduino.addInclude('Library freeRTOS','#include <Arduino_FreeRTOS.h>');
   Blockly.Arduino.addDeclaration('Task','void ' +name_task_unsign+ '(void *pvParameters);',false);
-  Blockly.Arduino.addSetup('Setup task','xTaskCreate('+name_task_unsign+',(const portCHAR *)"'+name_task+'",'+memory_task+',NULL,'+priority_task+',NULL);');
   Blockly.Arduino.addDeclaration('Function of task','void '+removeVietnameseTones(removeSpaces(this.getFieldValue('Name task')))+'(void *pvParameters)\n{\n(void) pvParamemters;\nwhile(1){'+function_task+'}\n};');
+  Blockly.Arduino.addSetup('Setup task','xTaskCreate('+name_task_unsign+',(const portCHAR *)"'+name_task+'",'+memory_task+',NULL,'+priority_task+',NULL);');
+  
 
   var code = '// updating';
   return code ;
@@ -884,63 +885,77 @@ var pin_sda = this.getFieldValue('I2C_port_SDA');
 var pin_scl = this.getFieldValue('I2C_port_SCL');
 var type_data = this.getFieldValue('Type data BME280');
 
-Blockly.Arduino.addInclude('bme280','#include <Wire.h>\n#include <Adafruit_Sensor.h>\n#include <Adafruit_BMP280.h>\n');
+Blockly.Arduino.addInclude('bme280','#include <Wire.h>\n#include <Adafruit_Sensor.h>\n#include <Adafruit_BME280.h>\n');
 Blockly.Arduino.addDeclaration('Line head BME280','//------BME280------\n');
-Blockly.Arduino.addDeclaration('BME280_Address','#define BMP280_I2C_ADDRESS  0x76',false);
+Blockly.Arduino.addDeclaration('parameter Pressure','#define SEALEVELPRESSURE_HPA (1013.25)');
+Blockly.Arduino.addDeclaration('BME280_Address','#define BME280_I2C_ADDRESS  0x76',false);
 Blockly.Arduino.addDeclaration('PORT I2C SDA','#define I2C_PORT_SDA  '+pin_sda+'',false);
 Blockly.Arduino.addDeclaration('PORT I2C SCL','#define I2C_PORT_SCL  '+pin_scl+'',false);
-Blockly.Arduino.addDeclaration('BME280_object','Adafruit_BMP280 bmp280;',false);
+Blockly.Arduino.addDeclaration('BME280_object','Adafruit_BME280 bme;',false);
 Blockly.Arduino.addDeclaration('Line tail BME280','//------BME280------\n');
 Blockly.Arduino.addDeclaration('Function select data',`
-  double selectDataOfBME280(String data){
-    if(data == "Nhiệt độ") return bmp280.readTemperature();
-    if(data == "Độ ẩm") return bmp280.readHumidity();
-    if(data == "Áp suất") return bmp280.readPreassure();
-  }
+
+int selectDataOfBME280(String data){
+  double dataBME;
+  if(data == "Nhiệt độ") dataBME = bme.readTemperature() ;
+  if(data == "Độ ẩm") dataBME = bme.readHumidity();
+  if(data == "Áp suất") dataBME = bme.readPressure();
+  return (int)(dataBME);
+}
 
 `)
 
-Blockly.Arduino.addSetup('BME280_setup_PORT_I2C','Wire.begin(I2C_PORT_SDA, I2C_PORT_SCL);',false);
-Blockly.Arduino.addSetup('BME280_setup','bmp280.begin(BMP280_I2C_ADDRESS);',false);
+Blockly.Arduino.addSetup('Line head1 BME280','//------BME280------\n');
+Blockly.Arduino.addSetup('Serialpr','Serial.println("Initializing BME280 sensor...");')
+Blockly.Arduino.addSetup('BME280_setup_PORT_I2C_2',
+`if (!bme.begin(BME280_I2C_ADDRESS, &Wire)) {
+  Serial.println("Could not find a valid BME280 sensor, check wiring!");
+  while (1) {
+    delay(10);
+  }
+}`)
+Blockly.Arduino.addSetup('Set ip mode','bme.takeForcedMeasurement();',false);
+Blockly.Arduino.addSetup('Line tail1 BME280','//------BME280------\n');
 
 
-var code = 'selecDataOfBME280("'+type_data+'")';
+var code = 'selectDataOfBME280("'+type_data+'")';
 return [code, Blockly.Arduino.ORDER_ADDITIVE];
 };
 
 Blockly.Arduino.AirsenseReadDataPMS7003 = function () {
 var Port_uart = this.getFieldValue('Port uart');
 var Port_rx = this.getFieldValue('Port rx');
-var Port_tx = this.getFieldValue('Port tx');
 var Baud_speed = this.getFieldValue('Baud speed');
 var type_data_PMS7003 = this.getFieldValue('Type data PMS7003');
 
 Blockly.Arduino.addDeclaration('Line head PMS7003','//------PMS7003------\n');
-Blockly.Arduino.addInclude('Library Uart Hardware & PMS7003','#include "PMS.h"\n#include <HardwareSerial.h>');
+Blockly.Arduino.addInclude('Library Uart Hardware & PMS7003','#include "PMS.h"');
 Blockly.Arduino.addDeclaration('PORT UART RX PMS','#define RX_PORT_PMS7003 '+Port_rx+'',false);
-Blockly.Arduino.addDeclaration('PORT UART TX  PMS','#define TX_PORT_PMS7003 '+Port_tx+'',false);
 Blockly.Arduino.addDeclaration('PORT UART  PMS','#define UART_PORT_PMS7003 '+Port_uart+'',false);
 Blockly.Arduino.addDeclaration('Initialize PMS1','HardwareSerial SerialPMS(UART_PORT_PMS7003);',false);
 Blockly.Arduino.addDeclaration('Initialize PMS2','PMS pms(SerialPMS);',false);
-Blockly.Arduino.addDeclaration('Initialize PMS3','PMS::DATA data;',false);
+Blockly.Arduino.addDeclaration('Initialize PMS3','PMS::DATA dataPMS7003;',false);
 Blockly.Arduino.addDeclaration('Line tail PMS7003','//------PMS7003------\n');
 Blockly.Arduino.addDeclaration('Function select type data of PMS7003',`
-  double selectDataOfPMS7003(String type_data, PMS::DATA data){
-    pms.requestRead();
-    if(type_data == "PM1") return data.PM_AE_UG_1_0;
-    if(type_data == "PM2.5") return data.PM_AE_UG_2_5;
-    if(type_data == "PM10") return data.PM_AE_UG_10_0;
-    return -1.0 ;
-  }
-  
-`)
+int selectDataOfPMS7003(String type_data, PMS::DATA data) {
+  int dataPMS7003_value;
+  pms.requestRead();
+  if (type_data == "PM1" && pms.readUntil(dataPMS7003)) dataPMS7003_value = data.PM_AE_UG_1_0;
+  else if (type_data == "PM2.5" && pms.readUntil(dataPMS7003)) dataPMS7003_value = data.PM_AE_UG_2_5;
+  else if (type_data == "PM10" && pms.readUntil(dataPMS7003)) dataPMS7003_value = data.PM_AE_UG_10_0;
+  return dataPMS7003_value;
+}
+
+`);
+
+Blockly.Arduino.addSetup('Line head1 PMS7003','//------PMS7003------\n');
+Blockly.Arduino.addSetup('SetupSeial','Serial.println("Initializing PMS7003 sensor...");\n');
+Blockly.Arduino.addSetup('Set up pms1','SerialPMS.begin('+Baud_speed+', SERIAL_8N1, RX_PORT_PMS7003);');
+Blockly.Arduino.addSetup('Set up pms2',`pms.passiveMode();\npms.wakeUp();\ndelay(3000);`);
+Blockly.Arduino.addSetup('Line tail1 PMS7003','//------PMS7003------\n');
 
 
-Blockly.Arduino.addSetup('Set up pms1','SerialPMS.begin('+Baud_speed+', SERIAL_8N1, RX_PORT_PMS7003, TX_PORT_PMS7003);')
-Blockly.Arduino.addSetup('Set up pms2',`pms.passiveMode();\npms.wakeup();\ndelay(3000);`)
-
-
-var code = 'selectDataOfPMS7003("'+type_data_PMS7003+'",data)';
+var code = 'selectDataOfPMS7003("'+type_data_PMS7003+'",dataPMS7003)';
 return [code, Blockly.Arduino.ORDER_ADDITIVE];
 
 
@@ -952,37 +967,78 @@ Blockly.Arduino.ESP32_wireless = function(){
 
 Blockly.Arduino.addInclude('Library wireless','#include <WiFi.h>\n#include "BluetoothSerial.h"');
 
-
 var nameWifi = this.getFieldValue('Name_wifi');
 var passwordWifi = this.getFieldValue('Password');
+var Name_bluetooth = this.getFieldValue('Name_bluetooth');
+
+Blockly.Arduino.addDeclaration('head wifi','//---------------WIFI-------------------',false);
 Blockly.Arduino.addDeclaration('SSID wifi','#define SSID  "'+nameWifi+'"',false);
 Blockly.Arduino.addDeclaration('Password wifi','#define PASSWORD "'+passwordWifi+'"',false);
+Blockly.Arduino.addDeclaration('Function wifi','void initWifi(){\nWiFi.mode(WIFI_STA);\nWiFi.begin(SSID, PASSWORD);\n Serial.print("Connecting to WiFi ..");\nwhile (WiFi.status() != WL_CONNECTED) {\nSerial.print(".");\ndelay(1000);}}',false);
+Blockly.Arduino.addDeclaration('tail wifi','//---------------WIFI-------------------',false);
 
-var Name_bluetooth = this.getFieldValue('Name_bluetooth');
+
+Blockly.Arduino.addDeclaration('head ble','//---------------BLUETOOTH-------------------',false);
 Blockly.Arduino.addDeclaration('Name bluetooth','#define NAME_BLUETOOTH  "'+Name_bluetooth+'"',false);
+Blockly.Arduino.addDeclaration('tail ble','//---------------BLUETOOTH-------------------',false);
 
-//----------------------------------------------WIFI------------------------------
 
-Blockly.Arduino.addDeclaration('Function wifi','void initWifi(){\nWiFi.mode(WIFI_STA);\nWiFi.begin(SSID, PASSWORD);\n Serial.print("Connecting to WiFi ..");\nwhile (WiFi.status() != WL_CONNECTED) {\nSerial.print(".");\ndelay(1000);}',false);
 
-//----------------------------------------------WIFI------------------------------
-
-//----------------------------------------------Bluetooth------------------------------
-
-Blockly.Arduino.addDeclaration('Set up bluetooth','BluetoothSerial SerialBT;',false);
-
-//----------------------------------------------Bluetooth------------------------------
 
 
 
 var Status_wireless = this.getFieldValue("Select");
 
-Blockly.Arduino.addSetup('Set up wireless','if("'+Status_wireless+'" == "Wifi"){\ninitWifi();\nSerial.print("RRSI: ");\nSerial.println(WiFi.RSSI());}\nelse {\nSerialBT.begin(NAME_BLUETOOTH);}');
-
+Blockly.Arduino.addSetup('wireless','//---------------WIRELESS-------------------',false);
+Blockly.Arduino.addSetup('Set up wireless','if("'+Status_wireless+'" == "Wifi"){\ninitWifi();\nSerial.print("RRSI: ");\nSerial.println(WiFi.RSSI());}\nelse {\nBluetoothSerial SerialBT;\nSerialBT.begin(NAME_BLUETOOTH);\n}');
+Blockly.Arduino.addSetup('wireless tail','//---------------WIRELESS-------------------',false);
 
 var code = ' ';
 return code ;
 }
+
+
+Blockly.Arduino['FormatStringData'] = function() {
+  //var numData = this.getFieldValue('NumData');
+  // var code = '';
+  var dataInputs = [];
+  var numberSelect = this.getFieldValue('NUM_INPUTS');
+  // Collect all input values
+  for (var i = 1; i <= numberSelect; i++) {
+       var input = Blockly.Arduino.valueToCode(this, 'Text' + i, Blockly.Arduino.ORDER_ATOMIC) || '""';
+       dataInputs.push('(double)'+input);
+   }
+
+  // Generate snprintf format string and variables
+  //var formatStringDataToMQTT = ["Nhiệt độ: ","Độ ẩm: ","Áp suất: ","PM1: ","PM2.5: ","PM10: ","CO2: "]
+  var formatTypeStringDataToMQTT = ["%d"]
+  
+  var formatString = '"';
+  var variables = '';
+  for (var i = 1; i <= numberSelect; i++) {
+      var nameData = this.getFieldValue('nameData'+i)
+      // formatString += formatStringDataToMQTT[i-1];
+      // formatString += formatTypeStringDataToMQTT[i-1];
+      // formatString += '\\n';
+
+      formatString += nameData;
+      formatString += formatTypeStringDataToMQTT[0];
+      formatString += '\\n';
+
+      
+      variables += dataInputs[i-1];
+      if (i <= numberSelect) variables += ', ';
+  }
+  variables = variables.slice(0, -2);
+  formatString += '"';
+
+  // Create the buffer and snprintf code
+  Blockly.Arduino.addDeclaration('funtion format','char* dataFormat(){\nstatic char bufferDataToMQTT[256];\n\nsnprintf(bufferDataToMQTT, sizeof(bufferDataToMQTT), ' + formatString + ', ' + variables + ');\n return bufferDataToMQTT;\n}')
+  var code = 'dataFormat()\n'
+  return [code, Blockly.Arduino.ORDER_ADDITIVE];
+
+};
+
 
 Blockly.Arduino.AirsenseReadDataMHZ14A = function(){
 var Port_uart = this.getFieldValue('Port uart');
@@ -991,204 +1047,144 @@ var Port_tx = this.getFieldValue('Port tx');
 var Baud_speed = this.getFieldValue('Baud speed')
 
 Blockly.Arduino.addDeclaration('Line head MHZ14A','//------MHZ14A------\n');
-Blockly.Arduino.addInclude('Library Uart Hardware & MHZ14A','#include <MH-Z14A.h>');
+Blockly.Arduino.addInclude('Library Uart Hardware & MHZ14A','#include <MH-Z14A.h>\n#include<Arduino.h>');
 Blockly.Arduino.addDeclaration('PORT UART RX MHZ14A','#define RX_PORT_MHZ14A '+Port_rx+'',false);
 Blockly.Arduino.addDeclaration('PORT UART TX  MHZ14A','#define TX_PORT_MHZ14A '+Port_tx+'',false);
 Blockly.Arduino.addDeclaration('PORT UART MHZ14A','#define UART_PORT_MHZ14A '+Port_uart+'',false);
 Blockly.Arduino.addDeclaration('Initialize MHZ14A','HardwareSerial SerialMHZ14A(UART_PORT_MHZ14A);',false);
 Blockly.Arduino.addDeclaration('Init MHZ14A','MHZ14A mhz14a_sensor;',false);
+Blockly.Arduino.addDeclaration('function convert',`int dataMHZ14A(int data){
+  return data;
+}`)
 Blockly.Arduino.addDeclaration('Line tail MHZ14A','//------MHZ14A------\n');
+Blockly.Arduino.addSetup('Line head MHZ14A','//------MHZ14A------\n');
+Blockly.Arduino.addSetup('SetupSeialMHZ14A','Serial.println("Initializing MH-Z14A sensor...");\n');
 Blockly.Arduino.addSetup('setup1_mhz14a','SerialMHZ14A.begin('+Baud_speed+');');
-Blockly.Arduino.addSetup('setup2_mhz14a','mhz14a_sensor.begin(SerialMHZ14A,4000);');
-Blockly.Arduino.addSetup('setup3_mhz14a','mhz14a_sensor.setDebug(false);');
-var code =  '//------MHZ14A------\nfloat  CO2 = mhz14a_sensor.readConcentrationPPM(0x01);\n//------MHZ14A------';
+Blockly.Arduino.addSetup('setup2_mhz14a','mhz14a_sensor.begin(SerialMHZ14A,Serial,4000);');
+Blockly.Arduino.addSetup('setup3_mhz14a','mhz14a_sensor.setDebug(true);');
+Blockly.Arduino.addSetup('setup4_mhz14a','mhz14a_sensor.setAutoCal(0x01, true);  ');
+Blockly.Arduino.addSetup('setup5_mhz14a','mhz14a_sensor.setDetectionRange(0x01, mhz14a_sensor.MR_2000);');
+Blockly.Arduino.addSetup('Line tail MHZ14A','//------MHZ14A------\n');
+
+var code =  'dataMHZ14A(mhz14a_sensor.readConcentrationPPM(0x01))';
 return [code, Blockly.Arduino.ORDER_ADDITIVE];
 }
-Blockly.Arduino.SetUpDS3231 = function(){
-  var date_Time= this.getFieldValue('DATE')
-  var time_Time= this.getFieldValue('TIME')
-  var SDA_3231=this.getFieldValue('SDA');
-  var SCL_3231=this.getFieldValue('SCL');
-    Blockly.Arduino.addInclude('Lib DS3231', '#include <DS3231.h>');
-    Blockly.Arduino.addDeclaration('DS3231_SDA','#define SDA_DS3231 '+SDA_3231+'');
-    Blockly.Arduino.addDeclaration('DS3231_SCL','#define SCL_DS3231 '+SCL_3231+'');
-    Blockly.Arduino.addSetup('DS3231_setup','rtc.begin();');
-    Blockly.Arduino.addSetup('Date_setup', 'rtc.setDate(' + date_Time + ');');
-    Blockly.Arduino.addSetup('Time_setup', 'rtc.setTime(' + time_Time + ');');
-    var code = '';
-    return code;
+
+
+Blockly.Arduino.setUpDS3231 = function(){
+  var SDA_3231=this.getFieldValue('SDA_ds3231');
+  var SCL_3231=this.getFieldValue('SCL_ds3231');
+  var Year = this.getFieldValue('Nam');
+  var Month = this.getFieldValue('Thang');
+  var Day = this.getFieldValue('Ngay');
+  var WeekDay = this.getFieldValue('Thu ngay');
+  var Hour = this.getFieldValue('Gio');
+  var Minute = this.getFieldValue('Phut');
+  var Second = this.getFieldValue('Giay');
+
+  Blockly.Arduino.addInclude('Lib DS3231', '#include <DS3231.h>');
+  Blockly.Arduino.addDeclaration('DS3231_SDA','#define SDA_DS3231 '+SDA_3231+'');
+  Blockly.Arduino.addDeclaration('DS3231_SCL','#define SCL_DS3231 '+SCL_3231+'');
+  Blockly.Arduino.addDeclaration('parameter DS3231','DS3231 myRTC;')
+  Blockly.Arduino.addSetup('DS3231_setup','Wire.begin(SDA_DS3231,SCL_DS3231);');
+  Blockly.Arduino.addSetup('Year_setup', 'myRTC.setYear('+Year+'- 2000);');
+  Blockly.Arduino.addSetup('Month_setup', 'myRTC.setMonth(' + Month + ');');
+  Blockly.Arduino.addSetup('Date_setup', 'myRTC.setDate(' + Day + ');');
+  Blockly.Arduino.addSetup('WeekDay_setup', 'myRTC.setDoW(' + WeekDay + ');');
+  Blockly.Arduino.addSetup('Hour_setup', 'myRTC.setHour(' + Hour + ');');
+  Blockly.Arduino.addSetup('Minute_setup', 'myRTC.setMinute(' + Minute + ');');
+  Blockly.Arduino.addSetup('Second_setup', 'myRTC.setSecond(' + Second + ');');
+  var code = '';
+  return code;
 
 }
 
-Blockly.Arduino.GetDateTimeDS3231 = function(){
+Blockly.Arduino.getDataOfDS3231 = function(){
 
-    var rs=this.getFieldValue('RS');
-    var en=this.getFieldValue('En');
-    var d1=this.getFieldValue('D1');
-    var d2=this.getFieldValue('D2');
-    var d3=this.getFieldValue('D3');
-    var d4=this.getFieldValue('D4');
-
-    Blockly.Arduino.addInclude('Lib DS3231', '#include <DS3231.h>');
-    Blockly.Arduino.addInclude('Lib LiquidCrystal ', '#include <LiquidCrystal.h>');
-    Blockly.Arduino.addDeclaration('DS3231_dec','DS3231  rtc(SDA_DS3231, SCL_DS3231);');
-    Blockly.Arduino.addDeclaration('LC_dec','LiquidCrystal lcd('+rs+','+en+','+d1+','+d2+','+d3+','+d4+');');
-    Blockly.Arduino.addSetup('DS3231_setup','rtc.begin();');
-    Blockly.Arduino.addSetup('LC_setup',' lcd.begin(16,2);');
-
-    var code = ' lcd.setCursor(0,0);\nlcd.print("Time:  ");\nlcd.print(rtc.getTimeStr());\nlcd.setCursor(0,1);\nlcd.print("Date: ");\nlcd.print(rtc.getDateStr());\ndelay(1000); ';
-    return code;
+  var type_data_ds3231 = this.getFieldValue('TypeData')
+  Blockly.Arduino.ad 
+  Blockly.Arduino.addDeclaration('function select data of ds3231',`
+  
+  String getDataOfDS3231(String data) {
+    bool status;  // Placeholder variable for functions that require additional arguments
+    bool century; // Another placeholder for century information
+    
+    if (data == "Năm") {
+      return String(myRTC.getYear());
+    } else if (data == "Tháng") {
+      return String(myRTC.getMonth(century));  // Use the required argument
+    } else if (data == "Ngày") {
+      return String(myRTC.getDate());
+    } else if (data == "Thứ ngày") {
+      return String(myRTC.getDoW());
+    } else if (data == "Giờ") {
+      return String(myRTC.getHour(status, status));  // Use the required arguments
+    } else if (data == "Phút") {
+      return String(myRTC.getMinute());
+    } else if (data == "Giây") {
+      return String(myRTC.getSecond());
+    } else {
+      return "Invalid Data";
+    }
+  }
+  `)
+  var code = 'getDataOfDS3231("'+type_data_ds3231+'")';
+  return [code, Blockly.Arduino.ORDER_ADDITIVE];
 
 }
+
 Blockly.Arduino.ConnectMQTT = function(){
   var Port = this.getFieldValue('PORT');
   var IP = this.getFieldValue('IP');
   var ID = this.getFieldValue('ID');
   var PW = this.getFieldValue('PassWord');
-  Blockly.Arduino.addInclude('MQTT client', '#include <ArduinoMqttClient.h>');
-  Blockly.Arduino.addInclude('WiFiNINA', '#include <WiFiNINA.h>');
-  Blockly.Arduino.addDeclaration('setup ID', 'char ssid[] = SSID;');
-  Blockly.Arduino.addDeclaration('setup PW', 'char pass[] = PASSWORD;');
-  Blockly.Arduino.addDeclaration('create wifi client', 'WiFiClient wifiClient;');
-  Blockly.Arduino.addDeclaration('connect MQTT client','MqttClient mqttClient(wifiClient);')
-  Blockly.Arduino.addSetup('MQTT setup',
-`
-//Initialize serial and wait for port to open:
-  Serial.begin(9600);
-  while (!Serial) {
-    ; // wait for serial port to connect. Needed for native USB port only
-  }
+ 
 
-  // attempt to connect to Wifi network:
-  Serial.print("Attempting to connect to WPA SSID: ");
-  Serial.println(ssid);
-  while (WiFi.begin(ssid, pass) != WL_CONNECTED) {
-    // failed, retry
-    Serial.print(".");
-    delay(5000);
-  }
-
-  Serial.println("You're connected to the network");
-  Serial.println();
-
-  Serial.print("Attempting to connect to the MQTT broker: ");
-  Serial.println(broker);
-
-  if (!mqttClient.connect(broker, port)) {
-    Serial.print("MQTT connection failed! Error code = ");
-    Serial.println(mqttClient.connectError());
-
-    while (1);
-  }
-
-  Serial.println("You're connected to the MQTT broker!");
-  Serial.println();
-}
-`
-  )
-  var code ='';
   Blockly.Arduino.addInclude('MQTT client', '#include <PubSubClient.h>');
-  Blockly.Arduino.addDeclaration('Setup IP','#define MQTT_SEVER = "'+IP+'"');
-  Blockly.Arduino.addDeclaration('Setup port','#define PORT = "'+Port+'"');
-  Blockly.Arduino.addDeclaration('setup ID', '#define SSID_MQTT = "'+ID+'"');
-  Blockly.Arduino.addDeclaration('setup PW', '#define PASSWORD_MQTT = "'+PW+'"');
+  Blockly.Arduino.addDeclaration('Setup IP','#define MQTT_SERVER  "'+IP+'"');
+  Blockly.Arduino.addDeclaration('Setup port','#define MQTT_PORT  '+Port+'');
+  Blockly.Arduino.addDeclaration('setup ID', '#define MQTT_USER  "'+ID+'"');
+  Blockly.Arduino.addDeclaration('setup PW', '#define MQTT_PASSWORD  "'+PW+'"');
   Blockly.Arduino.addDeclaration('create wifi client', 'WiFiClient espClient;');
   Blockly.Arduino.addDeclaration('connect MQTT client','PubSubClient client(espClient);');
-  Blockly.Arduino.addSetup('ConnectMQTT',`while (!client.connected()) {client.connect("ESP32Client", mqtt_user, mqtt_password);}`)
+  Blockly.Arduino.addDeclaration('initMQTT',`
+  void initMQTT() {
+    client.setServer(MQTT_SERVER, MQTT_PORT);
+    while (!client.connected()) {
+      if (client.connect("ESP32Client", MQTT_USER, MQTT_PASSWORD)) {
+        Serial.println("Connected to MQTT Broker!");
+      } else {
+        Serial.print("Failed to connect to MQTT Broker, retrying in 5 seconds - ");
+        Serial.print(client.state());
+        delay(5000);
+      }
+    }
+  }
+  `)
+  Blockly.Arduino.addSetup('ConnectMQTT',`initMQTT();`)
 
-  var code ='client.loop()';
+  var code =`if (!client.connected()) {
+    initMQTT(); // Reconnect if disconnected
+  }
+  client.loop();\n`;
   return code;
 }
 
 Blockly.Arduino.SendDataMQTT = function(){
-  var data_MQTT = this.getFieldValue('text');
+  var data_MQTT = Blockly.Arduino.valueToCode(
+    this, 'Text', Blockly.Arduino.ORDER_ATOMIC) || '""';
   var topic_mqtt = this.getFieldValue('TOPIC'); 
-  var Cap_data = this.getFieldValue('Cap_data');
-  Blockly.Arduino.addDeclaration('variable','char data_mqtt['+Cap_data+']');
-  Blockly.Arduino.addDeclaration('ConverChar','sprintf(data_mqtt,"%d",'+data_MQTT+')');
-  var code ='client.publish("'+topic_mqtt+'",data_mqtt)';
+  Blockly.Arduino.addInclude('include lib','#include "stdio.h"')
+  Blockly.Arduino.addFunction('checkTypeData',`char* converData(double data){
+        static char _bufferData[256];
+        snprintf(_bufferData, sizeof(_bufferData),"%0.2f",data);
+        return _bufferData;
+      }`)
+  var code ='client.publish("'+topic_mqtt+'",converData('+data_MQTT+'));';
   return code;
 }
-Blockly.Arduino.BMEMQTT=function(){
-  var type_data=this.getFieldValue('BME280');
-  Blockly.Arduino.addDeclaration('Broker','const char broker[] = "test.mosquitto.org";')
-  Blockly.Arduino.addDeclaration('Port','int        port     = 1883;')
-  Blockly.Arduino.addDeclaration('set interval','const long interval = 8000;\nunsigned long previousMillis = 0;')
-  Blockly.Arduino.addDeclaration('BME Topic','const char BME[]  = "Dữ liệu '+type_data+'";')
-  var code = 
-  `
-  mqttClient.poll();
-  double BME_data= selectDataofBME280("`+type_data+`");
-  unsigned long currentMillis = millis();
 
-  if (currentMillis - previousMillis >= interval) {
-    previousMillis = currentMillis;
 
-    // send message, the Print interface can be used to set the message contents
-    mqttClient.beginMessage(BME);
-    mqttClient.print(BME_Data);
-    mqttClient.endMessage();
-
-    Serial.println();
-  }
-}
-  `;
-  return code;
-
-}
-Blockly.Arduino.PMSMQTT=function(){
-  var type_data=this.getFieldValue('PMS7003');
-  Blockly.Arduino.addDeclaration('Broker','const char broker[] = "test.mosquitto.org";')
-  Blockly.Arduino.addDeclaration('Port','int        port     = 1883;')
-  Blockly.Arduino.addDeclaration('set interval','const long interval = 8000;\nunsigned long previousMillis = 0;')
-  Blockly.Arduino.addDeclaration('PMS Topic','const char PMS[]  = "Dữ liệu '+type_data+'";')
-  var code = 
-  `
-  mqttClient.poll();
-  double PMS_data= selectDataofPMS7003("`+type_data+`",data); 
-  unsigned long currentMillis = millis();
-
-  if (currentMillis - previousMillis >= interval) {
-    previousMillis = currentMillis;
-
-    // send message, the Print interface can be used to set the message contents
-    mqttClient.beginMessage(PMS);
-    mqttClient.print(PMS_data);
-    mqttClient.endMessage();
-
-    Serial.println();
-  }
-}
-  `;
-  return code;
-
-}
-Blockly.Arduino.MHZMQTT=function(){
-  Blockly.Arduino.addDeclaration('Broker','const char broker[] = "test.mosquitto.org";')
-  Blockly.Arduino.addDeclaration('Port','int        port     = 1883;')
-  Blockly.Arduino.addDeclaration('set interval','const long interval = 8000;\nunsigned long previousMillis = 0;')
-  Blockly.Arduino.addDeclaration('MHZ Topic','const char MHZ[]  = "Dữ liệu MHZ";')
-  var code = 
-  `
-  mqttClient.poll();
-  float MHZ_data=mhz14a_sensor.readConcentrationPPM(0x01);
-  unsigned long currentMillis = millis();
-
-  if (currentMillis - previousMillis >= interval) {
-    previousMillis = currentMillis;
-
-    // send message, the Print interface can be used to set the message contents
-    mqttClient.beginMessage(MHZ);
-    mqttClient.print(MHZ_data);
-    mqttClient.endMessage();
-
-    Serial.println();
-  }
-}
-  `;
-  return code;
-
-}
 Blockly.Arduino.ReceiveMQTTData=function(){
   var type_sensor=this.getFieldValue("type sensor data")
   Blockly.Arduino.addDeclaration('Broker','const char broker[] = "test.mosquitto.org";')

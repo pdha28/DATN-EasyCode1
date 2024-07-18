@@ -41,6 +41,8 @@ Blockly.Blocks['serial_setup'] = {
                 Blockly.Arduino.Boards.selected.serialSpeed), 'SPEED')
         .appendField(Blockly.Msg.ARD_SERIAL_BPS);
     this.setInputsInline(true);
+    this.setPreviousStatement(true, null);
+    this.setNextStatement(true, null);
     this.setTooltip(Blockly.Msg.ARD_SERIAL_SETUP_TIP);
   },
   /**
@@ -75,7 +77,8 @@ Blockly.Blocks['serial_print'] = {
         .appendField(new Blockly.FieldDropdown(
                 Blockly.Arduino.Boards.selected.serial), 'SERIAL_ID')
         .appendField(Blockly.Msg.ARD_SERIAL_PRINT);
-    this.appendValueInput('CONTENT');
+    this.appendValueInput('CONTENT')
+        
     this.appendDummyInput()
         .appendField(new Blockly.FieldCheckbox('TRUE'), 'NEW_LINE')
         .appendField(Blockly.Msg.ARD_SERIAL_PRINT_NEWLINE);

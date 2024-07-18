@@ -35,7 +35,9 @@ var setMenu = function (devMode, getBoard, config, codeType) {
     if (config.arduino_board=="Uno") uno = true;
     if (config.arduino_board=="Mega") mega = true;
     if (config.arduino_board=="ESP8266 WeMos D1") esp = true;
-    if (config.arduino_board == "ESP32 DevKit V1" ) esp32 = true ;
+    if (config.arduino_board == "ESP32 DevKit V1" ) {esp32 = true;
+                                        console.log("test sucessfull");
+    }
     if (typeof (devMode) === 'undefined') devMode = false;
     var ardublocklyMenu = [];
     if (process.platform == 'darwin') {
@@ -713,11 +715,6 @@ var getLanguageData = function () {
         ]
     };
 };
-var kcbot = true;
-var bhtarduino = true;
-var a4kids = true;
-var iot4kids = true;
-var Airsense = true;
 
 var openGpt = function(){
     return {
@@ -750,217 +747,254 @@ var openGpt = function(){
         }
     };
 };
+
+
+var kcbot = true;
+var bhtarduino = true;
+var a4kids = true;
+var iot4kids = true;
+var Airsense = true;
+
+
 var getBoardData = function () {
     return {
         label: 'Thiết bị',
         submenu: [
-            {
-                label: 'KC-Bot',
-                type: 'checkbox',
-                checked: kcbot,
-                click: () => {
-                    kcbot = !kcbot;
-                    lstBoard = "";
-                    if (kcbot) lstBoard += "kcbot,";
-                    if (bhtarduino) lstBoard += "bhtarduino,";
-                    if (a4kids) lstBoard += "a4kids,";
-                    if (iot4kids) lstBoard += "iot4kids,";
-                    if (Airsense) lstBoard += "Airsense,";
-                    BrowserWindow.getFocusedWindow().webContents
-                        .executeJavaScript(
-                            " Ardublockly.changeBoard({name:'" + lstBoard + "',board:'Uno'})");
-                }
-            },
+            // {
+            //     label: 'KC-Bot',
+            //     type: 'checkbox',
+            //     checked: kcbot,
+            //     click: () => {
+            //         kcbot = !kcbot;
+            //         lstBoard = "";
+            //         if (kcbot) lstBoard += "kcbot,";
+            //         if (bhtarduino) lstBoard += "bhtarduino,";
+            //         if (a4kids) lstBoard += "a4kids,";
+            //         if (iot4kids) lstBoard += "iot4kids,";
+            //         if (Airsense) lstBoard += "Airsense,";
+            //         BrowserWindow.getFocusedWindow().webContents
+            //             .executeJavaScript(
+            //                 " Ardublockly.changeBoard({name:'" + lstBoard + "',board:'Uno'})");
+            //     }
+            // },
         
-            {
-                label: 'Arduino robot',
-                type: 'checkbox',
-                checked: a4kids,
-                click: () => {
-                    a4kids = !a4kids;
-                    let lstBoard = "";
-                    if (kcbot) lstBoard += "kcbot,";
-                    if (bhtarduino) lstBoard += "bhtarduino,";
-                    if (a4kids) lstBoard += "a4kids,";
-                    if (iot4kids) lstBoard += "iot4kids,";
-                    if (Airsense) lstBoard += "Airsense,";
-                    BrowserWindow.getFocusedWindow().webContents
-                        .executeJavaScript(
-                            " Ardublockly.changeBoard({name:'" + lstBoard + "',board:'Uno'})");
-                }
-            }, {
-                label: 'IoT-ESP',
-                type: 'checkbox',
-                checked: iot4kids,
-                click: () => {
+            // {
+            //     label: 'Arduino robot',
+            //     type: 'checkbox',
+            //     checked: a4kids,
+            //     click: () => {
+            //         a4kids = !a4kids;
+            //         let lstBoard = "";
+            //         if (kcbot) lstBoard += "kcbot,";
+            //         if (bhtarduino) lstBoard += "bhtarduino,";
+            //         if (a4kids) lstBoard += "a4kids,";
+            //         if (iot4kids) lstBoard += "iot4kids,";
+            //         if (Airsense) lstBoard += "Airsense,";
+            //         BrowserWindow.getFocusedWindow().webContents
+            //             .executeJavaScript(
+            //                 " Ardublockly.changeBoard({name:'" + lstBoard + "',board:'Uno'})");
+            //     }
+            // }, {
+            //     label: 'IoT-ESP',
+            //     type: 'checkbox',
+            //     checked: iot4kids,
+            //     click: () => {
 
-                    iot4kids = !iot4kids;
-                    let lstBoard = "";
-                    if (kcbot) lstBoard += "kcbot,";
-                    if (bhtarduino) lstBoard += "bhtarduino,";
-                    if (a4kids) lstBoard += "a4kids,";
-                    if (iot4kids) lstBoard += "iot4kids,";
-                    if (Airsense) lstBoard += "Airsense,";
-                    BrowserWindow.getFocusedWindow().webContents
-                        .executeJavaScript(
-                            " Ardublockly.changeBoard({name:'" + lstBoard + "',board:'Uno'})");
-                }
-            }, {
-                label: 'BHT-arduino',
-                type: 'checkbox',
-                checked: bhtarduino,
-                click: () => {
+            //         iot4kids = !iot4kids;
+            //         let lstBoard = "";
+            //         if (kcbot) lstBoard += "kcbot,";
+            //         if (bhtarduino) lstBoard += "bhtarduino,";
+            //         if (a4kids) lstBoard += "a4kids,";
+            //         if (iot4kids) lstBoard += "iot4kids,";
+            //         if (Airsense) lstBoard += "Airsense,";
+            //         BrowserWindow.getFocusedWindow().webContents
+            //             .executeJavaScript(
+            //                 " Ardublockly.changeBoard({name:'" + lstBoard + "',board:'Uno'})");
+            //     }
+            // }, {
+            //     label: 'BHT-arduino',
+            //     type: 'checkbox',
+            //     checked: bhtarduino,
+            //     click: () => {
 
-                    bhtarduino = !bhtarduino;
-                    let lstBoard = "";
-                    if (kcbot) lstBoard += "kcbot,";
-                    if (bhtarduino) lstBoard += "bhtarduino,";
-                    if (a4kids) lstBoard += "a4kids,";
-                    if (iot4kids) lstBoard += "iot4kids,";
-                    if (Airsense) lstBoard += "Airsense,";
-                    BrowserWindow.getFocusedWindow().webContents
-                        .executeJavaScript(
-                            " Ardublockly.changeBoard({name:'" + lstBoard + "',board:'Uno'})");
-                }
-            },
+            //         bhtarduino = !bhtarduino;
+            //         let lstBoard = "";
+            //         if (kcbot) lstBoard += "kcbot,";
+            //         if (bhtarduino) lstBoard += "bhtarduino,";
+            //         if (a4kids) lstBoard += "a4kids,";
+            //         if (iot4kids) lstBoard += "iot4kids,";
+            //         if (Airsense) lstBoard += "Airsense,";
+            //         BrowserWindow.getFocusedWindow().webContents
+            //             .executeJavaScript(
+            //                 " Ardublockly.changeBoard({name:'" + lstBoard + "',board:'Uno'})");
+            //     }
+            // },
 
-            {
-                label: 'ESP32-Airsense',
-                type: 'checkbox',
-                checked: Airsense,
-                click: () => {
+            // {
+            //     label: 'ESP32-Airsense',
+            //     type: 'checkbox',
+            //     checked: Airsense,
+            //     click: () => {
 
-                    Airsense = !Airsense;
-                    let lstBoard = "";
-                    if (kcbot) lstBoard += "kcbot,";
-                    if (bhtarduino) lstBoard += "bhtarduino,";
-                    if (a4kids) lstBoard += "a4kids,";
-                    if (iot4kids) lstBoard += "iot4kids,";
-                    if (Airsense) lstBoard += "Airsense,";
-                    BrowserWindow.getFocusedWindow().webContents
-                        .executeJavaScript(
-                            " Ardublockly.changeBoard({name:'" + lstBoard + "',board:'ESP32 DevKit V1'})");
-                }
-            },
+            //         Airsense = !Airsense;
+            //         let lstBoard = "";
+            //         if (kcbot) lstBoard += "kcbot,";
+            //         if (bhtarduino) lstBoard += "bhtarduino,";
+            //         if (a4kids) lstBoard += "a4kids,";
+            //         if (iot4kids) lstBoard += "iot4kids,";
+            //         if (Airsense) lstBoard += "Airsense,";
+            //         BrowserWindow.getFocusedWindow().webContents
+            //             .executeJavaScript(
+            //                 " Ardublockly.changeBoard({name:'" + lstBoard + "',board:'ESP32 DevKit V1'})");
+            //     }
+            // },
 
 
-            {
-                type: 'separator'
-            },
-            {
-                label: 'STEM board',
-                type: "radio",
-                checked: false,
-                click: function () {
-                    let newMenu = getBoardData();
-                    newMenu.submenu[0].checked = true;
-                    newMenu.submenu[1].checked = true;
-                    newMenu.submenu[2].checked = true;
-                    newMenu.submenu[3].checked = true;
-                    newMenu.submenu[4].checked = true;
-                    newMenu.submenu[5].checked = false; // separator
-                    newMenu.submenu[6].checked = true;
-                    //kcbot = a4kids = iot4kids = bhtarduino = true;
-                    setMenu(false, newMenu, config_temp, cod_type);
-                    BrowserWindow.getFocusedWindow().webContents
-                        .executeJavaScript(
-                            "Ardublockly.changeBoard({name:'kcbot,bhtarduino,a4kids,iot4kids,',board:'stem'})");
-                }
-            },
+            // {
+            //     type: 'separator'
+            // },
+            // {
+            //     label: 'STEM board',
+            //     type: "radio",
+            //     checked: false,
+            //     click: function () {
+            //         let newMenu = getBoardData();
+            //         newMenu.submenu[0].checked = true;
+            //         newMenu.submenu[1].checked = true;
+            //         newMenu.submenu[2].checked = true;
+            //         newMenu.submenu[3].checked = true;
+            //         newMenu.submenu[4].checked = true;
+            //         newMenu.submenu[5].checked = false; // separator
+            //         newMenu.submenu[6].checked = true;
+            //         //kcbot = a4kids = iot4kids = bhtarduino = true;
+            //         setMenu(false, newMenu, config_temp, cod_type);
+            //         BrowserWindow.getFocusedWindow().webContents
+            //             .executeJavaScript(
+            //                 "Ardublockly.changeBoard({name:'kcbot,bhtarduino,a4kids,iot4kids,',board:'stem'})");
+            //     }
+            // },
 
-            {
-                label: 'ESP32',
-                type : "radio",
-                checked : false,
-                click: function(){
-                   let newMenu = getBoardData();
-                   newMenu.submenu[0].checked = true;
-                   newMenu.submenu[1].checked = true;
-                   newMenu.submenu[2].checked = true;
-                   newMenu.submenu[3].checked = true;
-                   newMenu.submenu[4].checked = true;
-                   newMenu.submenu[5].checked = true; // separator
-                   newMenu.submenu[6].checked = false;
-                   newMenu.submenu[7].checked = true;
-                   //newMenu.submenu[8].checked = true;
-                   //Airsense = kcbot = a4kids = iot4kids = bhtarduino = true;
-                   setMenu(false, newMenu, config_temp, cod_type);
-                   BrowserWindow.getFocusedWindow().webContents
-                       .executeJavaScript(
-                           " Ardublockly.changeBoard({name:'Airsense',board:'ESP32 DevKit V1'})");
-   
-                }
-               },
+            
+            
 
-            {
-                label: 'Nano 328',
-                type: "radio",
-                checked: false,
-                click: function () {
-                    let newMenu = getBoardData();
-                    newMenu.submenu[0].checked = true;
-                    newMenu.submenu[1].checked = true;
-                    newMenu.submenu[2].checked = true;
-                    newMenu.submenu[3].checked = true;
-                    newMenu.submenu[4].checked = true;
-                    newMenu.submenu[5].checked = true; // separator
-                    newMenu.submenu[6].checked = false;
-                    newMenu.submenu[7].checked = false;
-                    newMenu.submenu[8].checked = true;
-                    //kcbot = a4kids = iot4kids = bhtarduino = false;
-                    setMenu(false, newMenu, config_temp, cod_type);
-                    BrowserWindow.getFocusedWindow().webContents
-                        .executeJavaScript(
-                            " Ardublockly.changeBoard({name:'',board:'Nano'})");
-                }
-            }, 
+            // {
+            //     label: 'Nano 328',
+            //     type: "radio",
+            //     checked: false,
+            //     click: function () {
+            //         let newMenu = getBoardData();
+            //         newMenu.submenu[0].checked = true;
+            //         newMenu.submenu[1].checked = true;
+            //         newMenu.submenu[2].checked = true;
+            //         newMenu.submenu[3].checked = true;
+            //         newMenu.submenu[4].checked = true;
+            //         newMenu.submenu[5].checked = true; // separator
+            //         newMenu.submenu[6].checked = false;
+            //         newMenu.submenu[7].checked = false;
+            //         newMenu.submenu[8].checked = true;
+            //         //kcbot = a4kids = iot4kids = bhtarduino = false;
+            //         setMenu(false, newMenu, config_temp, cod_type);
+            //         BrowserWindow.getFocusedWindow().webContents
+            //             .executeJavaScript(
+            //                 " Ardublockly.changeBoard({name:'',board:'Nano'})");
+            //     }
+            // }, 
             {
                 label: 'Arduino Uno',
                 type: "radio",
                 checked: false,
                 click: function () {
                     let newMenu = getBoardData();
-                    newMenu.submenu[0].checked = true;
+                    newMenu.submenu[0].checked = false;
                     newMenu.submenu[1].checked = true;
-                    newMenu.submenu[2].checked = true;
-                    newMenu.submenu[3].checked = true;
-                    newMenu.submenu[4].checked = true;
-                    newMenu.submenu[5].checked = true; // separator
-                    newMenu.submenu[6].checked = false;
-                    newMenu.submenu[7].checked = false;
-                    newMenu.submenu[8].checked = false;
-                    newMenu.submenu[9].checked = true;
+                    // newMenu.submenu[2].checked = true;
+                    // newMenu.submenu[3].checked = true;
+                    // newMenu.submenu[4].checked = true;
+                    // newMenu.submenu[5].checked = true; // separator
+                    // newMenu.submenu[6].checked = false;
+                    // newMenu.submenu[7].checked = false;
+                    // newMenu.submenu[8].checked = false;
+                    // newMenu.submenu[9].checked = true;
                     //kcbot = a4kids = iot4kids = bhtarduino = true;
                     setMenu(false, newMenu, config_temp, cod_type);
                     BrowserWindow.getFocusedWindow().webContents
                         .executeJavaScript(
-                            " Ardublockly.changeBoard({name:'kcbot,bhtarduino,a4kids,iot4kids,',board:'Uno'})");
+                            " Ardublockly.changeBoard({name:'kcbot,',board:'Arduino Uno'})");
                 }
             }, 
+
             {
-                label: 'Mega',
-                type: "radio",
-                checked: false,
-                click: function () {
+                label: 'ESP32',
+                type : "radio",
+                checked : false,
+                click: function(){
                     let newMenu = getBoardData();
                     newMenu.submenu[0].checked = true;
-                    newMenu.submenu[1].checked = true;
-                    newMenu.submenu[2].checked = true;
-                    newMenu.submenu[3].checked = true;
-                    newMenu.submenu[4].checked = true;
-                    newMenu.submenu[5].checked = true; // separator
-                    newMenu.submenu[6].checked = false;
-                    newMenu.submenu[7].checked = false;
-                    newMenu.submenu[8].checked = false;
-                    newMenu.submenu[9].checked = false;
-                    newMenu.submenu[10].checked = true;
-                    //kcbot = a4kids = iot4kids = bhtarduino = false;
+                    newMenu.submenu[1].checked = false;
+                    // newMenu.submenu[2].checked = true;
+                    // newMenu.submenu[3].checked = true;
+                    // newMenu.submenu[4].checked = true;
+                    // newMenu.submenu[5].checked = true; // separator
+                    // newMenu.submenu[6].checked = false;
+                    // newMenu.submenu[7].checked = true;
+            
+                    // Cập nhật menu
                     setMenu(false, newMenu, config_temp, cod_type);
-                    BrowserWindow.getFocusedWindow().webContents
-                        .executeJavaScript(
-                            " Ardublockly.changeBoard({name:'',board:'Mega'})");
+            
+                    console.log("Menu updated successfully");
+            
+                    // Kiểm tra và thực thi JavaScript
+                    const focusedWindow = BrowserWindow.getFocusedWindow();
+                    if (focusedWindow) {
+                        console.log("A window is focused");
+            
+                        focusedWindow.webContents.executeJavaScript(
+                            "console.log('JavaScript execution test: ESP32 menu clicked')"
+                        ).then(result => {
+                            console.log("JavaScript executed successfully");
+                        }).catch(error => {
+                            console.error("Failed to execute JavaScript:", error);
+                        });
+            
+                        //focusedWindow.webContents.openDevTools();
+                        // Thực thi đoạn mã Ardublockly.changeBoard
+                        focusedWindow.webContents.executeJavaScript(
+                            "Ardublockly.changeBoard({name:'Airsense',board:'ESP32'})"
+                        ).then(result => {
+                            console.log("Ardublockly.changeBoard executed successfully");
+                        }).catch(error => {
+                            console.error("Failed to execute Ardublockly.changeBoard:", error);
+                        });
+            
+                    } else {
+                        console.error("No focused window found");
+                    }
                 }
-            }
+            },
+            // {
+            //     label: 'Mega',
+            //     type: "radio",
+            //     checked: false,
+            //     click: function () {
+            //         let newMenu = getBoardData();
+            //         newMenu.submenu[0].checked = true;
+            //         newMenu.submenu[1].checked = true;
+            //         newMenu.submenu[2].checked = true;
+            //         newMenu.submenu[3].checked = true;
+            //         newMenu.submenu[4].checked = true;
+            //         newMenu.submenu[5].checked = true; // separator
+            //         newMenu.submenu[6].checked = false;
+            //         newMenu.submenu[7].checked = false;
+            //         newMenu.submenu[8].checked = false;
+            //         newMenu.submenu[9].checked = false;
+            //         newMenu.submenu[10].checked = true;
+            //         //kcbot = a4kids = iot4kids = bhtarduino = false;
+            //         setMenu(false, newMenu, config_temp, cod_type);
+            //         BrowserWindow.getFocusedWindow().webContents
+            //             .executeJavaScript(
+            //                 " Ardublockly.changeBoard({name:'',board:'Mega'})");
+            //     }
+            // }
             // , {
             //     label: 'ESP8266 WeMos D1',
             //     type: "radio",
@@ -999,6 +1033,7 @@ var getConnectData = function () {
                 click: function () {
                     BrowserWindow.getFocusedWindow().webContents
                         .executeJavaScript('Ardublockly.openSettingCom()');
+                    //console.log("test sucessfull");
                 }
             }
             // ,{

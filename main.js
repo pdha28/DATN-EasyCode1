@@ -112,7 +112,7 @@ app.on('ready', function () {
 		mainWindow.loadURL('http://localhost:1000/kidscode/index.html?lang=vi&code=python');
 	}
 	else {
-		mainWindow.loadURL('http://localhost:1000/kidscode/index.html?lang=vi&board=Uno&name=kcbot,qbot,a4kids,iot4kids,Airsense')
+		mainWindow.loadURL('http://localhost:1000/kidscode/index.html?lang=vi&board=Uno&name=kcbot')
 	}
 
 	// })

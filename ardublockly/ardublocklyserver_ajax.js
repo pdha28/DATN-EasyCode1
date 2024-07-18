@@ -278,7 +278,7 @@ ArdublocklyServer.setArduinoBoard = function(new_board, callback) {
   ArdublocklyServer.putJson(
       '/settings/board', {"new_value": new_board}, callback);
 };
-
+  
 /**
  * Request to the Ardublockly Server to return JSON data containing all
  * available serial ports in the computer, and the selected one in the

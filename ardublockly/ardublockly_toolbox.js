@@ -21,14 +21,12 @@ var Airsense_toolbox =
         '</block>' +
 
          '<block type="freeRTOS">'+
-            //'<field name="I2C_port_SDA"> 21 </field>' +
-            //'<field name="I2C_port_SCL"> 22 </field>' +
+           
          '</block>' +
 
         '<block type="AirsenseReadDataPMS7003">'+
-            '<field name="Port uart"> 2 </field>' +
-            '<field name="Port rx"> 16 </field>' +
-            '<field name="Port tx"> 17 </field>' +
+            '<field name="Port uart"> 1 </field>' +
+            '<field name="Port rx"> 33 </field>' +
             '<field name="Baud speed"> 9600 </field>' +
         '</block>' +
 
@@ -40,38 +38,31 @@ var Airsense_toolbox =
 
          '<block type="AirsenseReadDataMHZ14A">'+
 
-         '<field name="Port uart"> 1 </field>' +
-         '<field name="Port rx"> 26 </field>' +
-         '<field name="Port tx"> 27 </field>' +
+         '<field name="Port uart"> 2 </field>' +
+         '<field name="Port rx"> 16 </field>' +
+         '<field name="Port tx"> 17 </field>' +
          '<field name="Baud speed"> 9600 </field>' +
          '</block>' +
-         '<block type="SetUpDS3231">'+
-            '<field name="DATE"></field>'+
-            '<field name="TIME"></field>'+
-            '<field name="SDA"> 20 </field>' +
-            '<field name="SCL"> 21 </field>' +
-            
-        '</block>'+
-        '<block type="GetDateTimeDS3231">'+
-        '<field name="RS"> 1 </field>' +
-        '<field name="En"> 2 </field>' +
-        '<field name="D1"> 4 </field>' +
-        '<field name="D2"> 5 </field>' +
-        '<field name="D3"> 6 </field>' +
-        '<field name="D4"> 7 </field>' +
 
+         '<block type = "FormatStringData">'+
         '</block>'+
+
+        '<block type="setUpDS3231">'+
+        '<field name="SDA_ds3231"> 21 </field>' +
+        '<field name="SCL_ds3231"> 22 </field>' +
+        '</block>'+
+
+        '<block type="getDataOfDS3231">'+
+        '</block>'+
+
         '<block type="ConnectMQTT">'+
         '</block>'+
-        '<block type="BMEMQTT">'+
-        '</block>'+
-        '<block type="PMSMQTT">'+
-        '</block>'+
-        '<block type="MHZMQTT">'+
-        '</block>'+
-        '<block type="ReceiveMQTTData">'+
+
+        '<block type = "SendDataMQTT">'+
         '</block>'+
 
+
+    
 
             
 '</category>';

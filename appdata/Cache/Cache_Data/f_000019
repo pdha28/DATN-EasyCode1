@@ -1,4 +1,4 @@
-// Copyright 2008 The Closure Library Authors. All Rights Reserved.
+// Copyright 2007 The Closure Library Authors. All Rights Reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,938 +13,864 @@
 // limitations under the License.
 
 /**
- * @fileoverview Base class for control renderers.
- * TODO(attila):  If the renderer framework works well, pull it into Component.
- *
- * @author attila@google.com (Attila Bodis)
+ * @fileoverview Utility functions for supporting Bidi issues.
  */
-
-goog.provide('goog.ui.ControlRenderer');
-
-goog.require('goog.a11y.aria');
-goog.require('goog.a11y.aria.Role');
-goog.require('goog.a11y.aria.State');
-goog.require('goog.array');
-goog.require('goog.asserts');
-goog.require('goog.dom');
-goog.require('goog.dom.TagName');
-goog.require('goog.dom.classlist');
-goog.require('goog.object');
-goog.require('goog.string');
-goog.require('goog.style');
-goog.require('goog.ui.Component');
-goog.require('goog.userAgent');
-
 
 
 /**
- * Default renderer for {@link goog.ui.Control}s.  Can be used as-is, but
- * subclasses of Control will probably want to use renderers specifically
- * tailored for them by extending this class.  Controls that use renderers
- * delegate one or more of the following API methods to the renderer:
- * <ul>
- *    <li>{@code createDom} - renders the DOM for the component
- *    <li>{@code canDecorate} - determines whether an element can be decorated
- *        by the component
- *    <li>{@code decorate} - decorates an existing element with the component
- *    <li>{@code setState} - updates the appearance of the component based on
- *        its state
- *    <li>{@code getContent} - returns the component's content
- *    <li>{@code setContent} - sets the component's content
- * </ul>
- * Controls are stateful; renderers, on the other hand, should be stateless and
- * reusable.
- * @constructor
+ * Namespace for bidi supporting functions.
  */
-goog.ui.ControlRenderer = function() {};
-goog.addSingletonGetter(goog.ui.ControlRenderer);
-goog.tagUnsealableClass(goog.ui.ControlRenderer);
+goog.provide('goog.i18n.bidi');
+goog.provide('goog.i18n.bidi.Dir');
+goog.provide('goog.i18n.bidi.DirectionalString');
+goog.provide('goog.i18n.bidi.Format');
 
 
 /**
- * Constructs a new renderer and sets the CSS class that the renderer will use
- * as the base CSS class to apply to all elements rendered by that renderer.
- * An example to use this function using a color palette:
+ * @define {boolean} FORCE_RTL forces the {@link goog.i18n.bidi.IS_RTL} constant
+ * to say that the current locale is a RTL locale.  This should only be used
+ * if you want to override the default behavior for deciding whether the
+ * current locale is RTL or not.
  *
- * <pre>
- * var myCustomRenderer = goog.ui.ControlRenderer.getCustomRenderer(
- *     goog.ui.PaletteRenderer, 'my-special-palette');
- * var newColorPalette = new goog.ui.ColorPalette(
- *     colors, myCustomRenderer, opt_domHelper);
- * </pre>
- *
- * Your CSS can look like this now:
- * <pre>
- * .my-special-palette { }
- * .my-special-palette-table { }
- * .my-special-palette-cell { }
- * etc.
- * </pre>
- *
- * <em>instead</em> of
- * <pre>
- * .CSS_MY_SPECIAL_PALETTE .goog-palette { }
- * .CSS_MY_SPECIAL_PALETTE .goog-palette-table { }
- * .CSS_MY_SPECIAL_PALETTE .goog-palette-cell { }
- * etc.
- * </pre>
- *
- * You would want to use this functionality when you want an instance of a
- * component to have specific styles different than the other components of the
- * same type in your application.  This avoids using descendant selectors to
- * apply the specific styles to this component.
- *
- * @param {Function} ctor The constructor of the renderer you are trying to
- *     create.
- * @param {string} cssClassName The name of the CSS class for this renderer.
- * @return {goog.ui.ControlRenderer} An instance of the desired renderer with
- *     its getCssClass() method overridden to return the supplied custom CSS
- *     class name.
+ * {@see goog.i18n.bidi.IS_RTL}
  */
-goog.ui.ControlRenderer.getCustomRenderer = function(ctor, cssClassName) {
-  var renderer = new ctor();
+goog.define('goog.i18n.bidi.FORCE_RTL', false);
 
-  /**
-   * Returns the CSS class to be applied to the root element of components
-   * rendered using this renderer.
-   * @return {string} Renderer-specific CSS class.
-   */
-  renderer.getCssClass = function() { return cssClassName; };
 
-  return renderer;
+/**
+ * Constant that defines whether or not the current locale is a RTL locale.
+ * If {@link goog.i18n.bidi.FORCE_RTL} is not true, this constant will default
+ * to check that {@link goog.LOCALE} is one of a few major RTL locales.
+ *
+ * <p>This is designed to be a maximally efficient compile-time constant. For
+ * example, for the default goog.LOCALE, compiling
+ * "if (goog.i18n.bidi.IS_RTL) alert('rtl') else {}" should produce no code. It
+ * is this design consideration that limits the implementation to only
+ * supporting a few major RTL locales, as opposed to the broader repertoire of
+ * something like goog.i18n.bidi.isRtlLanguage.
+ *
+ * <p>Since this constant refers to the directionality of the locale, it is up
+ * to the caller to determine if this constant should also be used for the
+ * direction of the UI.
+ *
+ * {@see goog.LOCALE}
+ *
+ * @type {boolean}
+ *
+ * TODO(user): write a test that checks that this is a compile-time constant.
+ */
+goog.i18n.bidi.IS_RTL = goog.i18n.bidi.FORCE_RTL ||
+    ((goog.LOCALE.substring(0, 2).toLowerCase() == 'ar' ||
+      goog.LOCALE.substring(0, 2).toLowerCase() == 'fa' ||
+      goog.LOCALE.substring(0, 2).toLowerCase() == 'he' ||
+      goog.LOCALE.substring(0, 2).toLowerCase() == 'iw' ||
+      goog.LOCALE.substring(0, 2).toLowerCase() == 'ps' ||
+      goog.LOCALE.substring(0, 2).toLowerCase() == 'sd' ||
+      goog.LOCALE.substring(0, 2).toLowerCase() == 'ug' ||
+      goog.LOCALE.substring(0, 2).toLowerCase() == 'ur' ||
+      goog.LOCALE.substring(0, 2).toLowerCase() == 'yi') &&
+     (goog.LOCALE.length == 2 || goog.LOCALE.substring(2, 3) == '-' ||
+      goog.LOCALE.substring(2, 3) == '_')) ||
+    (goog.LOCALE.length >= 3 &&
+     goog.LOCALE.substring(0, 3).toLowerCase() == 'ckb' &&
+     (goog.LOCALE.length == 3 || goog.LOCALE.substring(3, 4) == '-' ||
+      goog.LOCALE.substring(3, 4) == '_'));
+
+
+/**
+ * Unicode formatting characters and directionality string constants.
+ * @enum {string}
+ */
+goog.i18n.bidi.Format = {
+  /** Unicode "Left-To-Right Embedding" (LRE) character. */
+  LRE: '\u202A',
+  /** Unicode "Right-To-Left Embedding" (RLE) character. */
+  RLE: '\u202B',
+  /** Unicode "Pop Directional Formatting" (PDF) character. */
+  PDF: '\u202C',
+  /** Unicode "Left-To-Right Mark" (LRM) character. */
+  LRM: '\u200E',
+  /** Unicode "Right-To-Left Mark" (RLM) character. */
+  RLM: '\u200F'
 };
 
 
 /**
- * Default CSS class to be applied to the root element of components rendered
- * by this renderer.
+ * Directionality enum.
+ * @enum {number}
+ */
+goog.i18n.bidi.Dir = {
+  /**
+   * Left-to-right.
+   */
+  LTR: 1,
+
+  /**
+   * Right-to-left.
+   */
+  RTL: -1,
+
+  /**
+   * Neither left-to-right nor right-to-left.
+   */
+  NEUTRAL: 0
+};
+
+
+/**
+ * 'right' string constant.
  * @type {string}
  */
-goog.ui.ControlRenderer.CSS_CLASS = goog.getCssName('goog-control');
+goog.i18n.bidi.RIGHT = 'right';
 
 
 /**
- * Array of arrays of CSS classes that we want composite classes added and
- * removed for in IE6 and lower as a workaround for lack of multi-class CSS
- * selector support.
+ * 'left' string constant.
+ * @type {string}
+ */
+goog.i18n.bidi.LEFT = 'left';
+
+
+/**
+ * 'left' if locale is RTL, 'right' if not.
+ * @type {string}
+ */
+goog.i18n.bidi.I18N_RIGHT =
+    goog.i18n.bidi.IS_RTL ? goog.i18n.bidi.LEFT : goog.i18n.bidi.RIGHT;
+
+
+/**
+ * 'right' if locale is RTL, 'left' if not.
+ * @type {string}
+ */
+goog.i18n.bidi.I18N_LEFT =
+    goog.i18n.bidi.IS_RTL ? goog.i18n.bidi.RIGHT : goog.i18n.bidi.LEFT;
+
+
+/**
+ * Convert a directionality given in various formats to a goog.i18n.bidi.Dir
+ * constant. Useful for interaction with different standards of directionality
+ * representation.
  *
- * Subclasses that have accompanying CSS requiring this workaround should define
- * their own static IE6_CLASS_COMBINATIONS constant and override
- * getIe6ClassCombinations to return it.
- *
- * For example, if your stylesheet uses the selector .button.collapse-left
- * (and is compiled to .button_collapse-left for the IE6 version of the
- * stylesheet,) you should include ['button', 'collapse-left'] in this array
- * and the class button_collapse-left will be applied to the root element
- * whenever both button and collapse-left are applied individually.
- *
- * Members of each class name combination will be joined with underscores in the
- * order that they're defined in the array. You should alphabetize them (for
- * compatibility with the CSS compiler) unless you are doing something special.
- * @type {Array<Array<string>>}
+ * @param {goog.i18n.bidi.Dir|number|boolean|null} givenDir Directionality given
+ *     in one of the following formats:
+ *     1. A goog.i18n.bidi.Dir constant.
+ *     2. A number (positive = LTR, negative = RTL, 0 = neutral).
+ *     3. A boolean (true = RTL, false = LTR).
+ *     4. A null for unknown directionality.
+ * @param {boolean=} opt_noNeutral Whether a givenDir of zero or
+ *     goog.i18n.bidi.Dir.NEUTRAL should be treated as null, i.e. unknown, in
+ *     order to preserve legacy behavior.
+ * @return {?goog.i18n.bidi.Dir} A goog.i18n.bidi.Dir constant matching the
+ *     given directionality. If given null, returns null (i.e. unknown).
  */
-goog.ui.ControlRenderer.IE6_CLASS_COMBINATIONS = [];
-
-
-/**
- * Map of component states to corresponding ARIA attributes.  Since the mapping
- * of component states to ARIA attributes is neither component- nor
- * renderer-specific, this is a static property of the renderer class, and is
- * initialized on first use.
- * @type {Object<goog.ui.Component.State, goog.a11y.aria.State>}
- * @private
- */
-goog.ui.ControlRenderer.ariaAttributeMap_;
-
-
-/**
- * Map of certain ARIA states to ARIA roles that support them. Used for checked
- * and selected Component states because they are used on Components with ARIA
- * roles that do not support the corresponding ARIA state.
- * @private {!Object<goog.a11y.aria.Role, goog.a11y.aria.State>}
- * @const
- */
-goog.ui.ControlRenderer.TOGGLE_ARIA_STATE_MAP_ = goog.object.create(
-    goog.a11y.aria.Role.BUTTON, goog.a11y.aria.State.PRESSED,
-    goog.a11y.aria.Role.CHECKBOX, goog.a11y.aria.State.CHECKED,
-    goog.a11y.aria.Role.MENU_ITEM, goog.a11y.aria.State.SELECTED,
-    goog.a11y.aria.Role.MENU_ITEM_CHECKBOX, goog.a11y.aria.State.CHECKED,
-    goog.a11y.aria.Role.MENU_ITEM_RADIO, goog.a11y.aria.State.CHECKED,
-    goog.a11y.aria.Role.RADIO, goog.a11y.aria.State.CHECKED,
-    goog.a11y.aria.Role.TAB, goog.a11y.aria.State.SELECTED,
-    goog.a11y.aria.Role.TREEITEM, goog.a11y.aria.State.SELECTED);
-
-
-/**
- * Returns the ARIA role to be applied to the control.
- * See http://wiki/Main/ARIA for more info.
- * @return {goog.a11y.aria.Role|undefined} ARIA role.
- */
-goog.ui.ControlRenderer.prototype.getAriaRole = function() {
-  // By default, the ARIA role is unspecified.
-  return undefined;
-};
-
-
-/**
- * Returns the control's contents wrapped in a DIV, with the renderer's own
- * CSS class and additional state-specific classes applied to it.
- * @param {goog.ui.Control} control Control to render.
- * @return {Element} Root element for the control.
- */
-goog.ui.ControlRenderer.prototype.createDom = function(control) {
-  // Create and return DIV wrapping contents.
-  var element = control.getDomHelper().createDom(
-      goog.dom.TagName.DIV, this.getClassNames(control).join(' '),
-      control.getContent());
-
-  return element;
-};
-
-
-/**
- * Takes the control's root element and returns the parent element of the
- * control's contents.  Since by default controls are rendered as a single
- * DIV, the default implementation returns the element itself.  Subclasses
- * with more complex DOM structures must override this method as needed.
- * @param {Element} element Root element of the control whose content element
- *     is to be returned.
- * @return {Element} The control's content element.
- */
-goog.ui.ControlRenderer.prototype.getContentElement = function(element) {
-  return element;
-};
-
-
-/**
- * Updates the control's DOM by adding or removing the specified class name
- * to/from its root element. May add additional combined classes as needed in
- * IE6 and lower. Because of this, subclasses should use this method when
- * modifying class names on the control's root element.
- * @param {goog.ui.Control|Element} control Control instance (or root element)
- *     to be updated.
- * @param {string} className CSS class name to add or remove.
- * @param {boolean} enable Whether to add or remove the class name.
- */
-goog.ui.ControlRenderer.prototype.enableClassName = function(
-    control, className, enable) {
-  var element = /** @type {Element} */ (
-      control.getElement ? control.getElement() : control);
-  if (element) {
-    var classNames = [className];
-
-    // For IE6, we need to enable any combined classes involving this class
-    // as well.
-    // TODO(user): Remove this as IE6 is no longer in use.
-    if (goog.userAgent.IE && !goog.userAgent.isVersionOrHigher('7')) {
-      classNames = this.getAppliedCombinedClassNames_(
-          goog.dom.classlist.get(element), className);
-      classNames.push(className);
-    }
-
-    goog.dom.classlist.enableAll(element, classNames, enable);
-  }
-};
-
-
-/**
- * Updates the control's DOM by adding or removing the specified extra class
- * name to/from its element.
- * @param {goog.ui.Control} control Control to be updated.
- * @param {string} className CSS class name to add or remove.
- * @param {boolean} enable Whether to add or remove the class name.
- */
-goog.ui.ControlRenderer.prototype.enableExtraClassName = function(
-    control, className, enable) {
-  // The base class implementation is trivial; subclasses should override as
-  // needed.
-  this.enableClassName(control, className, enable);
-};
-
-
-/**
- * Returns true if this renderer can decorate the element, false otherwise.
- * The default implementation always returns true.
- * @param {Element} element Element to decorate.
- * @return {boolean} Whether the renderer can decorate the element.
- */
-goog.ui.ControlRenderer.prototype.canDecorate = function(element) {
-  return true;
-};
-
-
-/**
- * Default implementation of {@code decorate} for {@link goog.ui.Control}s.
- * Initializes the control's ID, content, and state based on the ID of the
- * element, its child nodes, and its CSS classes, respectively.  Returns the
- * element.
- * @param {goog.ui.Control} control Control instance to decorate the element.
- * @param {Element} element Element to decorate.
- * @return {Element} Decorated element.
- */
-goog.ui.ControlRenderer.prototype.decorate = function(control, element) {
-  // Set the control's ID to the decorated element's DOM ID, if any.
-  if (element.id) {
-    control.setId(element.id);
-  }
-
-  // Set the control's content to the decorated element's content.
-  var contentElem = this.getContentElement(element);
-  if (contentElem && contentElem.firstChild) {
-    control.setContentInternal(
-        contentElem.firstChild.nextSibling ?
-            goog.array.clone(contentElem.childNodes) :
-            contentElem.firstChild);
+goog.i18n.bidi.toDir = function(givenDir, opt_noNeutral) {
+  if (typeof givenDir == 'number') {
+    // This includes the non-null goog.i18n.bidi.Dir case.
+    return givenDir > 0 ? goog.i18n.bidi.Dir.LTR : givenDir < 0 ?
+                          goog.i18n.bidi.Dir.RTL :
+                          opt_noNeutral ? null : goog.i18n.bidi.Dir.NEUTRAL;
+  } else if (givenDir == null) {
+    return null;
   } else {
-    control.setContentInternal(null);
-  }
-
-  // Initialize the control's state based on the decorated element's CSS class.
-  // This implementation is optimized to minimize object allocations, string
-  // comparisons, and DOM access.
-  var state = 0x00;
-  var rendererClassName = this.getCssClass();
-  var structuralClassName = this.getStructuralCssClass();
-  var hasRendererClassName = false;
-  var hasStructuralClassName = false;
-  var hasCombinedClassName = false;
-  var classNames = goog.array.toArray(goog.dom.classlist.get(element));
-  goog.array.forEach(classNames, function(className) {
-    if (!hasRendererClassName && className == rendererClassName) {
-      hasRendererClassName = true;
-      if (structuralClassName == rendererClassName) {
-        hasStructuralClassName = true;
-      }
-    } else if (!hasStructuralClassName && className == structuralClassName) {
-      hasStructuralClassName = true;
-    } else {
-      state |= this.getStateFromClass(className);
-    }
-    if (this.getStateFromClass(className) == goog.ui.Component.State.DISABLED) {
-      goog.asserts.assertElement(contentElem);
-      if (goog.dom.isFocusableTabIndex(contentElem)) {
-        goog.dom.setFocusableTabIndex(contentElem, false);
-      }
-    }
-  }, this);
-  control.setStateInternal(state);
-
-  // Make sure the element has the renderer's CSS classes applied, as well as
-  // any extra class names set on the control.
-  if (!hasRendererClassName) {
-    classNames.push(rendererClassName);
-    if (structuralClassName == rendererClassName) {
-      hasStructuralClassName = true;
-    }
-  }
-  if (!hasStructuralClassName) {
-    classNames.push(structuralClassName);
-  }
-  var extraClassNames = control.getExtraClassNames();
-  if (extraClassNames) {
-    classNames.push.apply(classNames, extraClassNames);
-  }
-
-  // For IE6, rewrite all classes on the decorated element if any combined
-  // classes apply.
-  if (goog.userAgent.IE && !goog.userAgent.isVersionOrHigher('7')) {
-    var combinedClasses = this.getAppliedCombinedClassNames_(classNames);
-    if (combinedClasses.length > 0) {
-      classNames.push.apply(classNames, combinedClasses);
-      hasCombinedClassName = true;
-    }
-  }
-
-  // Only write to the DOM if new class names had to be added to the element.
-  if (!hasRendererClassName || !hasStructuralClassName || extraClassNames ||
-      hasCombinedClassName) {
-    goog.dom.classlist.set(element, classNames.join(' '));
-  }
-
-  return element;
-};
-
-
-/**
- * Initializes the control's DOM by configuring properties that can only be set
- * after the DOM has entered the document.  This implementation sets up BiDi
- * and keyboard focus.  Called from {@link goog.ui.Control#enterDocument}.
- * @param {goog.ui.Control} control Control whose DOM is to be initialized
- *     as it enters the document.
- */
-goog.ui.ControlRenderer.prototype.initializeDom = function(control) {
-  // Initialize render direction (BiDi).  We optimize the left-to-right render
-  // direction by assuming that elements are left-to-right by default, and only
-  // updating their styling if they are explicitly set to right-to-left.
-  if (control.isRightToLeft()) {
-    this.setRightToLeft(control.getElement(), true);
-  }
-
-  // Initialize keyboard focusability (tab index).  We assume that components
-  // aren't focusable by default (i.e have no tab index), and only touch the
-  // DOM if the component is focusable, enabled, and visible, and therefore
-  // needs a tab index.
-  if (control.isEnabled()) {
-    this.setFocusable(control, control.isVisible());
+    // Must be typeof givenDir == 'boolean'.
+    return givenDir ? goog.i18n.bidi.Dir.RTL : goog.i18n.bidi.Dir.LTR;
   }
 };
 
 
 /**
- * Sets the element's ARIA role.
- * @param {Element} element Element to update.
- * @param {?goog.a11y.aria.Role=} opt_preferredRole The preferred ARIA role.
- */
-goog.ui.ControlRenderer.prototype.setAriaRole = function(
-    element, opt_preferredRole) {
-  var ariaRole = opt_preferredRole || this.getAriaRole();
-  if (ariaRole) {
-    goog.asserts.assert(
-        element, 'The element passed as a first parameter cannot be null.');
-    var currentRole = goog.a11y.aria.getRole(element);
-    if (ariaRole == currentRole) {
-      return;
-    }
-    goog.a11y.aria.setRole(element, ariaRole);
-  }
-};
-
-
-/**
- * Sets the element's ARIA attributes, including distinguishing between
- * universally supported ARIA properties and ARIA states that are only
- * supported by certain ARIA roles. Only attributes which are initialized to be
- * true will be set.
- * @param {!goog.ui.Control} control Control whose ARIA state will be updated.
- * @param {!Element} element Element whose ARIA state is to be updated.
- */
-goog.ui.ControlRenderer.prototype.setAriaStates = function(control, element) {
-  goog.asserts.assert(control);
-  goog.asserts.assert(element);
-
-  var ariaLabel = control.getAriaLabel();
-  if (goog.isDefAndNotNull(ariaLabel)) {
-    this.setAriaLabel(element, ariaLabel);
-  }
-
-  if (!control.isVisible()) {
-    goog.a11y.aria.setState(
-        element, goog.a11y.aria.State.HIDDEN, !control.isVisible());
-  }
-  if (!control.isEnabled()) {
-    this.updateAriaState(
-        element, goog.ui.Component.State.DISABLED, !control.isEnabled());
-  }
-  if (control.isSupportedState(goog.ui.Component.State.SELECTED)) {
-    this.updateAriaState(
-        element, goog.ui.Component.State.SELECTED, control.isSelected());
-  }
-  if (control.isSupportedState(goog.ui.Component.State.CHECKED)) {
-    this.updateAriaState(
-        element, goog.ui.Component.State.CHECKED, control.isChecked());
-  }
-  if (control.isSupportedState(goog.ui.Component.State.OPENED)) {
-    this.updateAriaState(
-        element, goog.ui.Component.State.OPENED, control.isOpen());
-  }
-};
-
-
-/**
- * Sets the element's ARIA label. This should be overriden by subclasses that
- * don't apply the role directly on control.element_.
- * @param {!Element} element Element whose ARIA label is to be updated.
- * @param {string} ariaLabel Label to add to the element.
- */
-goog.ui.ControlRenderer.prototype.setAriaLabel = function(element, ariaLabel) {
-  goog.a11y.aria.setLabel(element, ariaLabel);
-};
-
-
-/**
- * Allows or disallows text selection within the control's DOM.
- * @param {Element} element The control's root element.
- * @param {boolean} allow Whether the element should allow text selection.
- */
-goog.ui.ControlRenderer.prototype.setAllowTextSelection = function(
-    element, allow) {
-  // On all browsers other than IE and Opera, it isn't necessary to recursively
-  // apply unselectable styling to the element's children.
-  goog.style.setUnselectable(
-      element, !allow, !goog.userAgent.IE && !goog.userAgent.OPERA);
-};
-
-
-/**
- * Applies special styling to/from the control's element if it is rendered
- * right-to-left, and removes it if it is rendered left-to-right.
- * @param {Element} element The control's root element.
- * @param {boolean} rightToLeft Whether the component is rendered
- *     right-to-left.
- */
-goog.ui.ControlRenderer.prototype.setRightToLeft = function(
-    element, rightToLeft) {
-  this.enableClassName(
-      element, goog.getCssName(this.getStructuralCssClass(), 'rtl'),
-      rightToLeft);
-};
-
-
-/**
- * Returns true if the control's key event target supports keyboard focus
- * (based on its {@code tabIndex} attribute), false otherwise.
- * @param {goog.ui.Control} control Control whose key event target is to be
- *     checked.
- * @return {boolean} Whether the control's key event target is focusable.
- */
-goog.ui.ControlRenderer.prototype.isFocusable = function(control) {
-  var keyTarget;
-  if (control.isSupportedState(goog.ui.Component.State.FOCUSED) &&
-      (keyTarget = control.getKeyEventTarget())) {
-    return goog.dom.isFocusableTabIndex(keyTarget);
-  }
-  return false;
-};
-
-
-/**
- * Updates the control's key event target to make it focusable or non-focusable
- * via its {@code tabIndex} attribute.  Does nothing if the control doesn't
- * support the {@code FOCUSED} state, or if it has no key event target.
- * @param {goog.ui.Control} control Control whose key event target is to be
- *     updated.
- * @param {boolean} focusable Whether to enable keyboard focus support on the
- *     control's key event target.
- */
-goog.ui.ControlRenderer.prototype.setFocusable = function(control, focusable) {
-  var keyTarget;
-  if (control.isSupportedState(goog.ui.Component.State.FOCUSED) &&
-      (keyTarget = control.getKeyEventTarget())) {
-    if (!focusable && control.isFocused()) {
-      // Blur before hiding.  Note that IE calls onblur handlers asynchronously.
-      try {
-        keyTarget.blur();
-      } catch (e) {
-        // TODO(user|user):  Find out why this fails on IE.
-      }
-      // The blur event dispatched by the key event target element when blur()
-      // was called on it should have been handled by the control's handleBlur()
-      // method, so at this point the control should no longer be focused.
-      // However, blur events are unreliable on IE and FF3, so if at this point
-      // the control is still focused, we trigger its handleBlur() method
-      // programmatically.
-      if (control.isFocused()) {
-        control.handleBlur(null);
-      }
-    }
-    // Don't overwrite existing tab index values unless needed.
-    if (goog.dom.isFocusableTabIndex(keyTarget) != focusable) {
-      goog.dom.setFocusableTabIndex(keyTarget, focusable);
-    }
-  }
-};
-
-
-/**
- * Shows or hides the element.
- * @param {Element} element Element to update.
- * @param {boolean} visible Whether to show the element.
- */
-goog.ui.ControlRenderer.prototype.setVisible = function(element, visible) {
-  // The base class implementation is trivial; subclasses should override as
-  // needed.  It should be possible to do animated reveals, for example.
-  goog.style.setElementShown(element, visible);
-  if (element) {
-    goog.a11y.aria.setState(element, goog.a11y.aria.State.HIDDEN, !visible);
-  }
-};
-
-
-/**
- * Updates the appearance of the control in response to a state change.
- * @param {goog.ui.Control} control Control instance to update.
- * @param {goog.ui.Component.State} state State to enable or disable.
- * @param {boolean} enable Whether the control is entering or exiting the state.
- */
-goog.ui.ControlRenderer.prototype.setState = function(control, state, enable) {
-  var element = control.getElement();
-  if (element) {
-    var className = this.getClassForState(state);
-    if (className) {
-      this.enableClassName(control, className, enable);
-    }
-    this.updateAriaState(element, state, enable);
-  }
-};
-
-
-/**
- * Updates the element's ARIA (accessibility) attributes , including
- * distinguishing between universally supported ARIA properties and ARIA states
- * that are only supported by certain ARIA roles.
- * @param {Element} element Element whose ARIA state is to be updated.
- * @param {goog.ui.Component.State} state Component state being enabled or
- *     disabled.
- * @param {boolean} enable Whether the state is being enabled or disabled.
- * @protected
- */
-goog.ui.ControlRenderer.prototype.updateAriaState = function(
-    element, state, enable) {
-  // Ensure the ARIA attribute map exists.
-  if (!goog.ui.ControlRenderer.ariaAttributeMap_) {
-    goog.ui.ControlRenderer.ariaAttributeMap_ = goog.object.create(
-        goog.ui.Component.State.DISABLED, goog.a11y.aria.State.DISABLED,
-        goog.ui.Component.State.SELECTED, goog.a11y.aria.State.SELECTED,
-        goog.ui.Component.State.CHECKED, goog.a11y.aria.State.CHECKED,
-        goog.ui.Component.State.OPENED, goog.a11y.aria.State.EXPANDED);
-  }
-  goog.asserts.assert(
-      element, 'The element passed as a first parameter cannot be null.');
-  var ariaAttr = goog.ui.ControlRenderer.getAriaStateForAriaRole_(
-      element, goog.ui.ControlRenderer.ariaAttributeMap_[state]);
-  if (ariaAttr) {
-    goog.a11y.aria.setState(element, ariaAttr, enable);
-  }
-};
-
-
-/**
- * Returns the appropriate ARIA attribute based on ARIA role if the ARIA
- * attribute is an ARIA state.
- * @param {!Element} element The element from which to get the ARIA role for
- * matching ARIA state.
- * @param {goog.a11y.aria.State} attr The ARIA attribute to check to see if it
- * can be applied to the given ARIA role.
- * @return {goog.a11y.aria.State} An ARIA attribute that can be applied to the
- * given ARIA role.
+ * A practical pattern to identify strong LTR characters. This pattern is not
+ * theoretically correct according to the Unicode standard. It is simplified for
+ * performance and small code size.
+ * @type {string}
  * @private
  */
-goog.ui.ControlRenderer.getAriaStateForAriaRole_ = function(element, attr) {
-  var role = goog.a11y.aria.getRole(element);
-  if (!role) {
-    return attr;
-  }
-  role = /** @type {goog.a11y.aria.Role} */ (role);
-  var matchAttr = goog.ui.ControlRenderer.TOGGLE_ARIA_STATE_MAP_[role] || attr;
-  return goog.ui.ControlRenderer.isAriaState_(attr) ? matchAttr : attr;
-};
+goog.i18n.bidi.ltrChars_ =
+    'A-Za-z\u00C0-\u00D6\u00D8-\u00F6\u00F8-\u02B8\u0300-\u0590\u0800-\u1FFF' +
+    '\u200E\u2C00-\uFB1C\uFE00-\uFE6F\uFEFD-\uFFFF';
 
 
 /**
- * Determines if the given ARIA attribute is an ARIA property or ARIA state.
- * @param {goog.a11y.aria.State} attr The ARIA attribute to classify.
- * @return {boolean} If the ARIA attribute is an ARIA state.
+ * A practical pattern to identify strong RTL character. This pattern is not
+ * theoretically correct according to the Unicode standard. It is simplified
+ * for performance and small code size.
+ * @type {string}
  * @private
  */
-goog.ui.ControlRenderer.isAriaState_ = function(attr) {
-  return attr == goog.a11y.aria.State.CHECKED ||
-      attr == goog.a11y.aria.State.SELECTED;
+goog.i18n.bidi.rtlChars_ =
+    '\u0591-\u06EF\u06FA-\u07FF\u200F\uFB1D-\uFDFF\uFE70-\uFEFC';
+
+
+/**
+ * Simplified regular expression for an HTML tag (opening or closing) or an HTML
+ * escape. We might want to skip over such expressions when estimating the text
+ * directionality.
+ * @type {RegExp}
+ * @private
+ */
+goog.i18n.bidi.htmlSkipReg_ = /<[^>]*>|&[^;]+;/g;
+
+
+/**
+ * Returns the input text with spaces instead of HTML tags or HTML escapes, if
+ * opt_isStripNeeded is true. Else returns the input as is.
+ * Useful for text directionality estimation.
+ * Note: the function should not be used in other contexts; it is not 100%
+ * correct, but rather a good-enough implementation for directionality
+ * estimation purposes.
+ * @param {string} str The given string.
+ * @param {boolean=} opt_isStripNeeded Whether to perform the stripping.
+ *     Default: false (to retain consistency with calling functions).
+ * @return {string} The given string cleaned of HTML tags / escapes.
+ * @private
+ */
+goog.i18n.bidi.stripHtmlIfNeeded_ = function(str, opt_isStripNeeded) {
+  return opt_isStripNeeded ? str.replace(goog.i18n.bidi.htmlSkipReg_, '') : str;
 };
 
 
 /**
- * Takes a control's root element, and sets its content to the given text
- * caption or DOM structure.  The default implementation replaces the children
- * of the given element.  Renderers that create more complex DOM structures
- * must override this method accordingly.
- * @param {Element} element The control's root element.
- * @param {goog.ui.ControlContent} content Text caption or DOM structure to be
- *     set as the control's content. The DOM nodes will not be cloned, they
- *     will only moved under the content element of the control.
+ * Regular expression to check for RTL characters.
+ * @type {RegExp}
+ * @private
  */
-goog.ui.ControlRenderer.prototype.setContent = function(element, content) {
-  var contentElem = this.getContentElement(element);
-  if (contentElem) {
-    goog.dom.removeChildren(contentElem);
-    if (content) {
-      if (goog.isString(content)) {
-        goog.dom.setTextContent(contentElem, content);
-      } else {
-        var childHandler = function(child) {
-          if (child) {
-            var doc = goog.dom.getOwnerDocument(contentElem);
-            contentElem.appendChild(
-                goog.isString(child) ? doc.createTextNode(child) : child);
-          }
-        };
-        if (goog.isArray(content)) {
-          // Array of nodes.
-          goog.array.forEach(content, childHandler);
-        } else if (goog.isArrayLike(content) && !('nodeType' in content)) {
-          // NodeList. The second condition filters out TextNode which also has
-          // length attribute but is not array like. The nodes have to be cloned
-          // because childHandler removes them from the list during iteration.
-          goog.array.forEach(
-              goog.array.clone(/** @type {!NodeList} */ (content)),
-              childHandler);
-        } else {
-          // Node or string.
-          childHandler(content);
-        }
-      }
-    }
+goog.i18n.bidi.rtlCharReg_ = new RegExp('[' + goog.i18n.bidi.rtlChars_ + ']');
+
+
+/**
+ * Regular expression to check for LTR characters.
+ * @type {RegExp}
+ * @private
+ */
+goog.i18n.bidi.ltrCharReg_ = new RegExp('[' + goog.i18n.bidi.ltrChars_ + ']');
+
+
+/**
+ * Test whether the given string has any RTL characters in it.
+ * @param {string} str The given string that need to be tested.
+ * @param {boolean=} opt_isHtml Whether str is HTML / HTML-escaped.
+ *     Default: false.
+ * @return {boolean} Whether the string contains RTL characters.
+ */
+goog.i18n.bidi.hasAnyRtl = function(str, opt_isHtml) {
+  return goog.i18n.bidi.rtlCharReg_.test(
+      goog.i18n.bidi.stripHtmlIfNeeded_(str, opt_isHtml));
+};
+
+
+/**
+ * Test whether the given string has any RTL characters in it.
+ * @param {string} str The given string that need to be tested.
+ * @return {boolean} Whether the string contains RTL characters.
+ * @deprecated Use hasAnyRtl.
+ */
+goog.i18n.bidi.hasRtlChar = goog.i18n.bidi.hasAnyRtl;
+
+
+/**
+ * Test whether the given string has any LTR characters in it.
+ * @param {string} str The given string that need to be tested.
+ * @param {boolean=} opt_isHtml Whether str is HTML / HTML-escaped.
+ *     Default: false.
+ * @return {boolean} Whether the string contains LTR characters.
+ */
+goog.i18n.bidi.hasAnyLtr = function(str, opt_isHtml) {
+  return goog.i18n.bidi.ltrCharReg_.test(
+      goog.i18n.bidi.stripHtmlIfNeeded_(str, opt_isHtml));
+};
+
+
+/**
+ * Regular expression pattern to check if the first character in the string
+ * is LTR.
+ * @type {RegExp}
+ * @private
+ */
+goog.i18n.bidi.ltrRe_ = new RegExp('^[' + goog.i18n.bidi.ltrChars_ + ']');
+
+
+/**
+ * Regular expression pattern to check if the first character in the string
+ * is RTL.
+ * @type {RegExp}
+ * @private
+ */
+goog.i18n.bidi.rtlRe_ = new RegExp('^[' + goog.i18n.bidi.rtlChars_ + ']');
+
+
+/**
+ * Check if the first character in the string is RTL or not.
+ * @param {string} str The given string that need to be tested.
+ * @return {boolean} Whether the first character in str is an RTL char.
+ */
+goog.i18n.bidi.isRtlChar = function(str) {
+  return goog.i18n.bidi.rtlRe_.test(str);
+};
+
+
+/**
+ * Check if the first character in the string is LTR or not.
+ * @param {string} str The given string that need to be tested.
+ * @return {boolean} Whether the first character in str is an LTR char.
+ */
+goog.i18n.bidi.isLtrChar = function(str) {
+  return goog.i18n.bidi.ltrRe_.test(str);
+};
+
+
+/**
+ * Check if the first character in the string is neutral or not.
+ * @param {string} str The given string that need to be tested.
+ * @return {boolean} Whether the first character in str is a neutral char.
+ */
+goog.i18n.bidi.isNeutralChar = function(str) {
+  return !goog.i18n.bidi.isLtrChar(str) && !goog.i18n.bidi.isRtlChar(str);
+};
+
+
+/**
+ * Regular expressions to check if a piece of text is of LTR directionality
+ * on first character with strong directionality.
+ * @type {RegExp}
+ * @private
+ */
+goog.i18n.bidi.ltrDirCheckRe_ = new RegExp(
+    '^[^' + goog.i18n.bidi.rtlChars_ + ']*[' + goog.i18n.bidi.ltrChars_ + ']');
+
+
+/**
+ * Regular expressions to check if a piece of text is of RTL directionality
+ * on first character with strong directionality.
+ * @type {RegExp}
+ * @private
+ */
+goog.i18n.bidi.rtlDirCheckRe_ = new RegExp(
+    '^[^' + goog.i18n.bidi.ltrChars_ + ']*[' + goog.i18n.bidi.rtlChars_ + ']');
+
+
+/**
+ * Check whether the first strongly directional character (if any) is RTL.
+ * @param {string} str String being checked.
+ * @param {boolean=} opt_isHtml Whether str is HTML / HTML-escaped.
+ *     Default: false.
+ * @return {boolean} Whether RTL directionality is detected using the first
+ *     strongly-directional character method.
+ */
+goog.i18n.bidi.startsWithRtl = function(str, opt_isHtml) {
+  return goog.i18n.bidi.rtlDirCheckRe_.test(
+      goog.i18n.bidi.stripHtmlIfNeeded_(str, opt_isHtml));
+};
+
+
+/**
+ * Check whether the first strongly directional character (if any) is RTL.
+ * @param {string} str String being checked.
+ * @param {boolean=} opt_isHtml Whether str is HTML / HTML-escaped.
+ *     Default: false.
+ * @return {boolean} Whether RTL directionality is detected using the first
+ *     strongly-directional character method.
+ * @deprecated Use startsWithRtl.
+ */
+goog.i18n.bidi.isRtlText = goog.i18n.bidi.startsWithRtl;
+
+
+/**
+ * Check whether the first strongly directional character (if any) is LTR.
+ * @param {string} str String being checked.
+ * @param {boolean=} opt_isHtml Whether str is HTML / HTML-escaped.
+ *     Default: false.
+ * @return {boolean} Whether LTR directionality is detected using the first
+ *     strongly-directional character method.
+ */
+goog.i18n.bidi.startsWithLtr = function(str, opt_isHtml) {
+  return goog.i18n.bidi.ltrDirCheckRe_.test(
+      goog.i18n.bidi.stripHtmlIfNeeded_(str, opt_isHtml));
+};
+
+
+/**
+ * Check whether the first strongly directional character (if any) is LTR.
+ * @param {string} str String being checked.
+ * @param {boolean=} opt_isHtml Whether str is HTML / HTML-escaped.
+ *     Default: false.
+ * @return {boolean} Whether LTR directionality is detected using the first
+ *     strongly-directional character method.
+ * @deprecated Use startsWithLtr.
+ */
+goog.i18n.bidi.isLtrText = goog.i18n.bidi.startsWithLtr;
+
+
+/**
+ * Regular expression to check if a string looks like something that must
+ * always be LTR even in RTL text, e.g. a URL. When estimating the
+ * directionality of text containing these, we treat these as weakly LTR,
+ * like numbers.
+ * @type {RegExp}
+ * @private
+ */
+goog.i18n.bidi.isRequiredLtrRe_ = /^http:\/\/.*/;
+
+
+/**
+ * Check whether the input string either contains no strongly directional
+ * characters or looks like a url.
+ * @param {string} str String being checked.
+ * @param {boolean=} opt_isHtml Whether str is HTML / HTML-escaped.
+ *     Default: false.
+ * @return {boolean} Whether neutral directionality is detected.
+ */
+goog.i18n.bidi.isNeutralText = function(str, opt_isHtml) {
+  str = goog.i18n.bidi.stripHtmlIfNeeded_(str, opt_isHtml);
+  return goog.i18n.bidi.isRequiredLtrRe_.test(str) ||
+      !goog.i18n.bidi.hasAnyLtr(str) && !goog.i18n.bidi.hasAnyRtl(str);
+};
+
+
+/**
+ * Regular expressions to check if the last strongly-directional character in a
+ * piece of text is LTR.
+ * @type {RegExp}
+ * @private
+ */
+goog.i18n.bidi.ltrExitDirCheckRe_ = new RegExp(
+    '[' + goog.i18n.bidi.ltrChars_ + '][^' + goog.i18n.bidi.rtlChars_ + ']*$');
+
+
+/**
+ * Regular expressions to check if the last strongly-directional character in a
+ * piece of text is RTL.
+ * @type {RegExp}
+ * @private
+ */
+goog.i18n.bidi.rtlExitDirCheckRe_ = new RegExp(
+    '[' + goog.i18n.bidi.rtlChars_ + '][^' + goog.i18n.bidi.ltrChars_ + ']*$');
+
+
+/**
+ * Check if the exit directionality a piece of text is LTR, i.e. if the last
+ * strongly-directional character in the string is LTR.
+ * @param {string} str String being checked.
+ * @param {boolean=} opt_isHtml Whether str is HTML / HTML-escaped.
+ *     Default: false.
+ * @return {boolean} Whether LTR exit directionality was detected.
+ */
+goog.i18n.bidi.endsWithLtr = function(str, opt_isHtml) {
+  return goog.i18n.bidi.ltrExitDirCheckRe_.test(
+      goog.i18n.bidi.stripHtmlIfNeeded_(str, opt_isHtml));
+};
+
+
+/**
+ * Check if the exit directionality a piece of text is LTR, i.e. if the last
+ * strongly-directional character in the string is LTR.
+ * @param {string} str String being checked.
+ * @param {boolean=} opt_isHtml Whether str is HTML / HTML-escaped.
+ *     Default: false.
+ * @return {boolean} Whether LTR exit directionality was detected.
+ * @deprecated Use endsWithLtr.
+ */
+goog.i18n.bidi.isLtrExitText = goog.i18n.bidi.endsWithLtr;
+
+
+/**
+ * Check if the exit directionality a piece of text is RTL, i.e. if the last
+ * strongly-directional character in the string is RTL.
+ * @param {string} str String being checked.
+ * @param {boolean=} opt_isHtml Whether str is HTML / HTML-escaped.
+ *     Default: false.
+ * @return {boolean} Whether RTL exit directionality was detected.
+ */
+goog.i18n.bidi.endsWithRtl = function(str, opt_isHtml) {
+  return goog.i18n.bidi.rtlExitDirCheckRe_.test(
+      goog.i18n.bidi.stripHtmlIfNeeded_(str, opt_isHtml));
+};
+
+
+/**
+ * Check if the exit directionality a piece of text is RTL, i.e. if the last
+ * strongly-directional character in the string is RTL.
+ * @param {string} str String being checked.
+ * @param {boolean=} opt_isHtml Whether str is HTML / HTML-escaped.
+ *     Default: false.
+ * @return {boolean} Whether RTL exit directionality was detected.
+ * @deprecated Use endsWithRtl.
+ */
+goog.i18n.bidi.isRtlExitText = goog.i18n.bidi.endsWithRtl;
+
+
+/**
+ * A regular expression for matching right-to-left language codes.
+ * See {@link #isRtlLanguage} for the design.
+ * @type {RegExp}
+ * @private
+ */
+goog.i18n.bidi.rtlLocalesRe_ = new RegExp(
+    '^(ar|ckb|dv|he|iw|fa|nqo|ps|sd|ug|ur|yi|' +
+        '.*[-_](Arab|Hebr|Thaa|Nkoo|Tfng))' +
+        '(?!.*[-_](Latn|Cyrl)($|-|_))($|-|_)',
+    'i');
+
+
+/**
+ * Check if a BCP 47 / III language code indicates an RTL language, i.e. either:
+ * - a language code explicitly specifying one of the right-to-left scripts,
+ *   e.g. "az-Arab", or<p>
+ * - a language code specifying one of the languages normally written in a
+ *   right-to-left script, e.g. "fa" (Farsi), except ones explicitly specifying
+ *   Latin or Cyrillic script (which are the usual LTR alternatives).<p>
+ * The list of right-to-left scripts appears in the 100-199 range in
+ * http://www.unicode.org/iso15924/iso15924-num.html, of which Arabic and
+ * Hebrew are by far the most widely used. We also recognize Thaana, N'Ko, and
+ * Tifinagh, which also have significant modern usage. The rest (Syriac,
+ * Samaritan, Mandaic, etc.) seem to have extremely limited or no modern usage
+ * and are not recognized to save on code size.
+ * The languages usually written in a right-to-left script are taken as those
+ * with Suppress-Script: Hebr|Arab|Thaa|Nkoo|Tfng  in
+ * http://www.iana.org/assignments/language-subtag-registry,
+ * as well as Central (or Sorani) Kurdish (ckb), Sindhi (sd) and Uyghur (ug).
+ * Other subtags of the language code, e.g. regions like EG (Egypt), are
+ * ignored.
+ * @param {string} lang BCP 47 (a.k.a III) language code.
+ * @return {boolean} Whether the language code is an RTL language.
+ */
+goog.i18n.bidi.isRtlLanguage = function(lang) {
+  return goog.i18n.bidi.rtlLocalesRe_.test(lang);
+};
+
+
+/**
+ * Regular expression for bracket guard replacement in text.
+ * @type {RegExp}
+ * @private
+ */
+goog.i18n.bidi.bracketGuardTextRe_ =
+    /(\(.*?\)+)|(\[.*?\]+)|(\{.*?\}+)|(<.*?>+)/g;
+
+
+/**
+ * Apply bracket guard using LRM and RLM. This is to address the problem of
+ * messy bracket display frequently happens in RTL layout.
+ * This function works for plain text, not for HTML. In HTML, the opening
+ * bracket might be in a different context than the closing bracket (such as
+ * an attribute value).
+ * @param {string} s The string that need to be processed.
+ * @param {boolean=} opt_isRtlContext specifies default direction (usually
+ *     direction of the UI).
+ * @return {string} The processed string, with all bracket guarded.
+ */
+goog.i18n.bidi.guardBracketInText = function(s, opt_isRtlContext) {
+  var useRtl = opt_isRtlContext === undefined ? goog.i18n.bidi.hasAnyRtl(s) :
+                                                opt_isRtlContext;
+  var mark = useRtl ? goog.i18n.bidi.Format.RLM : goog.i18n.bidi.Format.LRM;
+  return s.replace(goog.i18n.bidi.bracketGuardTextRe_, mark + '$&' + mark);
+};
+
+
+/**
+ * Enforce the html snippet in RTL directionality regardless overall context.
+ * If the html piece was enclosed by tag, dir will be applied to existing
+ * tag, otherwise a span tag will be added as wrapper. For this reason, if
+ * html snippet start with with tag, this tag must enclose the whole piece. If
+ * the tag already has a dir specified, this new one will override existing
+ * one in behavior (tested on FF and IE).
+ * @param {string} html The string that need to be processed.
+ * @return {string} The processed string, with directionality enforced to RTL.
+ */
+goog.i18n.bidi.enforceRtlInHtml = function(html) {
+  if (html.charAt(0) == '<') {
+    return html.replace(/<\w+/, '$& dir=rtl');
   }
+  // '\n' is important for FF so that it won't incorrectly merge span groups
+  return '\n<span dir=rtl>' + html + '</span>';
 };
 
 
 /**
- * Returns the element within the component's DOM that should receive keyboard
- * focus (null if none).  The default implementation returns the control's root
- * element.
- * @param {goog.ui.Control} control Control whose key event target is to be
- *     returned.
- * @return {Element} The key event target.
+ * Enforce RTL on both end of the given text piece using unicode BiDi formatting
+ * characters RLE and PDF.
+ * @param {string} text The piece of text that need to be wrapped.
+ * @return {string} The wrapped string after process.
  */
-goog.ui.ControlRenderer.prototype.getKeyEventTarget = function(control) {
-  return control.getElement();
-};
-
-
-// CSS class name management.
-
-
-/**
- * Returns the CSS class name to be applied to the root element of all
- * components rendered or decorated using this renderer.  The class name
- * is expected to uniquely identify the renderer class, i.e. no two
- * renderer classes are expected to share the same CSS class name.
- * @return {string} Renderer-specific CSS class name.
- */
-goog.ui.ControlRenderer.prototype.getCssClass = function() {
-  return goog.ui.ControlRenderer.CSS_CLASS;
+goog.i18n.bidi.enforceRtlInText = function(text) {
+  return goog.i18n.bidi.Format.RLE + text + goog.i18n.bidi.Format.PDF;
 };
 
 
 /**
- * Returns an array of combinations of classes to apply combined class names for
- * in IE6 and below. See {@link IE6_CLASS_COMBINATIONS} for more detail. This
- * method doesn't reference {@link IE6_CLASS_COMBINATIONS} so that it can be
- * compiled out, but subclasses should return their IE6_CLASS_COMBINATIONS
- * static constant instead.
- * @return {Array<Array<string>>} Array of class name combinations.
+ * Enforce the html snippet in RTL directionality regardless overall context.
+ * If the html piece was enclosed by tag, dir will be applied to existing
+ * tag, otherwise a span tag will be added as wrapper. For this reason, if
+ * html snippet start with with tag, this tag must enclose the whole piece. If
+ * the tag already has a dir specified, this new one will override existing
+ * one in behavior (tested on FF and IE).
+ * @param {string} html The string that need to be processed.
+ * @return {string} The processed string, with directionality enforced to RTL.
  */
-goog.ui.ControlRenderer.prototype.getIe6ClassCombinations = function() {
-  return [];
-};
-
-
-/**
- * Returns the name of a DOM structure-specific CSS class to be applied to the
- * root element of all components rendered or decorated using this renderer.
- * Unlike the class name returned by {@link #getCssClass}, the structural class
- * name may be shared among different renderers that generate similar DOM
- * structures.  The structural class name also serves as the basis of derived
- * class names used to identify and style structural elements of the control's
- * DOM, as well as the basis for state-specific class names.  The default
- * implementation returns the same class name as {@link #getCssClass}, but
- * subclasses are expected to override this method as needed.
- * @return {string} DOM structure-specific CSS class name (same as the renderer-
- *     specific CSS class name by default).
- */
-goog.ui.ControlRenderer.prototype.getStructuralCssClass = function() {
-  return this.getCssClass();
-};
-
-
-/**
- * Returns all CSS class names applicable to the given control, based on its
- * state.  The return value is an array of strings containing
- * <ol>
- *   <li>the renderer-specific CSS class returned by {@link #getCssClass},
- *       followed by
- *   <li>the structural CSS class returned by {@link getStructuralCssClass} (if
- *       different from the renderer-specific CSS class), followed by
- *   <li>any state-specific classes returned by {@link #getClassNamesForState},
- *       followed by
- *   <li>any extra classes returned by the control's {@code getExtraClassNames}
- *       method and
- *   <li>for IE6 and lower, additional combined classes from
- *       {@link getAppliedCombinedClassNames_}.
- * </ol>
- * Since all controls have at least one renderer-specific CSS class name, this
- * method is guaranteed to return an array of at least one element.
- * @param {goog.ui.Control} control Control whose CSS classes are to be
- *     returned.
- * @return {!Array<string>} Array of CSS class names applicable to the control.
- * @protected
- */
-goog.ui.ControlRenderer.prototype.getClassNames = function(control) {
-  var cssClass = this.getCssClass();
-
-  // Start with the renderer-specific class name.
-  var classNames = [cssClass];
-
-  // Add structural class name, if different.
-  var structuralCssClass = this.getStructuralCssClass();
-  if (structuralCssClass != cssClass) {
-    classNames.push(structuralCssClass);
+goog.i18n.bidi.enforceLtrInHtml = function(html) {
+  if (html.charAt(0) == '<') {
+    return html.replace(/<\w+/, '$& dir=ltr');
   }
-
-  // Add state-specific class names, if any.
-  var classNamesForState = this.getClassNamesForState(control.getState());
-  classNames.push.apply(classNames, classNamesForState);
-
-  // Add extra class names, if any.
-  var extraClassNames = control.getExtraClassNames();
-  if (extraClassNames) {
-    classNames.push.apply(classNames, extraClassNames);
-  }
-
-  // Add composite classes for IE6 support
-  if (goog.userAgent.IE && !goog.userAgent.isVersionOrHigher('7')) {
-    classNames.push.apply(
-        classNames, this.getAppliedCombinedClassNames_(classNames));
-  }
-
-  return classNames;
+  // '\n' is important for FF so that it won't incorrectly merge span groups
+  return '\n<span dir=ltr>' + html + '</span>';
 };
 
 
 /**
- * Returns an array of all the combined class names that should be applied based
- * on the given list of classes. Checks the result of
- * {@link getIe6ClassCombinations} for any combinations that have all
- * members contained in classes. If a combination matches, the members are
- * joined with an underscore (in order), and added to the return array.
+ * Enforce LTR on both end of the given text piece using unicode BiDi formatting
+ * characters LRE and PDF.
+ * @param {string} text The piece of text that need to be wrapped.
+ * @return {string} The wrapped string after process.
+ */
+goog.i18n.bidi.enforceLtrInText = function(text) {
+  return goog.i18n.bidi.Format.LRE + text + goog.i18n.bidi.Format.PDF;
+};
+
+
+/**
+ * Regular expression to find dimensions such as "padding: .3 0.4ex 5px 6;"
+ * @type {RegExp}
+ * @private
+ */
+goog.i18n.bidi.dimensionsRe_ =
+    /:\s*([.\d][.\w]*)\s+([.\d][.\w]*)\s+([.\d][.\w]*)\s+([.\d][.\w]*)/g;
+
+
+/**
+ * Regular expression for left.
+ * @type {RegExp}
+ * @private
+ */
+goog.i18n.bidi.leftRe_ = /left/gi;
+
+
+/**
+ * Regular expression for right.
+ * @type {RegExp}
+ * @private
+ */
+goog.i18n.bidi.rightRe_ = /right/gi;
+
+
+/**
+ * Placeholder regular expression for swapping.
+ * @type {RegExp}
+ * @private
+ */
+goog.i18n.bidi.tempRe_ = /%%%%/g;
+
+
+/**
+ * Swap location parameters and 'left'/'right' in CSS specification. The
+ * processed string will be suited for RTL layout. Though this function can
+ * cover most cases, there are always exceptions. It is suggested to put
+ * those exceptions in separate group of CSS string.
+ * @param {string} cssStr CSS spefication string.
+ * @return {string} Processed CSS specification string.
+ */
+goog.i18n.bidi.mirrorCSS = function(cssStr) {
+  return cssStr
+      .
+      // reverse dimensions
+      replace(goog.i18n.bidi.dimensionsRe_, ':$1 $4 $3 $2')
+      .replace(goog.i18n.bidi.leftRe_, '%%%%')
+      .  // swap left and right
+      replace(goog.i18n.bidi.rightRe_, goog.i18n.bidi.LEFT)
+      .replace(goog.i18n.bidi.tempRe_, goog.i18n.bidi.RIGHT);
+};
+
+
+/**
+ * Regular expression for hebrew double quote substitution, finding quote
+ * directly after hebrew characters.
+ * @type {RegExp}
+ * @private
+ */
+goog.i18n.bidi.doubleQuoteSubstituteRe_ = /([\u0591-\u05f2])"/g;
+
+
+/**
+ * Regular expression for hebrew single quote substitution, finding quote
+ * directly after hebrew characters.
+ * @type {RegExp}
+ * @private
+ */
+goog.i18n.bidi.singleQuoteSubstituteRe_ = /([\u0591-\u05f2])'/g;
+
+
+/**
+ * Replace the double and single quote directly after a Hebrew character with
+ * GERESH and GERSHAYIM. In such case, most likely that's user intention.
+ * @param {string} str String that need to be processed.
+ * @return {string} Processed string with double/single quote replaced.
+ */
+goog.i18n.bidi.normalizeHebrewQuote = function(str) {
+  return str.replace(goog.i18n.bidi.doubleQuoteSubstituteRe_, '$1\u05f4')
+      .replace(goog.i18n.bidi.singleQuoteSubstituteRe_, '$1\u05f3');
+};
+
+
+/**
+ * Regular expression to split a string into "words" for directionality
+ * estimation based on relative word counts.
+ * @type {RegExp}
+ * @private
+ */
+goog.i18n.bidi.wordSeparatorRe_ = /\s+/;
+
+
+/**
+ * Regular expression to check if a string contains any numerals. Used to
+ * differentiate between completely neutral strings and those containing
+ * numbers, which are weakly LTR.
  *
- * If opt_includedClass is provided, return only the combined classes that have
- * all members contained in classes AND include opt_includedClass as well.
- * opt_includedClass is added to classes as well.
- * @param {goog.array.ArrayLike<string>} classes Array-like thing of classes to
- *     return matching combined classes for.
- * @param {?string=} opt_includedClass If provided, get only the combined
- *     classes that include this one.
- * @return {!Array<string>} Array of combined class names that should be
- *     applied.
+ * Native Arabic digits (\u0660 - \u0669) are not included because although they
+ * do flow left-to-right inside a number, this is the case even if the  overall
+ * directionality is RTL, and a mathematical expression using these digits is
+ * supposed to flow right-to-left overall, including unary plus and minus
+ * appearing to the right of a number, and this does depend on the overall
+ * directionality being RTL. The digits used in Farsi (\u06F0 - \u06F9), on the
+ * other hand, are included, since Farsi math (including unary plus and minus)
+ * does flow left-to-right.
+ *
+ * @type {RegExp}
  * @private
  */
-goog.ui.ControlRenderer.prototype.getAppliedCombinedClassNames_ = function(
-    classes, opt_includedClass) {
-  var toAdd = [];
-  if (opt_includedClass) {
-    classes = goog.array.concat(classes, [opt_includedClass]);
-  }
-  goog.array.forEach(this.getIe6ClassCombinations(), function(combo) {
-    if (goog.array.every(combo, goog.partial(goog.array.contains, classes)) &&
-        (!opt_includedClass || goog.array.contains(combo, opt_includedClass))) {
-      toAdd.push(combo.join('_'));
+goog.i18n.bidi.hasNumeralsRe_ = /[\d\u06f0-\u06f9]/;
+
+
+/**
+ * This constant controls threshold of RTL directionality.
+ * @type {number}
+ * @private
+ */
+goog.i18n.bidi.rtlDetectionThreshold_ = 0.40;
+
+
+/**
+ * Estimates the directionality of a string based on relative word counts.
+ * If the number of RTL words is above a certain percentage of the total number
+ * of strongly directional words, returns RTL.
+ * Otherwise, if any words are strongly or weakly LTR, returns LTR.
+ * Otherwise, returns UNKNOWN, which is used to mean "neutral".
+ * Numbers are counted as weakly LTR.
+ * @param {string} str The string to be checked.
+ * @param {boolean=} opt_isHtml Whether str is HTML / HTML-escaped.
+ *     Default: false.
+ * @return {goog.i18n.bidi.Dir} Estimated overall directionality of {@code str}.
+ */
+goog.i18n.bidi.estimateDirection = function(str, opt_isHtml) {
+  var rtlCount = 0;
+  var totalCount = 0;
+  var hasWeaklyLtr = false;
+  var tokens = goog.i18n.bidi.stripHtmlIfNeeded_(str, opt_isHtml)
+                   .split(goog.i18n.bidi.wordSeparatorRe_);
+  for (var i = 0; i < tokens.length; i++) {
+    var token = tokens[i];
+    if (goog.i18n.bidi.startsWithRtl(token)) {
+      rtlCount++;
+      totalCount++;
+    } else if (goog.i18n.bidi.isRequiredLtrRe_.test(token)) {
+      hasWeaklyLtr = true;
+    } else if (goog.i18n.bidi.hasAnyLtr(token)) {
+      totalCount++;
+    } else if (goog.i18n.bidi.hasNumeralsRe_.test(token)) {
+      hasWeaklyLtr = true;
     }
-  });
-  return toAdd;
-};
-
-
-/**
- * Takes a bit mask of {@link goog.ui.Component.State}s, and returns an array
- * of the appropriate class names representing the given state, suitable to be
- * applied to the root element of a component rendered using this renderer, or
- * null if no state-specific classes need to be applied.  This default
- * implementation uses the renderer's {@link getClassForState} method to
- * generate each state-specific class.
- * @param {number} state Bit mask of component states.
- * @return {!Array<string>} Array of CSS class names representing the given
- *     state.
- * @protected
- */
-goog.ui.ControlRenderer.prototype.getClassNamesForState = function(state) {
-  var classNames = [];
-  while (state) {
-    // For each enabled state, push the corresponding CSS class name onto
-    // the classNames array.
-    var mask = state & -state;  // Least significant bit
-    classNames.push(
-        this.getClassForState(
-            /** @type {goog.ui.Component.State} */ (mask)));
-    state &= ~mask;
-  }
-  return classNames;
-};
-
-
-/**
- * Takes a single {@link goog.ui.Component.State}, and returns the
- * corresponding CSS class name (null if none).
- * @param {goog.ui.Component.State} state Component state.
- * @return {string|undefined} CSS class representing the given state (undefined
- *     if none).
- * @protected
- */
-goog.ui.ControlRenderer.prototype.getClassForState = function(state) {
-  if (!this.classByState_) {
-    this.createClassByStateMap_();
-  }
-  return this.classByState_[state];
-};
-
-
-/**
- * Takes a single CSS class name which may represent a component state, and
- * returns the corresponding component state (0x00 if none).
- * @param {string} className CSS class name, possibly representing a component
- *     state.
- * @return {goog.ui.Component.State} state Component state corresponding
- *     to the given CSS class (0x00 if none).
- * @protected
- */
-goog.ui.ControlRenderer.prototype.getStateFromClass = function(className) {
-  if (!this.stateByClass_) {
-    this.createStateByClassMap_();
-  }
-  var state = parseInt(this.stateByClass_[className], 10);
-  return /** @type {goog.ui.Component.State} */ (isNaN(state) ? 0x00 : state);
-};
-
-
-/**
- * Creates the lookup table of states to classes, used during state changes.
- * @private
- */
-goog.ui.ControlRenderer.prototype.createClassByStateMap_ = function() {
-  var baseClass = this.getStructuralCssClass();
-
-  // This ensures space-separated css classnames are not allowed, which some
-  // ControlRenderers had been doing.  See http://b/13694665.
-  var isValidClassName =
-      !goog.string.contains(goog.string.normalizeWhitespace(baseClass), ' ');
-  goog.asserts.assert(
-      isValidClassName,
-      'ControlRenderer has an invalid css class: \'' + baseClass + '\'');
-
-  /**
-   * Map of component states to state-specific structural class names,
-   * used when changing the DOM in response to a state change.  Precomputed
-   * and cached on first use to minimize object allocations and string
-   * concatenation.
-   * @type {Object}
-   * @private
-   */
-  this.classByState_ = goog.object.create(
-      goog.ui.Component.State.DISABLED, goog.getCssName(baseClass, 'disabled'),
-      goog.ui.Component.State.HOVER, goog.getCssName(baseClass, 'hover'),
-      goog.ui.Component.State.ACTIVE, goog.getCssName(baseClass, 'active'),
-      goog.ui.Component.State.SELECTED, goog.getCssName(baseClass, 'selected'),
-      goog.ui.Component.State.CHECKED, goog.getCssName(baseClass, 'checked'),
-      goog.ui.Component.State.FOCUSED, goog.getCssName(baseClass, 'focused'),
-      goog.ui.Component.State.OPENED, goog.getCssName(baseClass, 'open'));
-};
-
-
-/**
- * Creates the lookup table of classes to states, used during decoration.
- * @private
- */
-goog.ui.ControlRenderer.prototype.createStateByClassMap_ = function() {
-  // We need the classByState_ map so we can transpose it.
-  if (!this.classByState_) {
-    this.createClassByStateMap_();
   }
 
-  /**
-   * Map of state-specific structural class names to component states,
-   * used during element decoration.  Precomputed and cached on first use
-   * to minimize object allocations and string concatenation.
-   * @type {Object}
-   * @private
-   */
-  this.stateByClass_ = goog.object.transpose(this.classByState_);
+  return totalCount == 0 ?
+      (hasWeaklyLtr ? goog.i18n.bidi.Dir.LTR : goog.i18n.bidi.Dir.NEUTRAL) :
+      (rtlCount / totalCount > goog.i18n.bidi.rtlDetectionThreshold_ ?
+           goog.i18n.bidi.Dir.RTL :
+           goog.i18n.bidi.Dir.LTR);
 };
+
+
+/**
+ * Check the directionality of a piece of text, return true if the piece of
+ * text should be laid out in RTL direction.
+ * @param {string} str The piece of text that need to be detected.
+ * @param {boolean=} opt_isHtml Whether str is HTML / HTML-escaped.
+ *     Default: false.
+ * @return {boolean} Whether this piece of text should be laid out in RTL.
+ */
+goog.i18n.bidi.detectRtlDirectionality = function(str, opt_isHtml) {
+  return goog.i18n.bidi.estimateDirection(str, opt_isHtml) ==
+      goog.i18n.bidi.Dir.RTL;
+};
+
+
+/**
+ * Sets text input element's directionality and text alignment based on a
+ * given directionality. Does nothing if the given directionality is unknown or
+ * neutral.
+ * @param {Element} element Input field element to set directionality to.
+ * @param {goog.i18n.bidi.Dir|number|boolean|null} dir Desired directionality,
+ *     given in one of the following formats:
+ *     1. A goog.i18n.bidi.Dir constant.
+ *     2. A number (positive = LRT, negative = RTL, 0 = neutral).
+ *     3. A boolean (true = RTL, false = LTR).
+ *     4. A null for unknown directionality.
+ */
+goog.i18n.bidi.setElementDirAndAlign = function(element, dir) {
+  if (element) {
+    dir = goog.i18n.bidi.toDir(dir);
+    if (dir) {
+      element.style.textAlign = dir == goog.i18n.bidi.Dir.RTL ?
+          goog.i18n.bidi.RIGHT :
+          goog.i18n.bidi.LEFT;
+      element.dir = dir == goog.i18n.bidi.Dir.RTL ? 'rtl' : 'ltr';
+    }
+  }
+};
+
+
+/**
+ * Sets element dir based on estimated directionality of the given text.
+ * @param {!Element} element
+ * @param {string} text
+ */
+goog.i18n.bidi.setElementDirByTextDirectionality = function(element, text) {
+  switch (goog.i18n.bidi.estimateDirection(text)) {
+    case (goog.i18n.bidi.Dir.LTR):
+      element.dir = 'ltr';
+      break;
+    case (goog.i18n.bidi.Dir.RTL):
+      element.dir = 'rtl';
+      break;
+    default:
+      // Default for no direction, inherit from document.
+      element.removeAttribute('dir');
+  }
+};
+
+
+
+/**
+ * Strings that have an (optional) known direction.
+ *
+ * Implementations of this interface are string-like objects that carry an
+ * attached direction, if known.
+ * @interface
+ */
+goog.i18n.bidi.DirectionalString = function() {};
+
+
+/**
+ * Interface marker of the DirectionalString interface.
+ *
+ * This property can be used to determine at runtime whether or not an object
+ * implements this interface.  All implementations of this interface set this
+ * property to {@code true}.
+ * @type {boolean}
+ */
+goog.i18n.bidi.DirectionalString.prototype
+    .implementsGoogI18nBidiDirectionalString;
+
+
+/**
+ * Retrieves this object's known direction (if any).
+ * @return {?goog.i18n.bidi.Dir} The known direction. Null if unknown.
+ */
+goog.i18n.bidi.DirectionalString.prototype.getDirection;

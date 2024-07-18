@@ -1,881 +1,954 @@
-// Copyright 2006 The Closure Library Authors. All Rights Reserved.
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//      http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS-IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-
 /**
- * @fileoverview Functions for dealing with date/time formatting.
- */
-
-
-/**
- * Namespace for i18n date/time formatting functions
- */
-goog.provide('goog.i18n.DateTimeFormat');
-goog.provide('goog.i18n.DateTimeFormat.Format');
-
-goog.require('goog.asserts');
-goog.require('goog.date');
-goog.require('goog.i18n.DateTimeSymbols');
-goog.require('goog.i18n.TimeZone');
-goog.require('goog.string');
-
-
-/**
- * Datetime formatting functions following the pattern specification as defined
- * in JDK, ICU and CLDR, with minor modification for typical usage in JS.
- * Pattern specification:
- * {@link http://userguide.icu-project.org/formatparse/datetime}
- * <pre>
- * Symbol   Meaning                    Presentation       Example
- * ------   -------                    ------------       -------
- * G#       era designator             (Text)             AD
- * y#       year                       (Number)           1996
- * Y*       year (week of year)        (Number)           1997
- * u*       extended year              (Number)           4601
- * Q#       quarter                    (Text)             Q3 & 3rd quarter
- * M        month in year              (Text & Number)    July & 07
- * L        month in year (standalone) (Text & Number)    July & 07
- * d        day in month               (Number)           10
- * h        hour in am/pm (1~12)       (Number)           12
- * H        hour in day (0~23)         (Number)           0
- * m        minute in hour             (Number)           30
- * s        second in minute           (Number)           55
- * S        fractional second          (Number)           978
- * E#       day of week                (Text)             Tue & Tuesday
- * e*       day of week (local 1~7)    (Number)           2
- * c#       day of week (standalone)   (Text & Number)    2 & Tues & Tuesday & T
- * D*       day in year                (Number)           189
- * F*       day of week in month       (Number)           2 (2nd Wed in July)
- * w        week in year               (Number)           27
- * W*       week in month              (Number)           2
- * a        am/pm marker               (Text)             PM
- * k        hour in day (1~24)         (Number)           24
- * K        hour in am/pm (0~11)       (Number)           0
- * z        time zone                  (Text)             Pacific Standard Time
- * Z#       time zone (RFC 822)        (Number)           -0800
- * v#       time zone (generic)        (Text)             America/Los_Angeles
- * V#       time zone                  (Text)             Los Angeles Time
- * g*       Julian day                 (Number)           2451334
- * A*       milliseconds in day        (Number)           69540000
- * '        escape for text            (Delimiter)        'Date='
- * ''       single quote               (Literal)          'o''clock'
+ * @license
+ * Visual Blocks Editor
  *
- * Item marked with '*' are not supported yet.
- * Item marked with '#' works different than java
+ * Copyright 2016 Google Inc.
+ * https://developers.google.com/blockly/
  *
- * The count of pattern letters determine the format.
- * (Text): 4 or more, use full form, <4, use short or abbreviated form if it
- * exists. (e.g., "EEEE" produces "Monday", "EEE" produces "Mon")
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
  *
- * (Number): the minimum number of digits. Shorter numbers are zero-padded to
- * this amount (e.g. if "m" produces "6", "mm" produces "06"). Year is handled
- * specially; that is, if the count of 'y' is 2, the Year will be truncated to
- * 2 digits. (e.g., if "yyyy" produces "1997", "yy" produces "97".) Unlike other
- * fields, fractional seconds are padded on the right with zero.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * :(Text & Number) 3 or over, use text, otherwise use number. (e.g., "M"
- * produces "1", "MM" produces "01", "MMM" produces "Jan", and "MMMM" produces
- * "January".)
- *
- * Any characters in the pattern that are not in the ranges of ['a'..'z'] and
- * ['A'..'Z'] will be treated as quoted text. For instance, characters like ':',
- * '.', ' ', '#' and '@' will appear in the resulting time text even they are
- * not embraced within single quotes.
- * </pre>
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
  */
 
 /**
- * Construct a DateTimeFormat object based on current locale.
- * @constructor
- * @param {string|number} pattern pattern specification or pattern type.
- * @param {!Object=} opt_dateTimeSymbols Optional symbols to use for this
- *     instance rather than the global symbols.
- * @final
+ * @fileoverview Methods for graphically rendering a block as SVG.
+ * @author fenichel@google.com (Rachel Fenichel)
  */
-goog.i18n.DateTimeFormat = function(pattern, opt_dateTimeSymbols) {
-  goog.asserts.assert(goog.isDef(pattern), 'Pattern must be defined');
-  goog.asserts.assert(
-      goog.isDef(opt_dateTimeSymbols) || goog.isDef(goog.i18n.DateTimeSymbols),
-      'goog.i18n.DateTimeSymbols or explicit symbols must be defined');
 
-  this.patternParts_ = [];
+'use strict';
 
-  /**
-   * Data structure that with all the locale info needed for date formatting.
-   * (day/month names, most common patterns, rules for week-end, etc.)
-   * @private {!goog.i18n.DateTimeSymbolsType}
-   */
-  this.dateTimeSymbols_ = /** @type {!goog.i18n.DateTimeSymbolsType} */ (
-      opt_dateTimeSymbols || goog.i18n.DateTimeSymbols);
-  if (typeof pattern == 'number') {
-    this.applyStandardPattern_(pattern);
-  } else {
-    this.applyPattern_(pattern);
+goog.provide('Blockly.BlockSvg.render');
+
+goog.require('Blockly.BlockSvg');
+
+
+// UI constants for rendering blocks.
+/**
+ * Horizontal space between elements.
+ * @const
+ */
+Blockly.BlockSvg.SEP_SPACE_X = 10;
+/**
+ * Vertical space between elements.
+ * @const
+ */
+Blockly.BlockSvg.SEP_SPACE_Y = 10;
+/**
+ * Vertical padding around inline elements.
+ * @const
+ */
+Blockly.BlockSvg.INLINE_PADDING_Y = 5;
+/**
+ * Minimum height of a block.
+ * @const
+ */
+Blockly.BlockSvg.MIN_BLOCK_Y = 25;
+/**
+ * Height of horizontal puzzle tab.
+ * @const
+ */
+Blockly.BlockSvg.TAB_HEIGHT = 20;
+/**
+ * Width of horizontal puzzle tab.
+ * @const
+ */
+Blockly.BlockSvg.TAB_WIDTH = 8;
+/**
+ * Width of vertical tab (inc left margin).
+ * @const
+ */
+Blockly.BlockSvg.NOTCH_WIDTH = 30;
+/**
+ * Rounded corner radius.
+ * @const
+ */
+Blockly.BlockSvg.CORNER_RADIUS = 8;
+/**
+ * Do blocks with no previous or output connections have a 'hat' on top?
+ * @const
+ */
+Blockly.BlockSvg.START_HAT = false;
+/**
+ * Height of the top hat.
+ * @const
+ */
+Blockly.BlockSvg.START_HAT_HEIGHT = 15;
+/**
+ * Path of the top hat's curve.
+ * @const
+ */
+Blockly.BlockSvg.START_HAT_PATH = 'c 30,-' +
+    Blockly.BlockSvg.START_HAT_HEIGHT + ' 70,-' +
+    Blockly.BlockSvg.START_HAT_HEIGHT + ' 100,0';
+/**
+ * Path of the top hat's curve's highlight in LTR.
+ * @const
+ */
+Blockly.BlockSvg.START_HAT_HIGHLIGHT_LTR =
+    'c 17.8,-9.2 45.3,-14.9 75,-8.7 M 100.5,0.5';
+/**
+ * Path of the top hat's curve's highlight in RTL.
+ * @const
+ */
+Blockly.BlockSvg.START_HAT_HIGHLIGHT_RTL =
+    'm 25,-8.7 c 29.7,-6.2 57.2,-0.5 75,8.7';
+/**
+ * Distance from shape edge to intersect with a curved corner at 45 degrees.
+ * Applies to highlighting on around the inside of a curve.
+ * @const
+ */
+Blockly.BlockSvg.DISTANCE_45_INSIDE = (1 - Math.SQRT1_2) *
+    (Blockly.BlockSvg.CORNER_RADIUS - 0.5) + 0.5;
+/**
+ * Distance from shape edge to intersect with a curved corner at 45 degrees.
+ * Applies to highlighting on around the outside of a curve.
+ * @const
+ */
+Blockly.BlockSvg.DISTANCE_45_OUTSIDE = (1 - Math.SQRT1_2) *
+    (Blockly.BlockSvg.CORNER_RADIUS + 0.5) - 0.5;
+/**
+ * SVG path for drawing next/previous notch from left to right.
+ * @const
+ */
+Blockly.BlockSvg.NOTCH_PATH_LEFT = 'l 6,4 3,0 6,-4';
+/**
+ * SVG path for drawing next/previous notch from left to right with
+ * highlighting.
+ * @const
+ */
+Blockly.BlockSvg.NOTCH_PATH_LEFT_HIGHLIGHT = 'l 6,4 3,0 6,-4';
+/**
+ * SVG path for drawing next/previous notch from right to left.
+ * @const
+ */
+Blockly.BlockSvg.NOTCH_PATH_RIGHT = 'l -6,4 -3,0 -6,-4';
+/**
+ * SVG path for drawing jagged teeth at the end of collapsed blocks.
+ * @const
+ */
+Blockly.BlockSvg.JAGGED_TEETH = 'l 8,0 0,4 8,4 -16,8 8,4';
+/**
+ * Height of SVG path for jagged teeth at the end of collapsed blocks.
+ * @const
+ */
+Blockly.BlockSvg.JAGGED_TEETH_HEIGHT = 20;
+/**
+ * Width of SVG path for jagged teeth at the end of collapsed blocks.
+ * @const
+ */
+Blockly.BlockSvg.JAGGED_TEETH_WIDTH = 15;
+/**
+ * SVG path for drawing a horizontal puzzle tab from top to bottom.
+ * @const
+ */
+Blockly.BlockSvg.TAB_PATH_DOWN = 'v 5 c 0,10 -' + Blockly.BlockSvg.TAB_WIDTH +
+    ',-8 -' + Blockly.BlockSvg.TAB_WIDTH + ',7.5 s ' +
+    Blockly.BlockSvg.TAB_WIDTH + ',-2.5 ' + Blockly.BlockSvg.TAB_WIDTH + ',7.5';
+/**
+ * SVG path for drawing a horizontal puzzle tab from top to bottom with
+ * highlighting from the upper-right.
+ * @const
+ */
+Blockly.BlockSvg.TAB_PATH_DOWN_HIGHLIGHT_RTL = 'v 6.5 m -' +
+    (Blockly.BlockSvg.TAB_WIDTH * 0.97) + ',3 q -' +
+    (Blockly.BlockSvg.TAB_WIDTH * 0.05) + ',10 ' +
+    (Blockly.BlockSvg.TAB_WIDTH * 0.3) + ',9.5 m ' +
+    (Blockly.BlockSvg.TAB_WIDTH * 0.67) + ',-1.9 v 1.4';
+
+/**
+ * SVG start point for drawing the top-left corner.
+ * @const
+ */
+Blockly.BlockSvg.TOP_LEFT_CORNER_START =
+    'm 0,' + Blockly.BlockSvg.CORNER_RADIUS;
+/**
+ * SVG start point for drawing the top-left corner's highlight in RTL.
+ * @const
+ */
+Blockly.BlockSvg.TOP_LEFT_CORNER_START_HIGHLIGHT_RTL =
+    'm ' + Blockly.BlockSvg.DISTANCE_45_INSIDE + ',' +
+    Blockly.BlockSvg.DISTANCE_45_INSIDE;
+/**
+ * SVG start point for drawing the top-left corner's highlight in LTR.
+ * @const
+ */
+Blockly.BlockSvg.TOP_LEFT_CORNER_START_HIGHLIGHT_LTR =
+    'm 0.5,' + (Blockly.BlockSvg.CORNER_RADIUS - 0.5);
+/**
+ * SVG path for drawing the rounded top-left corner.
+ * @const
+ */
+Blockly.BlockSvg.TOP_LEFT_CORNER =
+    'A ' + Blockly.BlockSvg.CORNER_RADIUS + ',' +
+    Blockly.BlockSvg.CORNER_RADIUS + ' 0 0,1 ' +
+    Blockly.BlockSvg.CORNER_RADIUS + ',0';
+/**
+ * SVG path for drawing the highlight on the rounded top-left corner.
+ * @const
+ */
+Blockly.BlockSvg.TOP_LEFT_CORNER_HIGHLIGHT =
+    'A ' + (Blockly.BlockSvg.CORNER_RADIUS - 0.5) + ',' +
+    (Blockly.BlockSvg.CORNER_RADIUS - 0.5) + ' 0 0,1 ' +
+    Blockly.BlockSvg.CORNER_RADIUS + ',0.5';
+/**
+ * SVG path for drawing the top-left corner of a statement input.
+ * Includes the top notch, a horizontal space, and the rounded inside corner.
+ * @const
+ */
+Blockly.BlockSvg.INNER_TOP_LEFT_CORNER =
+    Blockly.BlockSvg.NOTCH_PATH_RIGHT + ' h -' +
+    (Blockly.BlockSvg.NOTCH_WIDTH - 15 - Blockly.BlockSvg.CORNER_RADIUS) +
+    ' a ' + Blockly.BlockSvg.CORNER_RADIUS + ',' +
+    Blockly.BlockSvg.CORNER_RADIUS + ' 0 0,0 -' +
+    Blockly.BlockSvg.CORNER_RADIUS + ',' +
+    Blockly.BlockSvg.CORNER_RADIUS;
+/**
+ * SVG path for drawing the bottom-left corner of a statement input.
+ * Includes the rounded inside corner.
+ * @const
+ */
+Blockly.BlockSvg.INNER_BOTTOM_LEFT_CORNER =
+    'a ' + Blockly.BlockSvg.CORNER_RADIUS + ',' +
+    Blockly.BlockSvg.CORNER_RADIUS + ' 0 0,0 ' +
+    Blockly.BlockSvg.CORNER_RADIUS + ',' +
+    Blockly.BlockSvg.CORNER_RADIUS;
+/**
+ * SVG path for drawing highlight on the top-left corner of a statement
+ * input in RTL.
+ * @const
+ */
+Blockly.BlockSvg.INNER_TOP_LEFT_CORNER_HIGHLIGHT_RTL =
+    'a ' + Blockly.BlockSvg.CORNER_RADIUS + ',' +
+    Blockly.BlockSvg.CORNER_RADIUS + ' 0 0,0 ' +
+    (-Blockly.BlockSvg.DISTANCE_45_OUTSIDE - 0.5) + ',' +
+    (Blockly.BlockSvg.CORNER_RADIUS -
+    Blockly.BlockSvg.DISTANCE_45_OUTSIDE);
+/**
+ * SVG path for drawing highlight on the bottom-left corner of a statement
+ * input in RTL.
+ * @const
+ */
+Blockly.BlockSvg.INNER_BOTTOM_LEFT_CORNER_HIGHLIGHT_RTL =
+    'a ' + (Blockly.BlockSvg.CORNER_RADIUS + 0.5) + ',' +
+    (Blockly.BlockSvg.CORNER_RADIUS + 0.5) + ' 0 0,0 ' +
+    (Blockly.BlockSvg.CORNER_RADIUS + 0.5) + ',' +
+    (Blockly.BlockSvg.CORNER_RADIUS + 0.5);
+/**
+ * SVG path for drawing highlight on the bottom-left corner of a statement
+ * input in LTR.
+ * @const
+ */
+Blockly.BlockSvg.INNER_BOTTOM_LEFT_CORNER_HIGHLIGHT_LTR =
+    'a ' + (Blockly.BlockSvg.CORNER_RADIUS + 0.5) + ',' +
+    (Blockly.BlockSvg.CORNER_RADIUS + 0.5) + ' 0 0,0 ' +
+    (Blockly.BlockSvg.CORNER_RADIUS -
+    Blockly.BlockSvg.DISTANCE_45_OUTSIDE) + ',' +
+    (Blockly.BlockSvg.DISTANCE_45_OUTSIDE + 0.5);
+
+/**
+ * Render the block.
+ * Lays out and reflows a block based on its contents and settings.
+ * @param {boolean=} opt_bubble If false, just render this block.
+ *   If true, also render block's parent, grandparent, etc.  Defaults to true.
+ */
+Blockly.BlockSvg.prototype.render = function(opt_bubble) {
+  Blockly.Field.startCache();
+  this.rendered = true;
+
+  var cursorX = Blockly.BlockSvg.SEP_SPACE_X;
+  if (this.RTL) {
+    cursorX = -cursorX;
   }
-};
-
-
-/**
- * Enum to identify predefined Date/Time format pattern.
- * @enum {number}
- */
-goog.i18n.DateTimeFormat.Format = {
-  FULL_DATE: 0,
-  LONG_DATE: 1,
-  MEDIUM_DATE: 2,
-  SHORT_DATE: 3,
-  FULL_TIME: 4,
-  LONG_TIME: 5,
-  MEDIUM_TIME: 6,
-  SHORT_TIME: 7,
-  FULL_DATETIME: 8,
-  LONG_DATETIME: 9,
-  MEDIUM_DATETIME: 10,
-  SHORT_DATETIME: 11
-};
-
-
-/**
- * regular expression pattern for parsing pattern string
- * @type {Array<RegExp>}
- * @private
- */
-goog.i18n.DateTimeFormat.TOKENS_ = [
-  // quote string
-  /^\'(?:[^\']|\'\')*\'/,
-  // pattern chars
-  /^(?:G+|y+|M+|k+|S+|E+|a+|h+|K+|H+|c+|L+|Q+|d+|m+|s+|v+|V+|w+|z+|Z+)/,
-  // and all the other chars
-  /^[^\'GyMkSEahKHcLQdmsvVwzZ]+/  // and all the other chars
-];
-
-
-/**
- * These are token types, corresponding to above token definitions.
- * @enum {number}
- * @private
- */
-goog.i18n.DateTimeFormat.PartTypes_ = {
-  QUOTED_STRING: 0,
-  FIELD: 1,
-  LITERAL: 2
-};
-
-
-/**
- * @param {!goog.date.DateLike} date
- * @private
- */
-goog.i18n.DateTimeFormat.getHours_ = function(date) {
-  return date.getHours ? date.getHours() : 0;
-};
-
-
-/**
- * Apply specified pattern to this formatter object.
- * @param {string} pattern String specifying how the date should be formatted.
- * @private
- */
-goog.i18n.DateTimeFormat.prototype.applyPattern_ = function(pattern) {
-  if (goog.i18n.DateTimeFormat.removeRlmInPatterns_) {
-    // Remove RLM unicode control character from pattern.
-    pattern = pattern.replace(/\u200f/g, '');
+  // Move the icons into position.
+  var icons = this.getIcons();
+  for (var i = 0; i < icons.length; i++) {
+    cursorX = icons[i].renderIcon(cursorX);
   }
-  // lex the pattern, once for all uses
-  while (pattern) {
-    for (var i = 0; i < goog.i18n.DateTimeFormat.TOKENS_.length; ++i) {
-      var m = pattern.match(goog.i18n.DateTimeFormat.TOKENS_[i]);
-      if (m) {
-        var part = m[0];
-        pattern = pattern.substring(part.length);
-        if (i == goog.i18n.DateTimeFormat.PartTypes_.QUOTED_STRING) {
-          if (part == "''") {
-            part = "'";  // '' -> '
-          } else {
-            part = part.substring(1, part.length - 1);  // strip quotes
-            part = part.replace(/\'\'/, "'");
-          }
-        }
-        this.patternParts_.push({text: part, type: i});
-        break;
+  cursorX += this.RTL ?
+      Blockly.BlockSvg.SEP_SPACE_X : -Blockly.BlockSvg.SEP_SPACE_X;
+  // If there are no icons, cursorX will be 0, otherwise it will be the
+  // width that the first label needs to move over by.
+
+  var inputRows = this.renderCompute_(cursorX);
+  this.renderDraw_(cursorX, inputRows);
+
+  if (opt_bubble !== false) {
+    // Render all blocks above this one (propagate a reflow).
+    var parentBlock = this.getParent();
+    if (parentBlock) {
+      parentBlock.render(true);
+    } else {
+      // Top-most block.  Fire an event to allow scrollbars to resize.
+      Blockly.asyncSvgResize(this.workspace);
+    }
+  }
+  Blockly.Field.stopCache();
+};
+
+/**
+ * Render a list of fields starting at the specified location.
+ * @param {!Array.<!Blockly.Field>} fieldList List of fields.
+ * @param {number} cursorX X-coordinate to start the fields.
+ * @param {number} cursorY Y-coordinate to start the fields.
+ * @return {number} X-coordinate of the end of the field row (plus a gap).
+ * @private
+ */
+Blockly.BlockSvg.prototype.renderFields_ =
+    function(fieldList, cursorX, cursorY) {
+  cursorY += Blockly.BlockSvg.INLINE_PADDING_Y;
+  if (this.RTL) {
+    cursorX = -cursorX;
+  }
+  for (var t = 0, field; field = fieldList[t]; t++) {
+    var root = field.getSvgRoot();
+    if (!root) {
+      continue;
+    }
+    if (this.RTL) {
+      cursorX -= field.renderSep + field.renderWidth;
+      root.setAttribute('transform',
+          'translate(' + cursorX + ',' + cursorY + ')');
+      if (field.renderWidth) {
+        cursorX -= Blockly.BlockSvg.SEP_SPACE_X;
+      }
+    } else {
+      root.setAttribute('transform',
+          'translate(' + (cursorX + field.renderSep) + ',' + cursorY + ')');
+      if (field.renderWidth) {
+        cursorX += field.renderSep + field.renderWidth +
+            Blockly.BlockSvg.SEP_SPACE_X;
       }
     }
   }
+  return this.RTL ? -cursorX : cursorX;
 };
 
-
 /**
- * Format the given date object according to preset pattern and current locale.
- * @param {goog.date.DateLike} date The Date object that is being formatted.
- * @param {goog.i18n.TimeZone=} opt_timeZone optional, if specified, time
- *    related fields will be formatted based on its setting. When this field
- *    is not specified, "undefined" will be pass around and those function
- *    that really need time zone service will create a default one.
- * @return {string} Formatted string for the given date.
- *    Throws an error if the date is null or if one tries to format a date-only
- *    object (for instance goog.date.Date) using a pattern with time fields.
+ * Computes the height and widths for each row and field.
+ * @param {number} iconWidth Offset of first row due to icons.
+ * @return {!Array.<!Array.<!Object>>} 2D array of objects, each containing
+ *     position information.
+ * @private
  */
-goog.i18n.DateTimeFormat.prototype.format = function(date, opt_timeZone) {
-  if (!date) throw Error('The date to format must be non-null.');
-
-  // We don't want to write code to calculate each date field because we
-  // want to maximize performance and minimize code size.
-  // JavaScript only provide API to render local time.
-  // Suppose target date is: 16:00 GMT-0400
-  // OS local time is:       12:00 GMT-0800
-  // We want to create a Local Date Object : 16:00 GMT-0800, and fix the
-  // time zone display ourselves.
-  // Thing get a little bit tricky when daylight time transition happens. For
-  // example, suppose OS timeZone is America/Los_Angeles, it is impossible to
-  // represent "2006/4/2 02:30" even for those timeZone that has no transition
-  // at this time. Because 2:00 to 3:00 on that day does not exist in
-  // America/Los_Angeles time zone. To avoid calculating date field through
-  // our own code, we uses 3 Date object instead, one for "Year, month, day",
-  // one for time within that day, and one for timeZone object since it need
-  // the real time to figure out actual time zone offset.
-  var diff = opt_timeZone ?
-      (date.getTimezoneOffset() - opt_timeZone.getOffset(date)) * 60000 :
-      0;
-  var dateForDate = diff ? new Date(date.getTime() + diff) : date;
-  var dateForTime = dateForDate;
-  // When the time manipulation applied above spans the DST on/off hour, this
-  // could alter the time incorrectly by adding or subtracting an additional
-  // hour.
-  // We can mitigate this by:
-  // - Adding the difference in timezone offset to the date. This ensures that
-  //   the dateForDate is still within the right day if the extra DST hour
-  //   affected the date.
-  // - Move the time one day forward if we applied a timezone offset backwards,
-  //   or vice versa. This trick ensures that the time is in the same offset
-  //   as the original date, so we remove the additional hour added or
-  //   subtracted by the DST switch.
-  if (opt_timeZone &&
-      dateForDate.getTimezoneOffset() != date.getTimezoneOffset()) {
-    var dstDiff =
-        (dateForDate.getTimezoneOffset() - date.getTimezoneOffset()) * 60000;
-    dateForDate = new Date(dateForDate.getTime() + dstDiff);
-
-    diff += diff > 0 ? -goog.date.MS_PER_DAY : goog.date.MS_PER_DAY;
-    dateForTime = new Date(date.getTime() + diff);
+Blockly.BlockSvg.prototype.renderCompute_ = function(iconWidth) {
+  var inputList = this.inputList;
+  var inputRows = [];
+  inputRows.rightEdge = iconWidth + Blockly.BlockSvg.SEP_SPACE_X * 2;
+  if (this.previousConnection || this.nextConnection) {
+    inputRows.rightEdge = Math.max(inputRows.rightEdge,
+        Blockly.BlockSvg.NOTCH_WIDTH + Blockly.BlockSvg.SEP_SPACE_X);
   }
-
-  var out = [];
-  for (var i = 0; i < this.patternParts_.length; ++i) {
-    var text = this.patternParts_[i].text;
-    if (goog.i18n.DateTimeFormat.PartTypes_.FIELD ==
-        this.patternParts_[i].type) {
-      out.push(
-          this.formatField_(
-              text, date, dateForDate, dateForTime, opt_timeZone));
+  var fieldValueWidth = 0;  // Width of longest external value field.
+  var fieldStatementWidth = 0;  // Width of longest statement field.
+  var hasValue = false;
+  var hasStatement = false;
+  var hasDummy = false;
+  var lastType = undefined;
+  var isInline = this.getInputsInline() && !this.isCollapsed();
+  for (var i = 0, input; input = inputList[i]; i++) {
+    if (!input.isVisible()) {
+      continue;
+    }
+    var row;
+    if (!isInline || !lastType ||
+        lastType == Blockly.NEXT_STATEMENT ||
+        input.type == Blockly.NEXT_STATEMENT) {
+      // Create new row.
+      lastType = input.type;
+      row = [];
+      if (isInline && input.type != Blockly.NEXT_STATEMENT) {
+        row.type = Blockly.BlockSvg.INLINE;
+      } else {
+        row.type = input.type;
+      }
+      row.height = 0;
+      inputRows.push(row);
     } else {
-      out.push(text);
+      row = inputRows[inputRows.length - 1];
+    }
+    row.push(input);
+
+    // Compute minimum input size.
+    input.renderHeight = Blockly.BlockSvg.MIN_BLOCK_Y;
+    // The width is currently only needed for inline value inputs.
+    if (isInline && input.type == Blockly.INPUT_VALUE) {
+      input.renderWidth = Blockly.BlockSvg.TAB_WIDTH +
+          Blockly.BlockSvg.SEP_SPACE_X * 1.25;
+    } else {
+      input.renderWidth = 0;
+    }
+    // Expand input size if there is a connection.
+    if (input.connection && input.connection.isConnected()) {
+      var linkedBlock = input.connection.targetBlock();
+      var bBox = linkedBlock.getHeightWidth();
+      input.renderHeight = Math.max(input.renderHeight, bBox.height);
+      input.renderWidth = Math.max(input.renderWidth, bBox.width);
+    }
+    // Blocks have a one pixel shadow that should sometimes overhang.
+    if (!isInline && i == inputList.length - 1) {
+      // Last value input should overhang.
+      input.renderHeight--;
+    } else if (!isInline && input.type == Blockly.INPUT_VALUE &&
+        inputList[i + 1] && inputList[i + 1].type == Blockly.NEXT_STATEMENT) {
+      // Value input above statement input should overhang.
+      input.renderHeight--;
+    }
+
+    row.height = Math.max(row.height, input.renderHeight);
+    input.fieldWidth = 0;
+    if (inputRows.length == 1) {
+      // The first row gets shifted to accommodate any icons.
+      input.fieldWidth += this.RTL ? -iconWidth : iconWidth;
+    }
+    var previousFieldEditable = false;
+    for (var j = 0, field; field = input.fieldRow[j]; j++) {
+      if (j != 0) {
+        input.fieldWidth += Blockly.BlockSvg.SEP_SPACE_X;
+      }
+      // Get the dimensions of the field.
+      var fieldSize = field.getSize();
+      field.renderWidth = fieldSize.width;
+      field.renderSep = (previousFieldEditable && field.EDITABLE) ?
+          Blockly.BlockSvg.SEP_SPACE_X : 0;
+      input.fieldWidth += field.renderWidth + field.renderSep;
+      row.height = Math.max(row.height, fieldSize.height);
+      previousFieldEditable = field.EDITABLE;
+    }
+
+    if (row.type != Blockly.BlockSvg.INLINE) {
+      if (row.type == Blockly.NEXT_STATEMENT) {
+        hasStatement = true;
+        fieldStatementWidth = Math.max(fieldStatementWidth, input.fieldWidth);
+      } else {
+        if (row.type == Blockly.INPUT_VALUE) {
+          hasValue = true;
+        } else if (row.type == Blockly.DUMMY_INPUT) {
+          hasDummy = true;
+        }
+        fieldValueWidth = Math.max(fieldValueWidth, input.fieldWidth);
+      }
     }
   }
-  return out.join('');
+
+  // Make inline rows a bit thicker in order to enclose the values.
+  for (var y = 0, row; row = inputRows[y]; y++) {
+    row.thicker = false;
+    if (row.type == Blockly.BlockSvg.INLINE) {
+      for (var z = 0, input; input = row[z]; z++) {
+        if (input.type == Blockly.INPUT_VALUE) {
+          row.height += 2 * Blockly.BlockSvg.INLINE_PADDING_Y;
+          row.thicker = true;
+          break;
+        }
+      }
+    }
+  }
+
+  // Compute the statement edge.
+  // This is the width of a block where statements are nested.
+  inputRows.statementEdge = 2 * Blockly.BlockSvg.SEP_SPACE_X +
+      fieldStatementWidth;
+  // Compute the preferred right edge.  Inline blocks may extend beyond.
+  // This is the width of the block where external inputs connect.
+  if (hasStatement) {
+    inputRows.rightEdge = Math.max(inputRows.rightEdge,
+        inputRows.statementEdge + Blockly.BlockSvg.NOTCH_WIDTH);
+  }
+  if (hasValue) {
+    inputRows.rightEdge = Math.max(inputRows.rightEdge, fieldValueWidth +
+        Blockly.BlockSvg.SEP_SPACE_X * 2 + Blockly.BlockSvg.TAB_WIDTH);
+  } else if (hasDummy) {
+    inputRows.rightEdge = Math.max(inputRows.rightEdge, fieldValueWidth +
+        Blockly.BlockSvg.SEP_SPACE_X * 2);
+  }
+
+  inputRows.hasValue = hasValue;
+  inputRows.hasStatement = hasStatement;
+  inputRows.hasDummy = hasDummy;
+  return inputRows;
 };
 
 
 /**
- * Apply a predefined pattern as identified by formatType, which is stored in
- * locale specific repository.
- * @param {number} formatType A number that identified the predefined pattern.
+ * Draw the path of the block.
+ * Move the fields to the correct locations.
+ * @param {number} iconWidth Offset of first row due to icons.
+ * @param {!Array.<!Array.<!Object>>} inputRows 2D array of objects, each
+ *     containing position information.
  * @private
  */
-goog.i18n.DateTimeFormat.prototype.applyStandardPattern_ = function(
-    formatType) {
-  var pattern;
-  if (formatType < 4) {
-    pattern = this.dateTimeSymbols_.DATEFORMATS[formatType];
-  } else if (formatType < 8) {
-    pattern = this.dateTimeSymbols_.TIMEFORMATS[formatType - 4];
-  } else if (formatType < 12) {
-    pattern = this.dateTimeSymbols_.DATETIMEFORMATS[formatType - 8];
-    pattern = pattern.replace(
-        '{1}', this.dateTimeSymbols_.DATEFORMATS[formatType - 8]);
-    pattern = pattern.replace(
-        '{0}', this.dateTimeSymbols_.TIMEFORMATS[formatType - 8]);
+Blockly.BlockSvg.prototype.renderDraw_ = function(iconWidth, inputRows) {
+  this.startHat_ = false;
+  // Reset the height to zero and let the rendering process add in
+  // portions of the block height as it goes. (e.g. hats, inputs, etc.)
+  this.height = 0;
+  // Should the top and bottom left corners be rounded or square?
+  if (this.outputConnection) {
+    this.squareTopLeftCorner_ = true;
+    this.squareBottomLeftCorner_ = true;
   } else {
-    this.applyStandardPattern_(goog.i18n.DateTimeFormat.Format.MEDIUM_DATETIME);
-    return;
-  }
-  this.applyPattern_(pattern);
-};
-
-
-/**
- * Localizes a string potentially containing numbers, replacing ASCII digits
- * with native digits if specified so by the locale. Leaves other characters.
- * @param {string} input the string to be localized, using ASCII digits.
- * @return {string} localized string, potentially using native digits.
- * @private
- */
-goog.i18n.DateTimeFormat.prototype.localizeNumbers_ = function(input) {
-  return goog.i18n.DateTimeFormat.localizeNumbers(input, this.dateTimeSymbols_);
-};
-
-
-/**
- * If the usage of Ascii digits should be enforced regardless of locale.
- * @type {boolean}
- * @private
- */
-goog.i18n.DateTimeFormat.enforceAsciiDigits_ = false;
-
-
-/**
- * If RLM unicode characters should be removed from date/time patterns (useful
- * when enforcing ASCII digits for Arabic). See {@code #setEnforceAsciiDigits}.
- * @type {boolean}
- * @private
- */
-goog.i18n.DateTimeFormat.removeRlmInPatterns_ = false;
-
-
-/**
- * Sets if the usage of Ascii digits in formatting should be enforced in
- * formatted date/time even for locales where native digits are indicated.
- * Also sets whether to remove RLM unicode control characters when using
- * standard enumerated patterns (they exist e.g. in standard d/M/y for Arabic).
- * Production code should call this once before any {@code DateTimeFormat}
- * object is instantiated.
- * Caveats:
- *    * Enforcing ASCII digits affects all future formatting by new or existing
- * {@code DateTimeFormat} objects.
- *    * Removal of RLM characters only applies to {@code DateTimeFormat} objects
- * instantiated after this call.
- * @param {boolean} enforceAsciiDigits Whether Ascii digits should be enforced.
- */
-goog.i18n.DateTimeFormat.setEnforceAsciiDigits = function(enforceAsciiDigits) {
-  goog.i18n.DateTimeFormat.enforceAsciiDigits_ = enforceAsciiDigits;
-
-  // Also setting removal of RLM chracters when forcing ASCII digits since it's
-  // the right thing to do for Arabic standard patterns. One could add an
-  // optional argument here or to the {@code DateTimeFormat} constructor to
-  // enable an alternative behavior.
-  goog.i18n.DateTimeFormat.removeRlmInPatterns_ = enforceAsciiDigits;
-};
-
-
-/**
- * @return {boolean} Whether enforcing ASCII digits for all locales. See
- *     {@code #setEnforceAsciiDigits} for more details.
- */
-goog.i18n.DateTimeFormat.isEnforceAsciiDigits = function() {
-  return goog.i18n.DateTimeFormat.enforceAsciiDigits_;
-};
-
-
-/**
- * Localizes a string potentially containing numbers, replacing ASCII digits
- * with native digits if specified so by the locale. Leaves other characters.
- * @param {number|string} input the string to be localized, using ASCII digits.
- * @param {!Object=} opt_dateTimeSymbols Optional symbols to use rather than
- *     the global symbols.
- * @return {string} localized string, potentially using native digits.
- */
-goog.i18n.DateTimeFormat.localizeNumbers = function(
-    input, opt_dateTimeSymbols) {
-  input = String(input);
-  var dateTimeSymbols = opt_dateTimeSymbols || goog.i18n.DateTimeSymbols;
-  if (dateTimeSymbols.ZERODIGIT === undefined ||
-      goog.i18n.DateTimeFormat.enforceAsciiDigits_) {
-    return input;
+    this.squareTopLeftCorner_ = false;
+    this.squareBottomLeftCorner_ = false;
+    // If this block is in the middle of a stack, square the corners.
+    if (this.previousConnection) {
+      var prevBlock = this.previousConnection.targetBlock();
+      if (prevBlock && prevBlock.getNextBlock() == this) {
+        this.squareTopLeftCorner_ = true;
+       }
+    } else if (Blockly.BlockSvg.START_HAT) {
+      // No output or previous connection.
+      this.squareTopLeftCorner_ = true;
+      this.startHat_ = true;
+      this.height += Blockly.BlockSvg.START_HAT_HEIGHT;
+      inputRows.rightEdge = Math.max(inputRows.rightEdge, 100);
+    }
+    var nextBlock = this.getNextBlock();
+    if (nextBlock) {
+      this.squareBottomLeftCorner_ = true;
+    }
   }
 
-  var parts = [];
-  for (var i = 0; i < input.length; i++) {
-    var c = input.charCodeAt(i);
-    parts.push(
-        (0x30 <= c && c <= 0x39) ?  // '0' <= c <= '9'
-            String.fromCharCode(dateTimeSymbols.ZERODIGIT + c - 0x30) :
-            input.charAt(i));
-  }
-  return parts.join('');
-};
+  // Fetch the block's coordinates on the surface for use in anchoring
+  // the connections.
+  var connectionsXY = this.getRelativeToSurfaceXY();
 
+  // Assemble the block's path.
+  var steps = [];
+  var inlineSteps = [];
+  // The highlighting applies to edges facing the upper-left corner.
+  // Since highlighting is a two-pixel wide border, it would normally overhang
+  // the edge of the block by a pixel. So undersize all measurements by a pixel.
+  var highlightSteps = [];
+  var highlightInlineSteps = [];
 
-/**
- * Formats Era field according to pattern specified.
- *
- * @param {number} count Number of time pattern char repeats, it controls
- *     how a field should be formatted.
- * @param {!goog.date.DateLike} date It holds the date object to be formatted.
- * @return {string} Formatted string that represent this field.
- * @private
- */
-goog.i18n.DateTimeFormat.prototype.formatEra_ = function(count, date) {
-  var value = date.getFullYear() > 0 ? 1 : 0;
-  return count >= 4 ? this.dateTimeSymbols_.ERANAMES[value] :
-                      this.dateTimeSymbols_.ERAS[value];
-};
+  this.renderDrawTop_(steps, highlightSteps, connectionsXY,
+      inputRows.rightEdge);
+  var cursorY = this.renderDrawRight_(steps, highlightSteps, inlineSteps,
+      highlightInlineSteps, connectionsXY, inputRows, iconWidth);
+  this.renderDrawBottom_(steps, highlightSteps, connectionsXY, cursorY);
+  this.renderDrawLeft_(steps, highlightSteps, connectionsXY, cursorY);
 
-
-/**
- * Formats Year field according to pattern specified
- *   Javascript Date object seems incapable handling 1BC and
- *   year before. It can show you year 0 which does not exists.
- *   following we just keep consistent with javascript's
- *   toString method. But keep in mind those things should be
- *   unsupported.
- * @param {number} count Number of time pattern char repeats, it controls
- *     how a field should be formatted.
- * @param {!goog.date.DateLike} date It holds the date object to be formatted.
- * @return {string} Formatted string that represent this field.
- * @private
- */
-goog.i18n.DateTimeFormat.prototype.formatYear_ = function(count, date) {
-  var value = date.getFullYear();
-  if (value < 0) {
-    value = -value;
-  }
-  if (count == 2) {
-    // See comment about special casing 'yy' at the start of the file, this
-    // matches ICU and CLDR behaviour. See also:
-    // http://icu-project.org/apiref/icu4j/com/ibm/icu/text/SimpleDateFormat.html
-    // http://www.unicode.org/reports/tr35/tr35-dates.html
-    value = value % 100;
-  }
-  return this.localizeNumbers_(goog.string.padNumber(value, count));
-};
-
-
-/**
- * Formats Month field according to pattern specified
- *
- * @param {number} count Number of time pattern char repeats, it controls
- *     how a field should be formatted.
- * @param {!goog.date.DateLike} date It holds the date object to be formatted.
- * @return {string} Formatted string that represent this field.
- * @private
- */
-goog.i18n.DateTimeFormat.prototype.formatMonth_ = function(count, date) {
-  var value = date.getMonth();
-  switch (count) {
-    case 5:
-      return this.dateTimeSymbols_.NARROWMONTHS[value];
-    case 4:
-      return this.dateTimeSymbols_.MONTHS[value];
-    case 3:
-      return this.dateTimeSymbols_.SHORTMONTHS[value];
-    default:
-      return this.localizeNumbers_(goog.string.padNumber(value + 1, count));
+  var pathString = steps.join(' ') + '\n' + inlineSteps.join(' ');
+  this.svgPath_.setAttribute('d', pathString);
+  this.svgPathDark_.setAttribute('d', pathString);
+  pathString = highlightSteps.join(' ') + '\n' + highlightInlineSteps.join(' ');
+  this.svgPathLight_.setAttribute('d', pathString);
+  if (this.RTL) {
+    // Mirror the block's path.
+    this.svgPath_.setAttribute('transform', 'scale(-1 1)');
+    this.svgPathLight_.setAttribute('transform', 'scale(-1 1)');
+    this.svgPathDark_.setAttribute('transform', 'translate(1,1) scale(-1 1)');
   }
 };
 
-
 /**
- * Validates is the goog.date.DateLike object to format has a time.
- * DateLike means Date|goog.date.Date, and goog.date.DateTime inherits
- * from goog.date.Date. But goog.date.Date does not have time related
- * members (getHours, getMinutes, getSeconds).
- * Formatting can be done, if there are no time placeholders in the pattern.
- *
- * @param {!goog.date.DateLike} date the object to validate.
+ * Render the top edge of the block.
+ * @param {!Array.<string>} steps Path of block outline.
+ * @param {!Array.<string>} highlightSteps Path of block highlights.
+ * @param {!Object} connectionsXY Location of block.
+ * @param {number} rightEdge Minimum width of block.
  * @private
  */
-goog.i18n.DateTimeFormat.validateDateHasTime_ = function(date) {
-  if (date.getHours && date.getSeconds && date.getMinutes) return;
-  // if (date instanceof Date || date instanceof goog.date.DateTime)
-  throw Error(
-      'The date to format has no time (probably a goog.date.Date). ' +
-      'Use Date or goog.date.DateTime, or use a pattern without time fields.');
+Blockly.BlockSvg.prototype.renderDrawTop_ =
+    function(steps, highlightSteps, connectionsXY, rightEdge) {
+  // Position the cursor at the top-left starting point.
+  if (this.squareTopLeftCorner_) {
+    steps.push('m 0,0');
+    highlightSteps.push('m 0.5,0.5');
+    if (this.startHat_) {
+      steps.push(Blockly.BlockSvg.START_HAT_PATH);
+      highlightSteps.push(this.RTL ?
+          Blockly.BlockSvg.START_HAT_HIGHLIGHT_RTL :
+          Blockly.BlockSvg.START_HAT_HIGHLIGHT_LTR);
+    }
+  } else {
+    steps.push(Blockly.BlockSvg.TOP_LEFT_CORNER_START);
+    highlightSteps.push(this.RTL ?
+        Blockly.BlockSvg.TOP_LEFT_CORNER_START_HIGHLIGHT_RTL :
+        Blockly.BlockSvg.TOP_LEFT_CORNER_START_HIGHLIGHT_LTR);
+    // Top-left rounded corner.
+    steps.push(Blockly.BlockSvg.TOP_LEFT_CORNER);
+    highlightSteps.push(Blockly.BlockSvg.TOP_LEFT_CORNER_HIGHLIGHT);
+  }
+
+  // Top edge.
+  if (this.previousConnection) {
+    steps.push('H', Blockly.BlockSvg.NOTCH_WIDTH - 15);
+    highlightSteps.push('H', Blockly.BlockSvg.NOTCH_WIDTH - 15);
+    steps.push(Blockly.BlockSvg.NOTCH_PATH_LEFT);
+    highlightSteps.push(Blockly.BlockSvg.NOTCH_PATH_LEFT_HIGHLIGHT);
+    // Create previous block connection.
+    var connectionX = connectionsXY.x + (this.RTL ?
+        -Blockly.BlockSvg.NOTCH_WIDTH : Blockly.BlockSvg.NOTCH_WIDTH);
+    var connectionY = connectionsXY.y;
+    this.previousConnection.moveTo(connectionX, connectionY);
+    // This connection will be tightened when the parent renders.
+  }
+  steps.push('H', rightEdge);
+  highlightSteps.push('H', rightEdge - 0.5);
+  this.width = rightEdge;
 };
 
-
 /**
- * Formats (1..24) Hours field according to pattern specified
- *
- * @param {number} count Number of time pattern char repeats. This controls
- *     how a field should be formatted.
- * @param {!goog.date.DateLike} date It holds the date object to be formatted.
- * @return {string} Formatted string that represent this field.
+ * Render the right edge of the block.
+ * @param {!Array.<string>} steps Path of block outline.
+ * @param {!Array.<string>} highlightSteps Path of block highlights.
+ * @param {!Array.<string>} inlineSteps Inline block outlines.
+ * @param {!Array.<string>} highlightInlineSteps Inline block highlights.
+ * @param {!Object} connectionsXY Location of block.
+ * @param {!Array.<!Array.<!Object>>} inputRows 2D array of objects, each
+ *     containing position information.
+ * @param {number} iconWidth Offset of first row due to icons.
+ * @return {number} Height of block.
  * @private
  */
-goog.i18n.DateTimeFormat.prototype.format24Hours_ = function(count, date) {
-  goog.i18n.DateTimeFormat.validateDateHasTime_(date);
-  var hours = goog.i18n.DateTimeFormat.getHours_(date) || 24;
-  return this.localizeNumbers_(goog.string.padNumber(hours, count));
+Blockly.BlockSvg.prototype.renderDrawRight_ = function(steps, highlightSteps,
+    inlineSteps, highlightInlineSteps, connectionsXY, inputRows, iconWidth) {
+  var cursorX;
+  var cursorY = 0;
+  var connectionX, connectionY;
+  for (var y = 0, row; row = inputRows[y]; y++) {
+    cursorX = Blockly.BlockSvg.SEP_SPACE_X;
+    if (y == 0) {
+      cursorX += this.RTL ? -iconWidth : iconWidth;
+    }
+    highlightSteps.push('M', (inputRows.rightEdge - 0.5) + ',' +
+        (cursorY + 0.5));
+    if (this.isCollapsed()) {
+      // Jagged right edge.
+      var input = row[0];
+      var fieldX = cursorX;
+      var fieldY = cursorY;
+      this.renderFields_(input.fieldRow, fieldX, fieldY);
+      steps.push(Blockly.BlockSvg.JAGGED_TEETH);
+      highlightSteps.push('h 8');
+      var remainder = row.height - Blockly.BlockSvg.JAGGED_TEETH_HEIGHT;
+      steps.push('v', remainder);
+      if (this.RTL) {
+        highlightSteps.push('v 3.9 l 7.2,3.4 m -14.5,8.9 l 7.3,3.5');
+        highlightSteps.push('v', remainder - 0.7);
+      }
+      this.width += Blockly.BlockSvg.JAGGED_TEETH_WIDTH;
+    } else if (row.type == Blockly.BlockSvg.INLINE) {
+      // Inline inputs.
+      for (var x = 0, input; input = row[x]; x++) {
+        var fieldX = cursorX;
+        var fieldY = cursorY;
+        if (row.thicker) {
+          // Lower the field slightly.
+          fieldY += Blockly.BlockSvg.INLINE_PADDING_Y;
+        }
+        // TODO: Align inline field rows (left/right/centre).
+        cursorX = this.renderFields_(input.fieldRow, fieldX, fieldY);
+        if (input.type != Blockly.DUMMY_INPUT) {
+          cursorX += input.renderWidth + Blockly.BlockSvg.SEP_SPACE_X;
+        }
+        if (input.type == Blockly.INPUT_VALUE) {
+          inlineSteps.push('M', (cursorX - Blockly.BlockSvg.SEP_SPACE_X) +
+                           ',' + (cursorY + Blockly.BlockSvg.INLINE_PADDING_Y));
+          inlineSteps.push('h', Blockly.BlockSvg.TAB_WIDTH - 2 -
+                           input.renderWidth);
+          inlineSteps.push(Blockly.BlockSvg.TAB_PATH_DOWN);
+          inlineSteps.push('v', input.renderHeight + 1 -
+                                Blockly.BlockSvg.TAB_HEIGHT);
+          inlineSteps.push('h', input.renderWidth + 2 -
+                           Blockly.BlockSvg.TAB_WIDTH);
+          inlineSteps.push('z');
+          if (this.RTL) {
+            // Highlight right edge, around back of tab, and bottom.
+            highlightInlineSteps.push('M',
+                (cursorX - Blockly.BlockSvg.SEP_SPACE_X - 2.5 +
+                 Blockly.BlockSvg.TAB_WIDTH - input.renderWidth) + ',' +
+                (cursorY + Blockly.BlockSvg.INLINE_PADDING_Y + 0.5));
+            highlightInlineSteps.push(
+                Blockly.BlockSvg.TAB_PATH_DOWN_HIGHLIGHT_RTL);
+            highlightInlineSteps.push('v',
+                input.renderHeight - Blockly.BlockSvg.TAB_HEIGHT + 2.5);
+            highlightInlineSteps.push('h',
+                input.renderWidth - Blockly.BlockSvg.TAB_WIDTH + 2);
+          } else {
+            // Highlight right edge, bottom.
+            highlightInlineSteps.push('M',
+                (cursorX - Blockly.BlockSvg.SEP_SPACE_X + 0.5) + ',' +
+                (cursorY + Blockly.BlockSvg.INLINE_PADDING_Y + 0.5));
+            highlightInlineSteps.push('v', input.renderHeight + 1);
+            highlightInlineSteps.push('h', Blockly.BlockSvg.TAB_WIDTH - 2 -
+                                           input.renderWidth);
+            // Short highlight glint at bottom of tab.
+            highlightInlineSteps.push('M',
+                (cursorX - input.renderWidth - Blockly.BlockSvg.SEP_SPACE_X +
+                 0.9) + ',' + (cursorY + Blockly.BlockSvg.INLINE_PADDING_Y +
+                 Blockly.BlockSvg.TAB_HEIGHT - 0.7));
+            highlightInlineSteps.push('l',
+                (Blockly.BlockSvg.TAB_WIDTH * 0.46) + ',-2.1');
+          }
+          // Create inline input connection.
+          if (this.RTL) {
+            connectionX = connectionsXY.x - cursorX -
+                Blockly.BlockSvg.TAB_WIDTH + Blockly.BlockSvg.SEP_SPACE_X +
+                input.renderWidth + 1;
+          } else {
+            connectionX = connectionsXY.x + cursorX +
+                Blockly.BlockSvg.TAB_WIDTH - Blockly.BlockSvg.SEP_SPACE_X -
+                input.renderWidth - 1;
+          }
+          connectionY = connectionsXY.y + cursorY +
+              Blockly.BlockSvg.INLINE_PADDING_Y + 1;
+          input.connection.moveTo(connectionX, connectionY);
+          if (input.connection.isConnected()) {
+            input.connection.tighten_();
+          }
+        }
+      }
+
+      cursorX = Math.max(cursorX, inputRows.rightEdge);
+      this.width = Math.max(this.width, cursorX);
+      steps.push('H', cursorX);
+      highlightSteps.push('H', cursorX - 0.5);
+      steps.push('v', row.height);
+      if (this.RTL) {
+        highlightSteps.push('v', row.height - 1);
+      }
+    } else if (row.type == Blockly.INPUT_VALUE) {
+      // External input.
+      var input = row[0];
+      var fieldX = cursorX;
+      var fieldY = cursorY;
+      if (input.align != Blockly.ALIGN_LEFT) {
+        var fieldRightX = inputRows.rightEdge - input.fieldWidth -
+            Blockly.BlockSvg.TAB_WIDTH - 2 * Blockly.BlockSvg.SEP_SPACE_X;
+        if (input.align == Blockly.ALIGN_RIGHT) {
+          fieldX += fieldRightX;
+        } else if (input.align == Blockly.ALIGN_CENTRE) {
+          fieldX += fieldRightX / 2;
+        }
+      }
+      this.renderFields_(input.fieldRow, fieldX, fieldY);
+      steps.push(Blockly.BlockSvg.TAB_PATH_DOWN);
+      var v = row.height - Blockly.BlockSvg.TAB_HEIGHT;
+      steps.push('v', v);
+      if (this.RTL) {
+        // Highlight around back of tab.
+        highlightSteps.push(Blockly.BlockSvg.TAB_PATH_DOWN_HIGHLIGHT_RTL);
+        highlightSteps.push('v', v + 0.5);
+      } else {
+        // Short highlight glint at bottom of tab.
+        highlightSteps.push('M', (inputRows.rightEdge - 5) + ',' +
+            (cursorY + Blockly.BlockSvg.TAB_HEIGHT - 0.7));
+        highlightSteps.push('l', (Blockly.BlockSvg.TAB_WIDTH * 0.46) +
+            ',-2.1');
+      }
+      // Create external input connection.
+      connectionX = connectionsXY.x +
+          (this.RTL ? -inputRows.rightEdge - 1 : inputRows.rightEdge + 1);
+      connectionY = connectionsXY.y + cursorY;
+      input.connection.moveTo(connectionX, connectionY);
+      if (input.connection.isConnected()) {
+        input.connection.tighten_();
+        this.width = Math.max(this.width, inputRows.rightEdge +
+            input.connection.targetBlock().getHeightWidth().width -
+            Blockly.BlockSvg.TAB_WIDTH + 1);
+      }
+    } else if (row.type == Blockly.DUMMY_INPUT) {
+      // External naked field.
+      var input = row[0];
+      var fieldX = cursorX;
+      var fieldY = cursorY;
+      if (input.align != Blockly.ALIGN_LEFT) {
+        var fieldRightX = inputRows.rightEdge - input.fieldWidth -
+            2 * Blockly.BlockSvg.SEP_SPACE_X;
+        if (inputRows.hasValue) {
+          fieldRightX -= Blockly.BlockSvg.TAB_WIDTH;
+        }
+        if (input.align == Blockly.ALIGN_RIGHT) {
+          fieldX += fieldRightX;
+        } else if (input.align == Blockly.ALIGN_CENTRE) {
+          fieldX += fieldRightX / 2;
+        }
+      }
+      this.renderFields_(input.fieldRow, fieldX, fieldY);
+      steps.push('v', row.height);
+      if (this.RTL) {
+        highlightSteps.push('v', row.height - 1);
+      }
+    } else if (row.type == Blockly.NEXT_STATEMENT) {
+      // Nested statement.
+      var input = row[0];
+      if (y == 0) {
+        // If the first input is a statement stack, add a small row on top.
+        steps.push('v', Blockly.BlockSvg.SEP_SPACE_Y);
+        if (this.RTL) {
+          highlightSteps.push('v', Blockly.BlockSvg.SEP_SPACE_Y - 1);
+        }
+        cursorY += Blockly.BlockSvg.SEP_SPACE_Y;
+      }
+      var fieldX = cursorX;
+      var fieldY = cursorY;
+      if (input.align != Blockly.ALIGN_LEFT) {
+        var fieldRightX = inputRows.statementEdge - input.fieldWidth -
+            2 * Blockly.BlockSvg.SEP_SPACE_X;
+        if (input.align == Blockly.ALIGN_RIGHT) {
+          fieldX += fieldRightX;
+        } else if (input.align == Blockly.ALIGN_CENTRE) {
+          fieldX += fieldRightX / 2;
+        }
+      }
+      this.renderFields_(input.fieldRow, fieldX, fieldY);
+      cursorX = inputRows.statementEdge + Blockly.BlockSvg.NOTCH_WIDTH;
+      steps.push('H', cursorX);
+      steps.push(Blockly.BlockSvg.INNER_TOP_LEFT_CORNER);
+      steps.push('v', row.height - 2 * Blockly.BlockSvg.CORNER_RADIUS);
+      steps.push(Blockly.BlockSvg.INNER_BOTTOM_LEFT_CORNER);
+      steps.push('H', inputRows.rightEdge);
+      if (this.RTL) {
+        highlightSteps.push('M',
+            (cursorX - Blockly.BlockSvg.NOTCH_WIDTH +
+             Blockly.BlockSvg.DISTANCE_45_OUTSIDE) +
+            ',' + (cursorY + Blockly.BlockSvg.DISTANCE_45_OUTSIDE));
+        highlightSteps.push(
+            Blockly.BlockSvg.INNER_TOP_LEFT_CORNER_HIGHLIGHT_RTL);
+        highlightSteps.push('v',
+            row.height - 2 * Blockly.BlockSvg.CORNER_RADIUS);
+        highlightSteps.push(
+            Blockly.BlockSvg.INNER_BOTTOM_LEFT_CORNER_HIGHLIGHT_RTL);
+        highlightSteps.push('H', inputRows.rightEdge - 0.5);
+      } else {
+        highlightSteps.push('M',
+            (cursorX - Blockly.BlockSvg.NOTCH_WIDTH +
+             Blockly.BlockSvg.DISTANCE_45_OUTSIDE) + ',' +
+            (cursorY + row.height - Blockly.BlockSvg.DISTANCE_45_OUTSIDE));
+        highlightSteps.push(
+            Blockly.BlockSvg.INNER_BOTTOM_LEFT_CORNER_HIGHLIGHT_LTR);
+        highlightSteps.push('H', inputRows.rightEdge - 0.5);
+      }
+      // Create statement connection.
+      connectionX = connectionsXY.x + (this.RTL ? -cursorX : cursorX + 1);
+      connectionY = connectionsXY.y + cursorY + 1;
+      input.connection.moveTo(connectionX, connectionY);
+      if (input.connection.isConnected()) {
+        input.connection.tighten_();
+        this.width = Math.max(this.width, inputRows.statementEdge +
+            input.connection.targetBlock().getHeightWidth().width);
+      }
+      if (y == inputRows.length - 1 ||
+          inputRows[y + 1].type == Blockly.NEXT_STATEMENT) {
+        // If the final input is a statement stack, add a small row underneath.
+        // Consecutive statement stacks are also separated by a small divider.
+        steps.push('v', Blockly.BlockSvg.SEP_SPACE_Y);
+        if (this.RTL) {
+          highlightSteps.push('v', Blockly.BlockSvg.SEP_SPACE_Y - 1);
+        }
+        cursorY += Blockly.BlockSvg.SEP_SPACE_Y;
+      }
+    }
+    cursorY += row.height;
+  }
+  if (!inputRows.length) {
+    cursorY = Blockly.BlockSvg.MIN_BLOCK_Y;
+    steps.push('V', cursorY);
+    if (this.RTL) {
+      highlightSteps.push('V', cursorY - 1);
+    }
+  }
+  return cursorY;
 };
 
-
 /**
- * Formats Fractional seconds field according to pattern
- * specified
- *
- * @param {number} count Number of time pattern char repeats, it controls
- *     how a field should be formatted.
- * @param {!goog.date.DateLike} date It holds the date object to be formatted.
- *
- * @return {string} Formatted string that represent this field.
+ * Render the bottom edge of the block.
+ * @param {!Array.<string>} steps Path of block outline.
+ * @param {!Array.<string>} highlightSteps Path of block highlights.
+ * @param {!Object} connectionsXY Location of block.
+ * @param {number} cursorY Height of block.
  * @private
  */
-goog.i18n.DateTimeFormat.prototype.formatFractionalSeconds_ = function(
-    count, date) {
-  // Fractional seconds left-justify, append 0 for precision beyond 3
-  var value = date.getTime() % 1000 / 1000;
-  return this.localizeNumbers_(
-      value.toFixed(Math.min(3, count)).substr(2) +
-      (count > 3 ? goog.string.padNumber(0, count - 3) : ''));
-};
+Blockly.BlockSvg.prototype.renderDrawBottom_ =
+    function(steps, highlightSteps, connectionsXY, cursorY) {
+  this.height += cursorY + 1;  // Add one for the shadow.
+  if (this.nextConnection) {
+    steps.push('H', (Blockly.BlockSvg.NOTCH_WIDTH + (this.RTL ? 0.5 : - 0.5)) +
+        ' ' + Blockly.BlockSvg.NOTCH_PATH_RIGHT);
+    // Create next block connection.
+    var connectionX;
+    if (this.RTL) {
+      connectionX = connectionsXY.x - Blockly.BlockSvg.NOTCH_WIDTH;
+    } else {
+      connectionX = connectionsXY.x + Blockly.BlockSvg.NOTCH_WIDTH;
+    }
+    var connectionY = connectionsXY.y + cursorY + 1;
+    this.nextConnection.moveTo(connectionX, connectionY);
+    if (this.nextConnection.isConnected()) {
+      this.nextConnection.tighten_();
+    }
+    this.height += 4;  // Height of tab.
+  }
 
-
-/**
- * Formats Day of week field according to pattern specified
- *
- * @param {number} count Number of time pattern char repeats, it controls
- *     how a field should be formatted.
- * @param {!goog.date.DateLike} date It holds the date object to be formatted.
- * @return {string} Formatted string that represent this field.
- * @private
- */
-goog.i18n.DateTimeFormat.prototype.formatDayOfWeek_ = function(count, date) {
-  var value = date.getDay();
-  return count >= 4 ? this.dateTimeSymbols_.WEEKDAYS[value] :
-                      this.dateTimeSymbols_.SHORTWEEKDAYS[value];
-};
-
-
-/**
- * Formats Am/Pm field according to pattern specified
- *
- * @param {number} count Number of time pattern char repeats, it controls
- *     how a field should be formatted.
- * @param {!goog.date.DateLike} date It holds the date object to be formatted.
- * @return {string} Formatted string that represent this field.
- * @private
- */
-goog.i18n.DateTimeFormat.prototype.formatAmPm_ = function(count, date) {
-  goog.i18n.DateTimeFormat.validateDateHasTime_(date);
-  var hours = goog.i18n.DateTimeFormat.getHours_(date);
-  return this.dateTimeSymbols_.AMPMS[hours >= 12 && hours < 24 ? 1 : 0];
-};
-
-
-/**
- * Formats (1..12) Hours field according to pattern specified
- *
- * @param {number} count Number of time pattern char repeats, it controls
- *     how a field should be formatted.
- * @param {!goog.date.DateLike} date It holds the date object to be formatted.
- * @return {string} formatted string that represent this field.
- * @private
- */
-goog.i18n.DateTimeFormat.prototype.format1To12Hours_ = function(count, date) {
-  goog.i18n.DateTimeFormat.validateDateHasTime_(date);
-  var hours = goog.i18n.DateTimeFormat.getHours_(date) % 12 || 12;
-  return this.localizeNumbers_(goog.string.padNumber(hours, count));
-};
-
-
-/**
- * Formats (0..11) Hours field according to pattern specified
- *
- * @param {number} count Number of time pattern char repeats, it controls
- *     how a field should be formatted.
- * @param {!goog.date.DateLike} date It holds the date object to be formatted.
- * @return {string} formatted string that represent this field.
- * @private
- */
-goog.i18n.DateTimeFormat.prototype.format0To11Hours_ = function(count, date) {
-  goog.i18n.DateTimeFormat.validateDateHasTime_(date);
-  var hours = goog.i18n.DateTimeFormat.getHours_(date) % 12;
-  return this.localizeNumbers_(goog.string.padNumber(hours, count));
-};
-
-
-/**
- * Formats (0..23) Hours field according to pattern specified
- *
- * @param {number} count Number of time pattern char repeats, it controls
- *     how a field should be formatted.
- * @param {!goog.date.DateLike} date It holds the date object to be formatted.
- * @return {string} formatted string that represent this field.
- * @private
- */
-goog.i18n.DateTimeFormat.prototype.format0To23Hours_ = function(count, date) {
-  goog.i18n.DateTimeFormat.validateDateHasTime_(date);
-  var hours = goog.i18n.DateTimeFormat.getHours_(date);
-  return this.localizeNumbers_(goog.string.padNumber(hours, count));
-};
-
-
-/**
- * Formats Standalone weekday field according to pattern specified
- *
- * @param {number} count Number of time pattern char repeats, it controls
- *     how a field should be formatted.
- * @param {!goog.date.DateLike} date It holds the date object to be formatted.
- * @return {string} formatted string that represent this field.
- * @private
- */
-goog.i18n.DateTimeFormat.prototype.formatStandaloneDay_ = function(
-    count, date) {
-  var value = date.getDay();
-  switch (count) {
-    case 5:
-      return this.dateTimeSymbols_.STANDALONENARROWWEEKDAYS[value];
-    case 4:
-      return this.dateTimeSymbols_.STANDALONEWEEKDAYS[value];
-    case 3:
-      return this.dateTimeSymbols_.STANDALONESHORTWEEKDAYS[value];
-    default:
-      return this.localizeNumbers_(goog.string.padNumber(value, 1));
+  // Should the bottom-left corner be rounded or square?
+  if (this.squareBottomLeftCorner_) {
+    steps.push('H 0');
+    if (!this.RTL) {
+      highlightSteps.push('M', '0.5,' + (cursorY - 0.5));
+    }
+  } else {
+    steps.push('H', Blockly.BlockSvg.CORNER_RADIUS);
+    steps.push('a', Blockly.BlockSvg.CORNER_RADIUS + ',' +
+               Blockly.BlockSvg.CORNER_RADIUS + ' 0 0,1 -' +
+               Blockly.BlockSvg.CORNER_RADIUS + ',-' +
+               Blockly.BlockSvg.CORNER_RADIUS);
+    if (!this.RTL) {
+      highlightSteps.push('M', Blockly.BlockSvg.DISTANCE_45_INSIDE + ',' +
+          (cursorY - Blockly.BlockSvg.DISTANCE_45_INSIDE));
+      highlightSteps.push('A', (Blockly.BlockSvg.CORNER_RADIUS - 0.5) + ',' +
+          (Blockly.BlockSvg.CORNER_RADIUS - 0.5) + ' 0 0,1 ' +
+          '0.5,' + (cursorY - Blockly.BlockSvg.CORNER_RADIUS));
+    }
   }
 };
 
-
 /**
- * Formats Standalone Month field according to pattern specified
- *
- * @param {number} count Number of time pattern char repeats, it controls
- *     how a field should be formatted.
- * @param {!goog.date.DateLike} date It holds the date object to be formatted.
- * @return {string} formatted string that represent this field.
+ * Render the left edge of the block.
+ * @param {!Array.<string>} steps Path of block outline.
+ * @param {!Array.<string>} highlightSteps Path of block highlights.
+ * @param {!Object} connectionsXY Location of block.
+ * @param {number} cursorY Height of block.
  * @private
  */
-goog.i18n.DateTimeFormat.prototype.formatStandaloneMonth_ = function(
-    count, date) {
-  var value = date.getMonth();
-  switch (count) {
-    case 5:
-      return this.dateTimeSymbols_.STANDALONENARROWMONTHS[value];
-    case 4:
-      return this.dateTimeSymbols_.STANDALONEMONTHS[value];
-    case 3:
-      return this.dateTimeSymbols_.STANDALONESHORTMONTHS[value];
-    default:
-      return this.localizeNumbers_(goog.string.padNumber(value + 1, count));
+Blockly.BlockSvg.prototype.renderDrawLeft_ =
+    function(steps, highlightSteps, connectionsXY, cursorY) {
+  if (this.outputConnection) {
+    // Create output connection.
+    this.outputConnection.moveTo(connectionsXY.x, connectionsXY.y);
+    // This connection will be tightened when the parent renders.
+    steps.push('V', Blockly.BlockSvg.TAB_HEIGHT);
+    steps.push('c 0,-10 -' + Blockly.BlockSvg.TAB_WIDTH + ',8 -' +
+        Blockly.BlockSvg.TAB_WIDTH + ',-7.5 s ' + Blockly.BlockSvg.TAB_WIDTH +
+        ',2.5 ' + Blockly.BlockSvg.TAB_WIDTH + ',-7.5');
+    if (this.RTL) {
+      highlightSteps.push('M', (Blockly.BlockSvg.TAB_WIDTH * -0.25) + ',8.4');
+      highlightSteps.push('l', (Blockly.BlockSvg.TAB_WIDTH * -0.45) + ',-2.1');
+    } else {
+      highlightSteps.push('V', Blockly.BlockSvg.TAB_HEIGHT - 1.5);
+      highlightSteps.push('m', (Blockly.BlockSvg.TAB_WIDTH * -0.92) +
+                          ',-0.5 q ' + (Blockly.BlockSvg.TAB_WIDTH * -0.19) +
+                          ',-5.5 0,-11');
+      highlightSteps.push('m', (Blockly.BlockSvg.TAB_WIDTH * 0.92) +
+                          ',1 V 0.5 H 1');
+    }
+    this.width += Blockly.BlockSvg.TAB_WIDTH;
+  } else if (!this.RTL) {
+    if (this.squareTopLeftCorner_) {
+      // Statement block in a stack.
+      highlightSteps.push('V', 0.5);
+    } else {
+      highlightSteps.push('V', Blockly.BlockSvg.CORNER_RADIUS);
+    }
   }
-};
-
-
-/**
- * Formats Quarter field according to pattern specified
- *
- * @param {number} count Number of time pattern char repeats, it controls
- *     how a field should be formatted.
- * @param {!goog.date.DateLike} date It holds the date object to be formatted.
- * @return {string} Formatted string that represent this field.
- * @private
- */
-goog.i18n.DateTimeFormat.prototype.formatQuarter_ = function(count, date) {
-  var value = Math.floor(date.getMonth() / 3);
-  return count < 4 ? this.dateTimeSymbols_.SHORTQUARTERS[value] :
-                     this.dateTimeSymbols_.QUARTERS[value];
-};
-
-
-/**
- * Formats Date field according to pattern specified
- *
- * @param {number} count Number of time pattern char repeats, it controls
- *     how a field should be formatted.
- * @param {!goog.date.DateLike} date It holds the date object to be formatted.
- * @return {string} Formatted string that represent this field.
- * @private
- */
-goog.i18n.DateTimeFormat.prototype.formatDate_ = function(count, date) {
-  return this.localizeNumbers_(goog.string.padNumber(date.getDate(), count));
-};
-
-
-/**
- * Formats Minutes field according to pattern specified
- *
- * @param {number} count Number of time pattern char repeats, it controls
- *     how a field should be formatted.
- * @param {!goog.date.DateLike} date It holds the date object to be formatted.
- * @return {string} Formatted string that represent this field.
- * @private
- */
-goog.i18n.DateTimeFormat.prototype.formatMinutes_ = function(count, date) {
-  goog.i18n.DateTimeFormat.validateDateHasTime_(date);
-  return this.localizeNumbers_(
-      goog.string.padNumber(
-          /** @type {!goog.date.DateTime} */ (date).getMinutes(), count));
-};
-
-
-/**
- * Formats Seconds field according to pattern specified
- *
- * @param {number} count Number of time pattern char repeats, it controls
- *     how a field should be formatted.
- * @param {!goog.date.DateLike} date It holds the date object to be formatted.
- * @return {string} Formatted string that represent this field.
- * @private
- */
-goog.i18n.DateTimeFormat.prototype.formatSeconds_ = function(count, date) {
-  goog.i18n.DateTimeFormat.validateDateHasTime_(date);
-  return this.localizeNumbers_(
-      goog.string.padNumber(
-          /** @type {!goog.date.DateTime} */ (date).getSeconds(), count));
-};
-
-
-/**
- * Formats the week of year field according to pattern specified
- *
- * @param {number} count Number of time pattern char repeats, it controls
- *     how a field should be formatted.
- * @param {!goog.date.DateLike} date It holds the date object to be formatted.
- * @return {string} Formatted string that represent this field.
- * @private
- */
-goog.i18n.DateTimeFormat.prototype.formatWeekOfYear_ = function(count, date) {
-
-
-  var weekNum = goog.date.getWeekNumber(
-      date.getFullYear(), date.getMonth(), date.getDate(),
-      this.dateTimeSymbols_.FIRSTWEEKCUTOFFDAY,
-      this.dateTimeSymbols_.FIRSTDAYOFWEEK);
-
-  return this.localizeNumbers_(goog.string.padNumber(weekNum, count));
-};
-
-
-/**
- * Formats TimeZone field following RFC
- *
- * @param {number} count Number of time pattern char repeats, it controls
- *     how a field should be formatted.
- * @param {!goog.date.DateLike} date It holds the date object to be formatted.
- * @param {goog.i18n.TimeZone=} opt_timeZone This holds current time zone info.
- * @return {string} Formatted string that represent this field.
- * @private
- */
-goog.i18n.DateTimeFormat.prototype.formatTimeZoneRFC_ = function(
-    count, date, opt_timeZone) {
-  opt_timeZone = opt_timeZone ||
-      goog.i18n.TimeZone.createTimeZone(date.getTimezoneOffset());
-
-  // RFC 822 formats should be kept in ASCII, but localized GMT formats may need
-  // to use native digits.
-  return count < 4 ? opt_timeZone.getRFCTimeZoneString(date) :
-                     this.localizeNumbers_(opt_timeZone.getGMTString(date));
-};
-
-
-/**
- * Generate GMT timeZone string for given date
- * @param {number} count Number of time pattern char repeats, it controls
- *     how a field should be formatted.
- * @param {!goog.date.DateLike} date Whose value being evaluated.
- * @param {goog.i18n.TimeZone=} opt_timeZone This holds current time zone info.
- * @return {string} GMT timeZone string.
- * @private
- */
-goog.i18n.DateTimeFormat.prototype.formatTimeZone_ = function(
-    count, date, opt_timeZone) {
-  opt_timeZone = opt_timeZone ||
-      goog.i18n.TimeZone.createTimeZone(date.getTimezoneOffset());
-  return count < 4 ? opt_timeZone.getShortName(date) :
-                     opt_timeZone.getLongName(date);
-};
-
-
-/**
- * Generate GMT timeZone string for given date
- * @param {!goog.date.DateLike} date Whose value being evaluated.
- * @param {goog.i18n.TimeZone=} opt_timeZone This holds current time zone info.
- * @return {string} GMT timeZone string.
- * @private
- */
-goog.i18n.DateTimeFormat.prototype.formatTimeZoneId_ = function(
-    date, opt_timeZone) {
-  opt_timeZone = opt_timeZone ||
-      goog.i18n.TimeZone.createTimeZone(date.getTimezoneOffset());
-  return opt_timeZone.getTimeZoneId();
-};
-
-
-/**
- * Generate localized, location dependent time zone id
- * @param {number} count Number of time pattern char repeats, it controls
- *     how a field should be formatted.
- * @param {!goog.date.DateLike} date Whose value being evaluated.
- * @param {goog.i18n.TimeZone=} opt_timeZone This holds current time zone info.
- * @return {string} GMT timeZone string.
- * @private
- */
-goog.i18n.DateTimeFormat.prototype.formatTimeZoneLocationId_ = function(
-    count, date, opt_timeZone) {
-  opt_timeZone = opt_timeZone ||
-      goog.i18n.TimeZone.createTimeZone(date.getTimezoneOffset());
-  return count <= 2 ? opt_timeZone.getTimeZoneId() :
-                      opt_timeZone.getGenericLocation(date);
-};
-
-
-/**
- * Formatting one date field.
- * @param {string} patternStr The pattern string for the field being formatted.
- * @param {!goog.date.DateLike} date represents the real date to be formatted.
- * @param {!goog.date.DateLike} dateForDate used to resolve date fields
- *     for formatting.
- * @param {!goog.date.DateLike} dateForTime used to resolve time fields
- *     for formatting.
- * @param {goog.i18n.TimeZone=} opt_timeZone This holds current time zone info.
- * @return {string} string representation for the given field.
- * @private
- */
-goog.i18n.DateTimeFormat.prototype.formatField_ = function(
-    patternStr, date, dateForDate, dateForTime, opt_timeZone) {
-  var count = patternStr.length;
-  switch (patternStr.charAt(0)) {
-    case 'G':
-      return this.formatEra_(count, dateForDate);
-    case 'y':
-      return this.formatYear_(count, dateForDate);
-    case 'M':
-      return this.formatMonth_(count, dateForDate);
-    case 'k':
-      return this.format24Hours_(count, dateForTime);
-    case 'S':
-      return this.formatFractionalSeconds_(count, dateForTime);
-    case 'E':
-      return this.formatDayOfWeek_(count, dateForDate);
-    case 'a':
-      return this.formatAmPm_(count, dateForTime);
-    case 'h':
-      return this.format1To12Hours_(count, dateForTime);
-    case 'K':
-      return this.format0To11Hours_(count, dateForTime);
-    case 'H':
-      return this.format0To23Hours_(count, dateForTime);
-    case 'c':
-      return this.formatStandaloneDay_(count, dateForDate);
-    case 'L':
-      return this.formatStandaloneMonth_(count, dateForDate);
-    case 'Q':
-      return this.formatQuarter_(count, dateForDate);
-    case 'd':
-      return this.formatDate_(count, dateForDate);
-    case 'm':
-      return this.formatMinutes_(count, dateForTime);
-    case 's':
-      return this.formatSeconds_(count, dateForTime);
-    case 'v':
-      return this.formatTimeZoneId_(date, opt_timeZone);
-    case 'V':
-      return this.formatTimeZoneLocationId_(count, date, opt_timeZone);
-    case 'w':
-      return this.formatWeekOfYear_(count, dateForTime);
-    case 'z':
-      return this.formatTimeZone_(count, date, opt_timeZone);
-    case 'Z':
-      return this.formatTimeZoneRFC_(count, date, opt_timeZone);
-    default:
-      return '';
-  }
+  steps.push('z');
 };

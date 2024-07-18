@@ -1,4 +1,4 @@
-// Copyright 2006 The Closure Library Authors. All Rights Reserved.
+// Copyright 2005 The Closure Library Authors. All Rights Reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,759 +13,977 @@
 // limitations under the License.
 
 /**
- * @fileoverview Utilities related to color and color conversion.
+ * @fileoverview An event manager for both native browser event
+ * targets and custom JavaScript event targets
+ * ({@code goog.events.Listenable}). This provides an abstraction
+ * over browsers' event systems.
+ *
+ * It also provides a simulation of W3C event model's capture phase in
+ * Internet Explorer (IE 8 and below). Caveat: the simulation does not
+ * interact well with listeners registered directly on the elements
+ * (bypassing goog.events) or even with listeners registered via
+ * goog.events in a separate JS binary. In these cases, we provide
+ * no ordering guarantees.
+ *
+ * The listeners will receive a "patched" event object. Such event object
+ * contains normalized values for certain event properties that differs in
+ * different browsers.
+ *
+ * Example usage:
+ * <pre>
+ * goog.events.listen(myNode, 'click', function(e) { alert('woo') });
+ * goog.events.listen(myNode, 'mouseover', mouseHandler, true);
+ * goog.events.unlisten(myNode, 'mouseover', mouseHandler, true);
+ * goog.events.removeAll(myNode);
+ * </pre>
+ *
+ *                                            in IE and event object patching]
+ * @author arv@google.com (Erik Arvidsson)
+ *
+ * @see ../demos/events.html
+ * @see ../demos/event-propagation.html
+ * @see ../demos/stopevent.html
  */
 
-goog.provide('goog.color');
-goog.provide('goog.color.Hsl');
-goog.provide('goog.color.Hsv');
-goog.provide('goog.color.Rgb');
+// IMPLEMENTATION NOTES:
+// goog.events stores an auxiliary data structure on each EventTarget
+// source being listened on. This allows us to take advantage of GC,
+// having the data structure GC'd when the EventTarget is GC'd. This
+// GC behavior is equivalent to using W3C DOM Events directly.
 
-goog.require('goog.color.names');
-goog.require('goog.math');
+goog.provide('goog.events');
+goog.provide('goog.events.CaptureSimulationMode');
+goog.provide('goog.events.Key');
+goog.provide('goog.events.ListenableType');
+
+goog.require('goog.asserts');
+goog.require('goog.debug.entryPointRegistry');
+goog.require('goog.events.BrowserEvent');
+goog.require('goog.events.BrowserFeature');
+goog.require('goog.events.Listenable');
+goog.require('goog.events.ListenerMap');
+
+goog.forwardDeclare('goog.debug.ErrorHandler');
+goog.forwardDeclare('goog.events.EventWrapper');
 
 
 /**
- * RGB color representation. An array containing three elements [r, g, b],
- * each an integer in [0, 255], representing the red, green, and blue components
- * of the color respectively.
- * @typedef {Array<number>}
+ * @typedef {number|goog.events.ListenableKey}
  */
-goog.color.Rgb;
+goog.events.Key;
 
 
 /**
- * HSV color representation. An array containing three elements [h, s, v]:
- * h (hue) must be an integer in [0, 360], cyclic.
- * s (saturation) must be a number in [0, 1].
- * v (value/brightness) must be an integer in [0, 255].
- * @typedef {Array<number>}
+ * @typedef {EventTarget|goog.events.Listenable}
  */
-goog.color.Hsv;
+goog.events.ListenableType;
 
 
 /**
- * HSL color representation. An array containing three elements [h, s, l]:
- * h (hue) must be an integer in [0, 360], cyclic.
- * s (saturation) must be a number in [0, 1].
- * l (lightness) must be a number in [0, 1].
- * @typedef {Array<number>}
+ * Property name on a native event target for the listener map
+ * associated with the event target.
+ * @private @const {string}
  */
-goog.color.Hsl;
+goog.events.LISTENER_MAP_PROP_ = 'closure_lm_' + ((Math.random() * 1e6) | 0);
 
 
 /**
- * Parses a color out of a string.
- * @param {string} str Color in some format.
- * @return {{hex: string, type: string}} 'hex' is a string containing a hex
- *     representation of the color, 'type' is a string containing the type
- *     of color format passed in ('hex', 'rgb', 'named').
+ * String used to prepend to IE event types.
+ * @const
+ * @private
  */
-goog.color.parse = function(str) {
-  var result = {};
-  str = String(str);
+goog.events.onString_ = 'on';
 
-  var maybeHex = goog.color.prependHashIfNecessaryHelper(str);
-  if (goog.color.isValidHexColor_(maybeHex)) {
-    result.hex = goog.color.normalizeHex(maybeHex);
-    result.type = 'hex';
-    return result;
+
+/**
+ * Map of computed "on<eventname>" strings for IE event types. Caching
+ * this removes an extra object allocation in goog.events.listen which
+ * improves IE6 performance.
+ * @const
+ * @dict
+ * @private
+ */
+goog.events.onStringMap_ = {};
+
+
+/**
+ * @enum {number} Different capture simulation mode for IE8-.
+ */
+goog.events.CaptureSimulationMode = {
+  /**
+   * Does not perform capture simulation. Will asserts in IE8- when you
+   * add capture listeners.
+   */
+  OFF_AND_FAIL: 0,
+
+  /**
+   * Does not perform capture simulation, silently ignore capture
+   * listeners.
+   */
+  OFF_AND_SILENT: 1,
+
+  /**
+   * Performs capture simulation.
+   */
+  ON: 2
+};
+
+
+/**
+ * @define {number} The capture simulation mode for IE8-. By default,
+ *     this is ON.
+ */
+goog.define('goog.events.CAPTURE_SIMULATION_MODE', 2);
+
+
+/**
+ * Estimated count of total native listeners.
+ * @private {number}
+ */
+goog.events.listenerCountEstimate_ = 0;
+
+
+/**
+ * Adds an event listener for a specific event on a native event
+ * target (such as a DOM element) or an object that has implemented
+ * {@link goog.events.Listenable}. A listener can only be added once
+ * to an object and if it is added again the key for the listener is
+ * returned. Note that if the existing listener is a one-off listener
+ * (registered via listenOnce), it will no longer be a one-off
+ * listener after a call to listen().
+ *
+ * @param {EventTarget|goog.events.Listenable} src The node to listen
+ *     to events on.
+ * @param {string|Array<string>|
+ *     !goog.events.EventId<EVENTOBJ>|!Array<!goog.events.EventId<EVENTOBJ>>}
+ *     type Event type or array of event types.
+ * @param {function(this:T, EVENTOBJ):?|{handleEvent:function(?):?}|null}
+ *     listener Callback method, or an object with a handleEvent function.
+ *     WARNING: passing an Object is now softly deprecated.
+ * @param {boolean=} opt_capt Whether to fire in capture phase (defaults to
+ *     false).
+ * @param {T=} opt_handler Element in whose scope to call the listener.
+ * @return {goog.events.Key} Unique key for the listener.
+ * @template T,EVENTOBJ
+ */
+goog.events.listen = function(src, type, listener, opt_capt, opt_handler) {
+  if (goog.isArray(type)) {
+    for (var i = 0; i < type.length; i++) {
+      goog.events.listen(src, type[i], listener, opt_capt, opt_handler);
+    }
+    return null;
+  }
+
+  listener = goog.events.wrapListener(listener);
+  if (goog.events.Listenable.isImplementedBy(src)) {
+    return src.listen(
+        /** @type {string|!goog.events.EventId} */ (type), listener, opt_capt,
+        opt_handler);
   } else {
-    var rgb = goog.color.isValidRgbColor_(str);
-    if (rgb.length) {
-      result.hex = goog.color.rgbArrayToHex(rgb);
-      result.type = 'rgb';
-      return result;
-    } else if (goog.color.names) {
-      var hex = goog.color.names[str.toLowerCase()];
-      if (hex) {
-        result.hex = hex;
-        result.type = 'named';
-        return result;
+    return goog.events.listen_(
+        /** @type {!EventTarget} */ (src),
+        /** @type {string|!goog.events.EventId} */ (type), listener,
+        /* callOnce */ false, opt_capt, opt_handler);
+  }
+};
+
+
+/**
+ * Adds an event listener for a specific event on a native event
+ * target. A listener can only be added once to an object and if it
+ * is added again the key for the listener is returned.
+ *
+ * Note that a one-off listener will not change an existing listener,
+ * if any. On the other hand a normal listener will change existing
+ * one-off listener to become a normal listener.
+ *
+ * @param {EventTarget} src The node to listen to events on.
+ * @param {string|!goog.events.EventId} type Event type.
+ * @param {!Function} listener Callback function.
+ * @param {boolean} callOnce Whether the listener is a one-off
+ *     listener or otherwise.
+ * @param {boolean=} opt_capt Whether to fire in capture phase (defaults to
+ *     false).
+ * @param {Object=} opt_handler Element in whose scope to call the listener.
+ * @return {goog.events.ListenableKey} Unique key for the listener.
+ * @private
+ */
+goog.events.listen_ = function(
+    src, type, listener, callOnce, opt_capt, opt_handler) {
+  if (!type) {
+    throw Error('Invalid event type');
+  }
+
+  var capture = !!opt_capt;
+  if (capture && !goog.events.BrowserFeature.HAS_W3C_EVENT_SUPPORT) {
+    if (goog.events.CAPTURE_SIMULATION_MODE ==
+        goog.events.CaptureSimulationMode.OFF_AND_FAIL) {
+      goog.asserts.fail('Can not register capture listener in IE8-.');
+      return null;
+    } else if (
+        goog.events.CAPTURE_SIMULATION_MODE ==
+        goog.events.CaptureSimulationMode.OFF_AND_SILENT) {
+      return null;
+    }
+  }
+
+  var listenerMap = goog.events.getListenerMap_(src);
+  if (!listenerMap) {
+    src[goog.events.LISTENER_MAP_PROP_] = listenerMap =
+        new goog.events.ListenerMap(src);
+  }
+
+  var listenerObj =
+      listenerMap.add(type, listener, callOnce, opt_capt, opt_handler);
+
+  // If the listenerObj already has a proxy, it has been set up
+  // previously. We simply return.
+  if (listenerObj.proxy) {
+    return listenerObj;
+  }
+
+  var proxy = goog.events.getProxy();
+  listenerObj.proxy = proxy;
+
+  proxy.src = src;
+  proxy.listener = listenerObj;
+
+  // Attach the proxy through the browser's API
+  if (src.addEventListener) {
+    src.addEventListener(type.toString(), proxy, capture);
+  } else if (src.attachEvent) {
+    // The else if above used to be an unconditional else. It would call
+    // exception on IE11, spoiling the day of some callers. The previous
+    // incarnation of this code, from 2007, indicates that it replaced an
+    // earlier still version that caused excess allocations on IE6.
+    src.attachEvent(goog.events.getOnString_(type.toString()), proxy);
+  } else {
+    throw Error('addEventListener and attachEvent are unavailable.');
+  }
+
+  goog.events.listenerCountEstimate_++;
+  return listenerObj;
+};
+
+
+/**
+ * Helper function for returning a proxy function.
+ * @return {!Function} A new or reused function object.
+ */
+goog.events.getProxy = function() {
+  var proxyCallbackFunction = goog.events.handleBrowserEvent_;
+  // Use a local var f to prevent one allocation.
+  var f =
+      goog.events.BrowserFeature.HAS_W3C_EVENT_SUPPORT ? function(eventObject) {
+        return proxyCallbackFunction.call(f.src, f.listener, eventObject);
+      } : function(eventObject) {
+        var v = proxyCallbackFunction.call(f.src, f.listener, eventObject);
+        // NOTE(chrishenry): In IE, we hack in a capture phase. However, if
+        // there is inline event handler which tries to prevent default (for
+        // example <a href="..." onclick="return false">...</a>) in a
+        // descendant element, the prevent default will be overridden
+        // by this listener if this listener were to return true. Hence, we
+        // return undefined.
+        if (!v) return v;
+      };
+  return f;
+};
+
+
+/**
+ * Adds an event listener for a specific event on a native event
+ * target (such as a DOM element) or an object that has implemented
+ * {@link goog.events.Listenable}. After the event has fired the event
+ * listener is removed from the target.
+ *
+ * If an existing listener already exists, listenOnce will do
+ * nothing. In particular, if the listener was previously registered
+ * via listen(), listenOnce() will not turn the listener into a
+ * one-off listener. Similarly, if there is already an existing
+ * one-off listener, listenOnce does not modify the listeners (it is
+ * still a once listener).
+ *
+ * @param {EventTarget|goog.events.Listenable} src The node to listen
+ *     to events on.
+ * @param {string|Array<string>|
+ *     !goog.events.EventId<EVENTOBJ>|!Array<!goog.events.EventId<EVENTOBJ>>}
+ *     type Event type or array of event types.
+ * @param {function(this:T, EVENTOBJ):?|{handleEvent:function(?):?}|null}
+ *     listener Callback method.
+ * @param {boolean=} opt_capt Fire in capture phase?.
+ * @param {T=} opt_handler Element in whose scope to call the listener.
+ * @return {goog.events.Key} Unique key for the listener.
+ * @template T,EVENTOBJ
+ */
+goog.events.listenOnce = function(src, type, listener, opt_capt, opt_handler) {
+  if (goog.isArray(type)) {
+    for (var i = 0; i < type.length; i++) {
+      goog.events.listenOnce(src, type[i], listener, opt_capt, opt_handler);
+    }
+    return null;
+  }
+
+  listener = goog.events.wrapListener(listener);
+  if (goog.events.Listenable.isImplementedBy(src)) {
+    return src.listenOnce(
+        /** @type {string|!goog.events.EventId} */ (type), listener, opt_capt,
+        opt_handler);
+  } else {
+    return goog.events.listen_(
+        /** @type {!EventTarget} */ (src),
+        /** @type {string|!goog.events.EventId} */ (type), listener,
+        /* callOnce */ true, opt_capt, opt_handler);
+  }
+};
+
+
+/**
+ * Adds an event listener with a specific event wrapper on a DOM Node or an
+ * object that has implemented {@link goog.events.Listenable}. A listener can
+ * only be added once to an object.
+ *
+ * @param {EventTarget|goog.events.Listenable} src The target to
+ *     listen to events on.
+ * @param {goog.events.EventWrapper} wrapper Event wrapper to use.
+ * @param {function(this:T, ?):?|{handleEvent:function(?):?}|null} listener
+ *     Callback method, or an object with a handleEvent function.
+ * @param {boolean=} opt_capt Whether to fire in capture phase (defaults to
+ *     false).
+ * @param {T=} opt_handler Element in whose scope to call the listener.
+ * @template T
+ */
+goog.events.listenWithWrapper = function(
+    src, wrapper, listener, opt_capt, opt_handler) {
+  wrapper.listen(src, listener, opt_capt, opt_handler);
+};
+
+
+/**
+ * Removes an event listener which was added with listen().
+ *
+ * @param {EventTarget|goog.events.Listenable} src The target to stop
+ *     listening to events on.
+ * @param {string|Array<string>|
+ *     !goog.events.EventId<EVENTOBJ>|!Array<!goog.events.EventId<EVENTOBJ>>}
+ *     type Event type or array of event types to unlisten to.
+ * @param {function(?):?|{handleEvent:function(?):?}|null} listener The
+ *     listener function to remove.
+ * @param {boolean=} opt_capt In DOM-compliant browsers, this determines
+ *     whether the listener is fired during the capture or bubble phase of the
+ *     event.
+ * @param {Object=} opt_handler Element in whose scope to call the listener.
+ * @return {?boolean} indicating whether the listener was there to remove.
+ * @template EVENTOBJ
+ */
+goog.events.unlisten = function(src, type, listener, opt_capt, opt_handler) {
+  if (goog.isArray(type)) {
+    for (var i = 0; i < type.length; i++) {
+      goog.events.unlisten(src, type[i], listener, opt_capt, opt_handler);
+    }
+    return null;
+  }
+
+  listener = goog.events.wrapListener(listener);
+  if (goog.events.Listenable.isImplementedBy(src)) {
+    return src.unlisten(
+        /** @type {string|!goog.events.EventId} */ (type), listener, opt_capt,
+        opt_handler);
+  }
+
+  if (!src) {
+    // TODO(chrishenry): We should tighten the API to only accept
+    // non-null objects, or add an assertion here.
+    return false;
+  }
+
+  var capture = !!opt_capt;
+  var listenerMap = goog.events.getListenerMap_(
+      /** @type {!EventTarget} */ (src));
+  if (listenerMap) {
+    var listenerObj = listenerMap.getListener(
+        /** @type {string|!goog.events.EventId} */ (type), listener, capture,
+        opt_handler);
+    if (listenerObj) {
+      return goog.events.unlistenByKey(listenerObj);
+    }
+  }
+
+  return false;
+};
+
+
+/**
+ * Removes an event listener which was added with listen() by the key
+ * returned by listen().
+ *
+ * @param {goog.events.Key} key The key returned by listen() for this
+ *     event listener.
+ * @return {boolean} indicating whether the listener was there to remove.
+ */
+goog.events.unlistenByKey = function(key) {
+  // TODO(chrishenry): Remove this check when tests that rely on this
+  // are fixed.
+  if (goog.isNumber(key)) {
+    return false;
+  }
+
+  var listener = key;
+  if (!listener || listener.removed) {
+    return false;
+  }
+
+  var src = listener.src;
+  if (goog.events.Listenable.isImplementedBy(src)) {
+    return /** @type {!goog.events.Listenable} */ (src).unlistenByKey(listener);
+  }
+
+  var type = listener.type;
+  var proxy = listener.proxy;
+  if (src.removeEventListener) {
+    src.removeEventListener(type, proxy, listener.capture);
+  } else if (src.detachEvent) {
+    src.detachEvent(goog.events.getOnString_(type), proxy);
+  }
+  goog.events.listenerCountEstimate_--;
+
+  var listenerMap = goog.events.getListenerMap_(
+      /** @type {!EventTarget} */ (src));
+  // TODO(chrishenry): Try to remove this conditional and execute the
+  // first branch always. This should be safe.
+  if (listenerMap) {
+    listenerMap.removeByKey(listener);
+    if (listenerMap.getTypeCount() == 0) {
+      // Null the src, just because this is simple to do (and useful
+      // for IE <= 7).
+      listenerMap.src = null;
+      // We don't use delete here because IE does not allow delete
+      // on a window object.
+      src[goog.events.LISTENER_MAP_PROP_] = null;
+    }
+  } else {
+    listener.markAsRemoved();
+  }
+
+  return true;
+};
+
+
+/**
+ * Removes an event listener which was added with listenWithWrapper().
+ *
+ * @param {EventTarget|goog.events.Listenable} src The target to stop
+ *     listening to events on.
+ * @param {goog.events.EventWrapper} wrapper Event wrapper to use.
+ * @param {function(?):?|{handleEvent:function(?):?}|null} listener The
+ *     listener function to remove.
+ * @param {boolean=} opt_capt In DOM-compliant browsers, this determines
+ *     whether the listener is fired during the capture or bubble phase of the
+ *     event.
+ * @param {Object=} opt_handler Element in whose scope to call the listener.
+ */
+goog.events.unlistenWithWrapper = function(
+    src, wrapper, listener, opt_capt, opt_handler) {
+  wrapper.unlisten(src, listener, opt_capt, opt_handler);
+};
+
+
+/**
+ * Removes all listeners from an object. You can also optionally
+ * remove listeners of a particular type.
+ *
+ * @param {Object|undefined} obj Object to remove listeners from. Must be an
+ *     EventTarget or a goog.events.Listenable.
+ * @param {string|!goog.events.EventId=} opt_type Type of event to remove.
+ *     Default is all types.
+ * @return {number} Number of listeners removed.
+ */
+goog.events.removeAll = function(obj, opt_type) {
+  // TODO(chrishenry): Change the type of obj to
+  // (!EventTarget|!goog.events.Listenable).
+
+  if (!obj) {
+    return 0;
+  }
+
+  if (goog.events.Listenable.isImplementedBy(obj)) {
+    return /** @type {?} */ (obj).removeAllListeners(opt_type);
+  }
+
+  var listenerMap = goog.events.getListenerMap_(
+      /** @type {!EventTarget} */ (obj));
+  if (!listenerMap) {
+    return 0;
+  }
+
+  var count = 0;
+  var typeStr = opt_type && opt_type.toString();
+  for (var type in listenerMap.listeners) {
+    if (!typeStr || type == typeStr) {
+      // Clone so that we don't need to worry about unlistenByKey
+      // changing the content of the ListenerMap.
+      var listeners = listenerMap.listeners[type].concat();
+      for (var i = 0; i < listeners.length; ++i) {
+        if (goog.events.unlistenByKey(listeners[i])) {
+          ++count;
+        }
       }
     }
   }
-  throw Error(str + ' is not a valid color string');
+  return count;
 };
 
 
 /**
- * Determines if the given string can be parsed as a color.
- *     {@see goog.color.parse}.
- * @param {string} str Potential color string.
- * @return {boolean} True if str is in a format that can be parsed to a color.
+ * Gets the listeners for a given object, type and capture phase.
+ *
+ * @param {Object} obj Object to get listeners for.
+ * @param {string|!goog.events.EventId} type Event type.
+ * @param {boolean} capture Capture phase?.
+ * @return {Array<!goog.events.Listener>} Array of listener objects.
  */
-goog.color.isValidColor = function(str) {
-  var maybeHex = goog.color.prependHashIfNecessaryHelper(str);
-  return !!(
-      goog.color.isValidHexColor_(maybeHex) ||
-      goog.color.isValidRgbColor_(str).length ||
-      goog.color.names && goog.color.names[str.toLowerCase()]);
-};
-
-
-/**
- * Parses red, green, blue components out of a valid rgb color string.
- * Throws Error if the color string is invalid.
- * @param {string} str RGB representation of a color.
- *    {@see goog.color.isValidRgbColor_}.
- * @return {!goog.color.Rgb} rgb representation of the color.
- */
-goog.color.parseRgb = function(str) {
-  var rgb = goog.color.isValidRgbColor_(str);
-  if (!rgb.length) {
-    throw Error(str + ' is not a valid RGB color');
-  }
-  return rgb;
-};
-
-
-/**
- * Converts a hex representation of a color to RGB.
- * @param {string} hexColor Color to convert.
- * @return {string} string of the form 'rgb(R,G,B)' which can be used in
- *    styles.
- */
-goog.color.hexToRgbStyle = function(hexColor) {
-  return goog.color.rgbStyle_(goog.color.hexToRgb(hexColor));
-};
-
-
-/**
- * Regular expression for extracting the digits in a hex color triplet.
- * @type {RegExp}
- * @private
- */
-goog.color.hexTripletRe_ = /#(.)(.)(.)/;
-
-
-/**
- * Normalize an hex representation of a color
- * @param {string} hexColor an hex color string.
- * @return {string} hex color in the format '#rrggbb' with all lowercase
- *     literals.
- */
-goog.color.normalizeHex = function(hexColor) {
-  if (!goog.color.isValidHexColor_(hexColor)) {
-    throw Error("'" + hexColor + "' is not a valid hex color");
-  }
-  if (hexColor.length == 4) {  // of the form #RGB
-    hexColor = hexColor.replace(goog.color.hexTripletRe_, '#$1$1$2$2$3$3');
-  }
-  return hexColor.toLowerCase();
-};
-
-
-/**
- * Converts a hex representation of a color to RGB.
- * @param {string} hexColor Color to convert.
- * @return {!goog.color.Rgb} rgb representation of the color.
- */
-goog.color.hexToRgb = function(hexColor) {
-  hexColor = goog.color.normalizeHex(hexColor);
-  var r = parseInt(hexColor.substr(1, 2), 16);
-  var g = parseInt(hexColor.substr(3, 2), 16);
-  var b = parseInt(hexColor.substr(5, 2), 16);
-
-  return [r, g, b];
-};
-
-
-/**
- * Converts a color from RGB to hex representation.
- * @param {number} r Amount of red, int between 0 and 255.
- * @param {number} g Amount of green, int between 0 and 255.
- * @param {number} b Amount of blue, int between 0 and 255.
- * @return {string} hex representation of the color.
- */
-goog.color.rgbToHex = function(r, g, b) {
-  r = Number(r);
-  g = Number(g);
-  b = Number(b);
-  if (r != (r & 255) || g != (g & 255) || b != (b & 255)) {
-    throw Error('"(' + r + ',' + g + ',' + b + '") is not a valid RGB color');
-  }
-  var hexR = goog.color.prependZeroIfNecessaryHelper(r.toString(16));
-  var hexG = goog.color.prependZeroIfNecessaryHelper(g.toString(16));
-  var hexB = goog.color.prependZeroIfNecessaryHelper(b.toString(16));
-  return '#' + hexR + hexG + hexB;
-};
-
-
-/**
- * Converts a color from RGB to hex representation.
- * @param {goog.color.Rgb} rgb rgb representation of the color.
- * @return {string} hex representation of the color.
- */
-goog.color.rgbArrayToHex = function(rgb) {
-  return goog.color.rgbToHex(rgb[0], rgb[1], rgb[2]);
-};
-
-
-/**
- * Converts a color from RGB color space to HSL color space.
- * Modified from {@link http://en.wikipedia.org/wiki/HLS_color_space}.
- * @param {number} r Value of red, in [0, 255].
- * @param {number} g Value of green, in [0, 255].
- * @param {number} b Value of blue, in [0, 255].
- * @return {!goog.color.Hsl} hsl representation of the color.
- */
-goog.color.rgbToHsl = function(r, g, b) {
-  // First must normalize r, g, b to be between 0 and 1.
-  var normR = r / 255;
-  var normG = g / 255;
-  var normB = b / 255;
-  var max = Math.max(normR, normG, normB);
-  var min = Math.min(normR, normG, normB);
-  var h = 0;
-  var s = 0;
-
-  // Luminosity is the average of the max and min rgb color intensities.
-  var l = 0.5 * (max + min);
-
-  // The hue and saturation are dependent on which color intensity is the max.
-  // If max and min are equal, the color is gray and h and s should be 0.
-  if (max != min) {
-    if (max == normR) {
-      h = 60 * (normG - normB) / (max - min);
-    } else if (max == normG) {
-      h = 60 * (normB - normR) / (max - min) + 120;
-    } else if (max == normB) {
-      h = 60 * (normR - normG) / (max - min) + 240;
+goog.events.getListeners = function(obj, type, capture) {
+  if (goog.events.Listenable.isImplementedBy(obj)) {
+    return /** @type {!goog.events.Listenable} */ (obj).getListeners(
+        type, capture);
+  } else {
+    if (!obj) {
+      // TODO(chrishenry): We should tighten the API to accept
+      // !EventTarget|goog.events.Listenable, and add an assertion here.
+      return [];
     }
 
-    if (0 < l && l <= 0.5) {
-      s = (max - min) / (2 * l);
+    var listenerMap = goog.events.getListenerMap_(
+        /** @type {!EventTarget} */ (obj));
+    return listenerMap ? listenerMap.getListeners(type, capture) : [];
+  }
+};
+
+
+/**
+ * Gets the goog.events.Listener for the event or null if no such listener is
+ * in use.
+ *
+ * @param {EventTarget|goog.events.Listenable} src The target from
+ *     which to get listeners.
+ * @param {?string|!goog.events.EventId<EVENTOBJ>} type The type of the event.
+ * @param {function(EVENTOBJ):?|{handleEvent:function(?):?}|null} listener The
+ *     listener function to get.
+ * @param {boolean=} opt_capt In DOM-compliant browsers, this determines
+ *                            whether the listener is fired during the
+ *                            capture or bubble phase of the event.
+ * @param {Object=} opt_handler Element in whose scope to call the listener.
+ * @return {goog.events.ListenableKey} the found listener or null if not found.
+ * @template EVENTOBJ
+ */
+goog.events.getListener = function(src, type, listener, opt_capt, opt_handler) {
+  // TODO(chrishenry): Change type from ?string to string, or add assertion.
+  type = /** @type {string} */ (type);
+  listener = goog.events.wrapListener(listener);
+  var capture = !!opt_capt;
+  if (goog.events.Listenable.isImplementedBy(src)) {
+    return src.getListener(type, listener, capture, opt_handler);
+  }
+
+  if (!src) {
+    // TODO(chrishenry): We should tighten the API to only accept
+    // non-null objects, or add an assertion here.
+    return null;
+  }
+
+  var listenerMap = goog.events.getListenerMap_(
+      /** @type {!EventTarget} */ (src));
+  if (listenerMap) {
+    return listenerMap.getListener(type, listener, capture, opt_handler);
+  }
+  return null;
+};
+
+
+/**
+ * Returns whether an event target has any active listeners matching the
+ * specified signature. If either the type or capture parameters are
+ * unspecified, the function will match on the remaining criteria.
+ *
+ * @param {EventTarget|goog.events.Listenable} obj Target to get
+ *     listeners for.
+ * @param {string|!goog.events.EventId=} opt_type Event type.
+ * @param {boolean=} opt_capture Whether to check for capture or bubble-phase
+ *     listeners.
+ * @return {boolean} Whether an event target has one or more listeners matching
+ *     the requested type and/or capture phase.
+ */
+goog.events.hasListener = function(obj, opt_type, opt_capture) {
+  if (goog.events.Listenable.isImplementedBy(obj)) {
+    return obj.hasListener(opt_type, opt_capture);
+  }
+
+  var listenerMap = goog.events.getListenerMap_(
+      /** @type {!EventTarget} */ (obj));
+  return !!listenerMap && listenerMap.hasListener(opt_type, opt_capture);
+};
+
+
+/**
+ * Provides a nice string showing the normalized event objects public members
+ * @param {Object} e Event Object.
+ * @return {string} String of the public members of the normalized event object.
+ */
+goog.events.expose = function(e) {
+  var str = [];
+  for (var key in e) {
+    if (e[key] && e[key].id) {
+      str.push(key + ' = ' + e[key] + ' (' + e[key].id + ')');
     } else {
-      s = (max - min) / (2 - 2 * l);
+      str.push(key + ' = ' + e[key]);
     }
   }
-
-  // Make sure the hue falls between 0 and 360.
-  return [Math.round(h + 360) % 360, s, l];
+  return str.join('\n');
 };
 
 
 /**
- * Converts a color from RGB color space to HSL color space.
- * @param {goog.color.Rgb} rgb rgb representation of the color.
- * @return {!goog.color.Hsl} hsl representation of the color.
- */
-goog.color.rgbArrayToHsl = function(rgb) {
-  return goog.color.rgbToHsl(rgb[0], rgb[1], rgb[2]);
-};
-
-
-/**
- * Helper for hslToRgb.
- * @param {number} v1 Helper variable 1.
- * @param {number} v2 Helper variable 2.
- * @param {number} vH Helper variable 3.
- * @return {number} Appropriate RGB value, given the above.
+ * Returns a string with on prepended to the specified type. This is used for IE
+ * which expects "on" to be prepended. This function caches the string in order
+ * to avoid extra allocations in steady state.
+ * @param {string} type Event type.
+ * @return {string} The type string with 'on' prepended.
  * @private
  */
-goog.color.hueToRgb_ = function(v1, v2, vH) {
-  if (vH < 0) {
-    vH += 1;
-  } else if (vH > 1) {
-    vH -= 1;
+goog.events.getOnString_ = function(type) {
+  if (type in goog.events.onStringMap_) {
+    return goog.events.onStringMap_[type];
   }
-  if ((6 * vH) < 1) {
-    return (v1 + (v2 - v1) * 6 * vH);
-  } else if (2 * vH < 1) {
-    return v2;
-  } else if (3 * vH < 2) {
-    return (v1 + (v2 - v1) * ((2 / 3) - vH) * 6);
-  }
-  return v1;
+  return goog.events.onStringMap_[type] = goog.events.onString_ + type;
 };
 
 
 /**
- * Converts a color from HSL color space to RGB color space.
- * Modified from {@link http://www.easyrgb.com/math.html}
- * @param {number} h Hue, in [0, 360].
- * @param {number} s Saturation, in [0, 1].
- * @param {number} l Luminosity, in [0, 1].
- * @return {!goog.color.Rgb} rgb representation of the color.
+ * Fires an object's listeners of a particular type and phase
+ *
+ * @param {Object} obj Object whose listeners to call.
+ * @param {string|!goog.events.EventId} type Event type.
+ * @param {boolean} capture Which event phase.
+ * @param {Object} eventObject Event object to be passed to listener.
+ * @return {boolean} True if all listeners returned true else false.
  */
-goog.color.hslToRgb = function(h, s, l) {
-  var r = 0;
-  var g = 0;
-  var b = 0;
-  var normH = h / 360;  // normalize h to fall in [0, 1]
+goog.events.fireListeners = function(obj, type, capture, eventObject) {
+  if (goog.events.Listenable.isImplementedBy(obj)) {
+    return /** @type {!goog.events.Listenable} */ (obj).fireListeners(
+        type, capture, eventObject);
+  }
 
-  if (s == 0) {
-    r = g = b = l * 255;
-  } else {
-    var temp1 = 0;
-    var temp2 = 0;
-    if (l < 0.5) {
-      temp2 = l * (1 + s);
+  return goog.events.fireListeners_(obj, type, capture, eventObject);
+};
+
+
+/**
+ * Fires an object's listeners of a particular type and phase.
+ * @param {Object} obj Object whose listeners to call.
+ * @param {string|!goog.events.EventId} type Event type.
+ * @param {boolean} capture Which event phase.
+ * @param {Object} eventObject Event object to be passed to listener.
+ * @return {boolean} True if all listeners returned true else false.
+ * @private
+ */
+goog.events.fireListeners_ = function(obj, type, capture, eventObject) {
+  /** @type {boolean} */
+  var retval = true;
+
+  var listenerMap = goog.events.getListenerMap_(
+      /** @type {EventTarget} */ (obj));
+  if (listenerMap) {
+    // TODO(chrishenry): Original code avoids array creation when there
+    // is no listener, so we do the same. If this optimization turns
+    // out to be not required, we can replace this with
+    // listenerMap.getListeners(type, capture) instead, which is simpler.
+    var listenerArray = listenerMap.listeners[type.toString()];
+    if (listenerArray) {
+      listenerArray = listenerArray.concat();
+      for (var i = 0; i < listenerArray.length; i++) {
+        var listener = listenerArray[i];
+        // We might not have a listener if the listener was removed.
+        if (listener && listener.capture == capture && !listener.removed) {
+          var result = goog.events.fireListener(listener, eventObject);
+          retval = retval && (result !== false);
+        }
+      }
+    }
+  }
+  return retval;
+};
+
+
+/**
+ * Fires a listener with a set of arguments
+ *
+ * @param {goog.events.Listener} listener The listener object to call.
+ * @param {Object} eventObject The event object to pass to the listener.
+ * @return {boolean} Result of listener.
+ */
+goog.events.fireListener = function(listener, eventObject) {
+  var listenerFn = listener.listener;
+  var listenerHandler = listener.handler || listener.src;
+
+  if (listener.callOnce) {
+    goog.events.unlistenByKey(listener);
+  }
+  return listenerFn.call(listenerHandler, eventObject);
+};
+
+
+/**
+ * Gets the total number of listeners currently in the system.
+ * @return {number} Number of listeners.
+ * @deprecated This returns estimated count, now that Closure no longer
+ * stores a central listener registry. We still return an estimation
+ * to keep existing listener-related tests passing. In the near future,
+ * this function will be removed.
+ */
+goog.events.getTotalListenerCount = function() {
+  return goog.events.listenerCountEstimate_;
+};
+
+
+/**
+ * Dispatches an event (or event like object) and calls all listeners
+ * listening for events of this type. The type of the event is decided by the
+ * type property on the event object.
+ *
+ * If any of the listeners returns false OR calls preventDefault then this
+ * function will return false.  If one of the capture listeners calls
+ * stopPropagation, then the bubble listeners won't fire.
+ *
+ * @param {goog.events.Listenable} src The event target.
+ * @param {goog.events.EventLike} e Event object.
+ * @return {boolean} If anyone called preventDefault on the event object (or
+ *     if any of the handlers returns false) this will also return false.
+ *     If there are no handlers, or if all handlers return true, this returns
+ *     true.
+ */
+goog.events.dispatchEvent = function(src, e) {
+  goog.asserts.assert(
+      goog.events.Listenable.isImplementedBy(src),
+      'Can not use goog.events.dispatchEvent with ' +
+          'non-goog.events.Listenable instance.');
+  return src.dispatchEvent(e);
+};
+
+
+/**
+ * Installs exception protection for the browser event entry point using the
+ * given error handler.
+ *
+ * @param {goog.debug.ErrorHandler} errorHandler Error handler with which to
+ *     protect the entry point.
+ */
+goog.events.protectBrowserEventEntryPoint = function(errorHandler) {
+  goog.events.handleBrowserEvent_ =
+      errorHandler.protectEntryPoint(goog.events.handleBrowserEvent_);
+};
+
+
+/**
+ * Handles an event and dispatches it to the correct listeners. This
+ * function is a proxy for the real listener the user specified.
+ *
+ * @param {goog.events.Listener} listener The listener object.
+ * @param {Event=} opt_evt Optional event object that gets passed in via the
+ *     native event handlers.
+ * @return {boolean} Result of the event handler.
+ * @this {EventTarget} The object or Element that fired the event.
+ * @private
+ */
+goog.events.handleBrowserEvent_ = function(listener, opt_evt) {
+  if (listener.removed) {
+    return true;
+  }
+
+  // Synthesize event propagation if the browser does not support W3C
+  // event model.
+  if (!goog.events.BrowserFeature.HAS_W3C_EVENT_SUPPORT) {
+    var ieEvent = opt_evt ||
+        /** @type {Event} */ (goog.getObjectByName('window.event'));
+    var evt = new goog.events.BrowserEvent(ieEvent, this);
+    /** @type {boolean} */
+    var retval = true;
+
+    if (goog.events.CAPTURE_SIMULATION_MODE ==
+        goog.events.CaptureSimulationMode.ON) {
+      // If we have not marked this event yet, we should perform capture
+      // simulation.
+      if (!goog.events.isMarkedIeEvent_(ieEvent)) {
+        goog.events.markIeEvent_(ieEvent);
+
+        var ancestors = [];
+        for (var parent = evt.currentTarget; parent;
+             parent = parent.parentNode) {
+          ancestors.push(parent);
+        }
+
+        // Fire capture listeners.
+        var type = listener.type;
+        for (var i = ancestors.length - 1; !evt.propagationStopped_ && i >= 0;
+             i--) {
+          evt.currentTarget = ancestors[i];
+          var result =
+              goog.events.fireListeners_(ancestors[i], type, true, evt);
+          retval = retval && result;
+        }
+
+        // Fire bubble listeners.
+        //
+        // We can technically rely on IE to perform bubble event
+        // propagation. However, it turns out that IE fires events in
+        // opposite order of attachEvent registration, which broke
+        // some code and tests that rely on the order. (While W3C DOM
+        // Level 2 Events TR leaves the event ordering unspecified,
+        // modern browsers and W3C DOM Level 3 Events Working Draft
+        // actually specify the order as the registration order.)
+        for (var i = 0; !evt.propagationStopped_ && i < ancestors.length; i++) {
+          evt.currentTarget = ancestors[i];
+          var result =
+              goog.events.fireListeners_(ancestors[i], type, false, evt);
+          retval = retval && result;
+        }
+      }
     } else {
-      temp2 = l + s - (s * l);
+      retval = goog.events.fireListener(listener, evt);
     }
-    temp1 = 2 * l - temp2;
-    r = 255 * goog.color.hueToRgb_(temp1, temp2, normH + (1 / 3));
-    g = 255 * goog.color.hueToRgb_(temp1, temp2, normH);
-    b = 255 * goog.color.hueToRgb_(temp1, temp2, normH - (1 / 3));
+    return retval;
   }
 
-  return [Math.round(r), Math.round(g), Math.round(b)];
+  // Otherwise, simply fire the listener.
+  return goog.events.fireListener(
+      listener, new goog.events.BrowserEvent(opt_evt, this));
 };
 
 
 /**
- * Converts a color from HSL color space to RGB color space.
- * @param {goog.color.Hsl} hsl hsl representation of the color.
- * @return {!goog.color.Rgb} rgb representation of the color.
- */
-goog.color.hslArrayToRgb = function(hsl) {
-  return goog.color.hslToRgb(hsl[0], hsl[1], hsl[2]);
-};
-
-
-/**
- * Helper for isValidHexColor_.
- * @type {RegExp}
+ * This is used to mark the IE event object so we do not do the Closure pass
+ * twice for a bubbling event.
+ * @param {Event} e The IE browser event.
  * @private
  */
-goog.color.validHexColorRe_ = /^#(?:[0-9a-f]{3}){1,2}$/i;
+goog.events.markIeEvent_ = function(e) {
+  // Only the keyCode and the returnValue can be changed. We use keyCode for
+  // non keyboard events.
+  // event.returnValue is a bit more tricky. It is undefined by default. A
+  // boolean false prevents the default action. In a window.onbeforeunload and
+  // the returnValue is non undefined it will be alerted. However, we will only
+  // modify the returnValue for keyboard events. We can get a problem if non
+  // closure events sets the keyCode or the returnValue
 
+  var useReturnValue = false;
 
-/**
- * Checks if a string is a valid hex color.  We expect strings of the format
- * #RRGGBB (ex: #1b3d5f) or #RGB (ex: #3CA == #33CCAA).
- * @param {string} str String to check.
- * @return {boolean} Whether the string is a valid hex color.
- * @private
- */
-goog.color.isValidHexColor_ = function(str) {
-  return goog.color.validHexColorRe_.test(str);
-};
-
-
-/**
- * Helper for isNormalizedHexColor_.
- * @type {RegExp}
- * @private
- */
-goog.color.normalizedHexColorRe_ = /^#[0-9a-f]{6}$/;
-
-
-/**
- * Checks if a string is a normalized hex color.
- * We expect strings of the format #RRGGBB (ex: #1b3d5f)
- * using only lowercase letters.
- * @param {string} str String to check.
- * @return {boolean} Whether the string is a normalized hex color.
- * @private
- */
-goog.color.isNormalizedHexColor_ = function(str) {
-  return goog.color.normalizedHexColorRe_.test(str);
-};
-
-
-/**
- * Regular expression for matching and capturing RGB style strings. Helper for
- * isValidRgbColor_.
- * @type {RegExp}
- * @private
- */
-goog.color.rgbColorRe_ =
-    /^(?:rgb)?\((0|[1-9]\d{0,2}),\s?(0|[1-9]\d{0,2}),\s?(0|[1-9]\d{0,2})\)$/i;
-
-
-/**
- * Checks if a string is a valid rgb color.  We expect strings of the format
- * '(r, g, b)', or 'rgb(r, g, b)', where each color component is an int in
- * [0, 255].
- * @param {string} str String to check.
- * @return {!goog.color.Rgb} the rgb representation of the color if it is
- *     a valid color, or the empty array otherwise.
- * @private
- */
-goog.color.isValidRgbColor_ = function(str) {
-  // Each component is separate (rather than using a repeater) so we can
-  // capture the match. Also, we explicitly set each component to be either 0,
-  // or start with a non-zero, to prevent octal numbers from slipping through.
-  var regExpResultArray = str.match(goog.color.rgbColorRe_);
-  if (regExpResultArray) {
-    var r = Number(regExpResultArray[1]);
-    var g = Number(regExpResultArray[2]);
-    var b = Number(regExpResultArray[3]);
-    if (r >= 0 && r <= 255 && g >= 0 && g <= 255 && b >= 0 && b <= 255) {
-      return [r, g, b];
-    }
-  }
-  return [];
-};
-
-
-/**
- * Takes a hex value and prepends a zero if it's a single digit.
- * Small helper method for use by goog.color and friends.
- * @param {string} hex Hex value to prepend if single digit.
- * @return {string} hex value prepended with zero if it was single digit,
- *     otherwise the same value that was passed in.
- */
-goog.color.prependZeroIfNecessaryHelper = function(hex) {
-  return hex.length == 1 ? '0' + hex : hex;
-};
-
-
-/**
- * Takes a string a prepends a '#' sign if one doesn't exist.
- * Small helper method for use by goog.color and friends.
- * @param {string} str String to check.
- * @return {string} The value passed in, prepended with a '#' if it didn't
- *     already have one.
- */
-goog.color.prependHashIfNecessaryHelper = function(str) {
-  return str.charAt(0) == '#' ? str : '#' + str;
-};
-
-
-/**
- * Takes an array of [r, g, b] and converts it into a string appropriate for
- * CSS styles.
- * @param {goog.color.Rgb} rgb rgb representation of the color.
- * @return {string} string of the form 'rgb(r,g,b)'.
- * @private
- */
-goog.color.rgbStyle_ = function(rgb) {
-  return 'rgb(' + rgb.join(',') + ')';
-};
-
-
-/**
- * Converts an HSV triplet to an RGB array.  V is brightness because b is
- *   reserved for blue in RGB.
- * @param {number} h Hue value in [0, 360].
- * @param {number} s Saturation value in [0, 1].
- * @param {number} brightness brightness in [0, 255].
- * @return {!goog.color.Rgb} rgb representation of the color.
- */
-goog.color.hsvToRgb = function(h, s, brightness) {
-  var red = 0;
-  var green = 0;
-  var blue = 0;
-  if (s == 0) {
-    red = brightness;
-    green = brightness;
-    blue = brightness;
-  } else {
-    var sextant = Math.floor(h / 60);
-    var remainder = (h / 60) - sextant;
-    var val1 = brightness * (1 - s);
-    var val2 = brightness * (1 - (s * remainder));
-    var val3 = brightness * (1 - (s * (1 - remainder)));
-    switch (sextant) {
-      case 1:
-        red = val2;
-        green = brightness;
-        blue = val1;
-        break;
-      case 2:
-        red = val1;
-        green = brightness;
-        blue = val3;
-        break;
-      case 3:
-        red = val1;
-        green = val2;
-        blue = brightness;
-        break;
-      case 4:
-        red = val3;
-        green = val1;
-        blue = brightness;
-        break;
-      case 5:
-        red = brightness;
-        green = val1;
-        blue = val2;
-        break;
-      case 6:
-      case 0:
-        red = brightness;
-        green = val3;
-        blue = val1;
-        break;
+  if (e.keyCode == 0) {
+    // We cannot change the keyCode in case that srcElement is input[type=file].
+    // We could test that that is the case but that would allocate 3 objects.
+    // If we use try/catch we will only allocate extra objects in the case of a
+    // failure.
+    /** @preserveTry */
+    try {
+      e.keyCode = -1;
+      return;
+    } catch (ex) {
+      useReturnValue = true;
     }
   }
 
-  return [Math.floor(red), Math.floor(green), Math.floor(blue)];
+  if (useReturnValue ||
+      /** @type {boolean|undefined} */ (e.returnValue) == undefined) {
+    e.returnValue = true;
+  }
 };
 
 
 /**
- * Converts from RGB values to an array of HSV values.
- * @param {number} red Red value in [0, 255].
- * @param {number} green Green value in [0, 255].
- * @param {number} blue Blue value in [0, 255].
- * @return {!goog.color.Hsv} hsv representation of the color.
+ * This is used to check if an IE event has already been handled by the Closure
+ * system so we do not do the Closure pass twice for a bubbling event.
+ * @param {Event} e  The IE browser event.
+ * @return {boolean} True if the event object has been marked.
+ * @private
  */
-goog.color.rgbToHsv = function(red, green, blue) {
+goog.events.isMarkedIeEvent_ = function(e) {
+  return e.keyCode < 0 || e.returnValue != undefined;
+};
 
-  var max = Math.max(Math.max(red, green), blue);
-  var min = Math.min(Math.min(red, green), blue);
-  var hue;
-  var saturation;
-  var value = max;
-  if (min == max) {
-    hue = 0;
-    saturation = 0;
-  } else {
-    var delta = (max - min);
-    saturation = delta / max;
 
-    if (red == max) {
-      hue = (green - blue) / delta;
-    } else if (green == max) {
-      hue = 2 + ((blue - red) / delta);
-    } else {
-      hue = 4 + ((red - green) / delta);
-    }
-    hue *= 60;
-    if (hue < 0) {
-      hue += 360;
-    }
-    if (hue > 360) {
-      hue -= 360;
-    }
+/**
+ * Counter to create unique event ids.
+ * @private {number}
+ */
+goog.events.uniqueIdCounter_ = 0;
+
+
+/**
+ * Creates a unique event id.
+ *
+ * @param {string} identifier The identifier.
+ * @return {string} A unique identifier.
+ * @idGenerator
+ */
+goog.events.getUniqueId = function(identifier) {
+  return identifier + '_' + goog.events.uniqueIdCounter_++;
+};
+
+
+/**
+ * @param {EventTarget} src The source object.
+ * @return {goog.events.ListenerMap} A listener map for the given
+ *     source object, or null if none exists.
+ * @private
+ */
+goog.events.getListenerMap_ = function(src) {
+  var listenerMap = src[goog.events.LISTENER_MAP_PROP_];
+  // IE serializes the property as well (e.g. when serializing outer
+  // HTML). So we must check that the value is of the correct type.
+  return listenerMap instanceof goog.events.ListenerMap ? listenerMap : null;
+};
+
+
+/**
+ * Expando property for listener function wrapper for Object with
+ * handleEvent.
+ * @private @const {string}
+ */
+goog.events.LISTENER_WRAPPER_PROP_ =
+    '__closure_events_fn_' + ((Math.random() * 1e9) >>> 0);
+
+
+/**
+ * @param {Object|Function} listener The listener function or an
+ *     object that contains handleEvent method.
+ * @return {!Function} Either the original function or a function that
+ *     calls obj.handleEvent. If the same listener is passed to this
+ *     function more than once, the same function is guaranteed to be
+ *     returned.
+ */
+goog.events.wrapListener = function(listener) {
+  goog.asserts.assert(listener, 'Listener can not be null.');
+
+  if (goog.isFunction(listener)) {
+    return listener;
   }
 
-  return [hue, saturation, value];
-};
-
-
-/**
- * Converts from an array of RGB values to an array of HSV values.
- * @param {goog.color.Rgb} rgb rgb representation of the color.
- * @return {!goog.color.Hsv} hsv representation of the color.
- */
-goog.color.rgbArrayToHsv = function(rgb) {
-  return goog.color.rgbToHsv(rgb[0], rgb[1], rgb[2]);
-};
-
-
-/**
- * Converts an HSV triplet to an RGB array.
- * @param {goog.color.Hsv} hsv hsv representation of the color.
- * @return {!goog.color.Rgb} rgb representation of the color.
- */
-goog.color.hsvArrayToRgb = function(hsv) {
-  return goog.color.hsvToRgb(hsv[0], hsv[1], hsv[2]);
-};
-
-
-/**
- * Converts a hex representation of a color to HSL.
- * @param {string} hex Color to convert.
- * @return {!goog.color.Hsv} hsv representation of the color.
- */
-goog.color.hexToHsl = function(hex) {
-  var rgb = goog.color.hexToRgb(hex);
-  return goog.color.rgbToHsl(rgb[0], rgb[1], rgb[2]);
-};
-
-
-/**
- * Converts from h,s,l values to a hex string
- * @param {number} h Hue, in [0, 360].
- * @param {number} s Saturation, in [0, 1].
- * @param {number} l Luminosity, in [0, 1].
- * @return {string} hex representation of the color.
- */
-goog.color.hslToHex = function(h, s, l) {
-  return goog.color.rgbArrayToHex(goog.color.hslToRgb(h, s, l));
-};
-
-
-/**
- * Converts from an hsl array to a hex string
- * @param {goog.color.Hsl} hsl hsl representation of the color.
- * @return {string} hex representation of the color.
- */
-goog.color.hslArrayToHex = function(hsl) {
-  return goog.color.rgbArrayToHex(goog.color.hslToRgb(hsl[0], hsl[1], hsl[2]));
-};
-
-
-/**
- * Converts a hex representation of a color to HSV
- * @param {string} hex Color to convert.
- * @return {!goog.color.Hsv} hsv representation of the color.
- */
-goog.color.hexToHsv = function(hex) {
-  return goog.color.rgbArrayToHsv(goog.color.hexToRgb(hex));
-};
-
-
-/**
- * Converts from h,s,v values to a hex string
- * @param {number} h Hue, in [0, 360].
- * @param {number} s Saturation, in [0, 1].
- * @param {number} v Value, in [0, 255].
- * @return {string} hex representation of the color.
- */
-goog.color.hsvToHex = function(h, s, v) {
-  return goog.color.rgbArrayToHex(goog.color.hsvToRgb(h, s, v));
-};
-
-
-/**
- * Converts from an HSV array to a hex string
- * @param {goog.color.Hsv} hsv hsv representation of the color.
- * @return {string} hex representation of the color.
- */
-goog.color.hsvArrayToHex = function(hsv) {
-  return goog.color.hsvToHex(hsv[0], hsv[1], hsv[2]);
-};
-
-
-/**
- * Calculates the Euclidean distance between two color vectors on an HSL sphere.
- * A demo of the sphere can be found at:
- * http://en.wikipedia.org/wiki/HSL_color_space
- * In short, a vector for color (H, S, L) in this system can be expressed as
- * (S*L'*cos(2*PI*H), S*L'*sin(2*PI*H), L), where L' = abs(L - 0.5), and we
- * simply calculate the 1-2 distance using these coordinates
- * @param {goog.color.Hsl} hsl1 First color in hsl representation.
- * @param {goog.color.Hsl} hsl2 Second color in hsl representation.
- * @return {number} Distance between the two colors, in the range [0, 1].
- */
-goog.color.hslDistance = function(hsl1, hsl2) {
-  var sl1, sl2;
-  if (hsl1[2] <= 0.5) {
-    sl1 = hsl1[1] * hsl1[2];
-  } else {
-    sl1 = hsl1[1] * (1.0 - hsl1[2]);
+  goog.asserts.assert(
+      listener.handleEvent, 'An object listener must have handleEvent method.');
+  if (!listener[goog.events.LISTENER_WRAPPER_PROP_]) {
+    listener[goog.events.LISTENER_WRAPPER_PROP_] = function(e) {
+      return /** @type {?} */ (listener).handleEvent(e);
+    };
   }
-
-  if (hsl2[2] <= 0.5) {
-    sl2 = hsl2[1] * hsl2[2];
-  } else {
-    sl2 = hsl2[1] * (1.0 - hsl2[2]);
-  }
-
-  var h1 = hsl1[0] / 360.0;
-  var h2 = hsl2[0] / 360.0;
-  var dh = (h1 - h2) * 2.0 * Math.PI;
-  return (hsl1[2] - hsl2[2]) * (hsl1[2] - hsl2[2]) + sl1 * sl1 + sl2 * sl2 -
-      2 * sl1 * sl2 * Math.cos(dh);
+  return listener[goog.events.LISTENER_WRAPPER_PROP_];
 };
 
 
-/**
- * Blend two colors together, using the specified factor to indicate the weight
- * given to the first color
- * @param {goog.color.Rgb} rgb1 First color represented in rgb.
- * @param {goog.color.Rgb} rgb2 Second color represented in rgb.
- * @param {number} factor The weight to be given to rgb1 over rgb2. Values
- *     should be in the range [0, 1]. If less than 0, factor will be set to 0.
- *     If greater than 1, factor will be set to 1.
- * @return {!goog.color.Rgb} Combined color represented in rgb.
- */
-goog.color.blend = function(rgb1, rgb2, factor) {
-  factor = goog.math.clamp(factor, 0, 1);
-
-  return [
-    Math.round(factor * rgb1[0] + (1.0 - factor) * rgb2[0]),
-    Math.round(factor * rgb1[1] + (1.0 - factor) * rgb2[1]),
-    Math.round(factor * rgb1[2] + (1.0 - factor) * rgb2[2])
-  ];
-};
-
-
-/**
- * Adds black to the specified color, darkening it
- * @param {goog.color.Rgb} rgb rgb representation of the color.
- * @param {number} factor Number in the range [0, 1]. 0 will do nothing, while
- *     1 will return black. If less than 0, factor will be set to 0. If greater
- *     than 1, factor will be set to 1.
- * @return {!goog.color.Rgb} Combined rgb color.
- */
-goog.color.darken = function(rgb, factor) {
-  var black = [0, 0, 0];
-  return goog.color.blend(black, rgb, factor);
-};
-
-
-/**
- * Adds white to the specified color, lightening it
- * @param {goog.color.Rgb} rgb rgb representation of the color.
- * @param {number} factor Number in the range [0, 1].  0 will do nothing, while
- *     1 will return white. If less than 0, factor will be set to 0. If greater
- *     than 1, factor will be set to 1.
- * @return {!goog.color.Rgb} Combined rgb color.
- */
-goog.color.lighten = function(rgb, factor) {
-  var white = [255, 255, 255];
-  return goog.color.blend(white, rgb, factor);
-};
-
-
-/**
- * Find the "best" (highest-contrast) of the suggested colors for the prime
- * color. Uses W3C formula for judging readability and visual accessibility:
- * http://www.w3.org/TR/AERT#color-contrast
- * @param {goog.color.Rgb} prime Color represented as a rgb array.
- * @param {Array<goog.color.Rgb>} suggestions Array of colors,
- *     each representing a rgb array.
- * @return {!goog.color.Rgb} Highest-contrast color represented by an array..
- */
-goog.color.highContrast = function(prime, suggestions) {
-  var suggestionsWithDiff = [];
-  for (var i = 0; i < suggestions.length; i++) {
-    suggestionsWithDiff.push({
-      color: suggestions[i],
-      diff: goog.color.yiqBrightnessDiff_(suggestions[i], prime) +
-          goog.color.colorDiff_(suggestions[i], prime)
+// Register the browser event handler as an entry point, so that
+// it can be monitored for exception handling, etc.
+goog.debug.entryPointRegistry.register(
+    /**
+     * @param {function(!Function): !Function} transformer The transforming
+     *     function.
+     */
+    function(transformer) {
+      goog.events.handleBrowserEvent_ =
+          transformer(goog.events.handleBrowserEvent_);
     });
-  }
-  suggestionsWithDiff.sort(function(a, b) { return b.diff - a.diff; });
-  return suggestionsWithDiff[0].color;
-};
-
-
-/**
- * Calculate brightness of a color according to YIQ formula (brightness is Y).
- * More info on YIQ here: http://en.wikipedia.org/wiki/YIQ. Helper method for
- * goog.color.highContrast()
- * @param {goog.color.Rgb} rgb Color represented by a rgb array.
- * @return {number} brightness (Y).
- * @private
- */
-goog.color.yiqBrightness_ = function(rgb) {
-  return Math.round((rgb[0] * 299 + rgb[1] * 587 + rgb[2] * 114) / 1000);
-};
-
-
-/**
- * Calculate difference in brightness of two colors. Helper method for
- * goog.color.highContrast()
- * @param {goog.color.Rgb} rgb1 Color represented by a rgb array.
- * @param {goog.color.Rgb} rgb2 Color represented by a rgb array.
- * @return {number} Brightness difference.
- * @private
- */
-goog.color.yiqBrightnessDiff_ = function(rgb1, rgb2) {
-  return Math.abs(
-      goog.color.yiqBrightness_(rgb1) - goog.color.yiqBrightness_(rgb2));
-};
-
-
-/**
- * Calculate color difference between two colors. Helper method for
- * goog.color.highContrast()
- * @param {goog.color.Rgb} rgb1 Color represented by a rgb array.
- * @param {goog.color.Rgb} rgb2 Color represented by a rgb array.
- * @return {number} Color difference.
- * @private
- */
-goog.color.colorDiff_ = function(rgb1, rgb2) {
-  return Math.abs(rgb1[0] - rgb2[0]) + Math.abs(rgb1[1] - rgb2[1]) +
-      Math.abs(rgb1[2] - rgb2[2]);
-};

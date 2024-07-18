@@ -149,9 +149,9 @@ Blockly.Blocks['kcbot_lcd'] = {
     this.appendDummyInput()
         .appendField(Blockly.Msg.kcbot_lcd_dia_chi)
         .appendField(new Blockly.FieldDropdown([["0x27","0x27"], ["0x3F","0x3F"]]), "data")
-    this.appendValueInput("text")
-        .setCheck(null)
-        .appendField(Blockly.Msg.kcbot_lcd_display);
+     this.appendValueInput("text")
+         .setCheck(null)
+         .appendField(Blockly.Msg.kcbot_lcd_display);
     this.appendValueInput("x")
         .setCheck(Blockly.Types.NUMBER.checkList)
         .appendField(Blockly.Msg.kcbot_lcd_pos);
@@ -161,8 +161,8 @@ Blockly.Blocks['kcbot_lcd'] = {
     this.setPreviousStatement(true, null);
     this.setNextStatement(true, null);
     this.setColour("#844957");
- this.setTooltip("");
- this.setHelpUrl("");
+    this.setTooltip("test");
+    this.setHelpUrl("test");
   }
 };
 
@@ -727,6 +727,232 @@ var Priority_task_RTOS = [
   ['25', '25']
 ];
 
+var Day_values = [
+  ['1', '1'],
+  ['2', '2'],
+  ['3', '3'],
+  ['4', '4'],
+  ['5', '5'],
+  ['6', '6'],
+  ['7', '7'],
+  ['8', '8'],
+  ['9', '9'],
+  ['10', '10'],
+  ['11', '11'],
+  ['12', '12'],
+  ['13', '13'],
+  ['14', '14'],
+  ['15', '15'],
+  ['16', '16'],
+  ['17', '17'],
+  ['18', '18'],
+  ['19', '19'],
+  ['20', '20'],
+  ['21', '21'],
+  ['22', '22'],
+  ['23', '23'],
+  ['24', '24'],
+  ['25', '25'],
+  ['26', '26'],
+  ['27', '27'],
+  ['28', '28'],
+  ['29', '29'],
+  ['30', '30'],
+  ['31', '31']
+];
+
+var Month_values = [
+  ['1', '1'],
+  ['2', '2'],
+  ['3', '3'],
+  ['4', '4'],
+  ['5', '5'],
+  ['6', '6'],
+  ['7', '7'],
+  ['8', '8'],
+  ['9', '9'],
+  ['10', '10'],
+  ['11', '11'],
+  ['12', '12']
+];
+
+var Year_values = [
+  ['2022', '2022'],
+  ['2023', '2023'],
+  ['2024', '2024'],
+  ['2025', '2025'],
+  ['2026', '2026'],
+  ['2027', '2027'],
+  ['2028', '2028'],
+  ['2029', '2029'],
+  ['2030', '2030']
+];
+
+var WeekDay_values = [
+  ['1', '1'],
+  ['2', '2'],
+  ['3', '3'],
+  ['4', '4'],
+  ['5', '5'],
+  ['6', '6'],
+  ['7', '7']
+];
+
+var Hour_values = [
+  ['0', '0'],
+  ['1', '1'],
+  ['2', '2'],
+  ['3', '3'],
+  ['4', '4'],
+  ['5', '5'],
+  ['6', '6'],
+  ['7', '7'],
+  ['8', '8'],
+  ['9', '9'],
+  ['10', '10'],
+  ['11', '11'],
+  ['12', '12'],
+  ['13', '13'],
+  ['14', '14'],
+  ['15', '15'],
+  ['16', '16'],
+  ['17', '17'],
+  ['18', '18'],
+  ['19', '19'],
+  ['20', '20'],
+  ['21', '21'],
+  ['22', '22'],
+  ['23', '23']
+];
+
+var Minute_values = [
+  ['0', '0'],
+  ['1', '1'],
+  ['2', '2'],
+  ['3', '3'],
+  ['4', '4'],
+  ['5', '5'],
+  ['6', '6'],
+  ['7', '7'],
+  ['8', '8'],
+  ['9', '9'],
+  ['10', '10'],
+  ['11', '11'],
+  ['12', '12'],
+  ['13', '13'],
+  ['14', '14'],
+  ['15', '15'],
+  ['16', '16'],
+  ['17', '17'],
+  ['18', '18'],
+  ['19', '19'],
+  ['20', '20'],
+  ['21', '21'],
+  ['22', '22'],
+  ['23', '23'],
+  ['24', '24'],
+  ['25', '25'],
+  ['26', '26'],
+  ['27', '27'],
+  ['28', '28'],
+  ['29', '29'],
+  ['30', '30'],
+  ['31', '31'],
+  ['32', '32'],
+  ['33', '33'],
+  ['34', '34'],
+  ['35', '35'],
+  ['36', '36'],
+  ['37', '37'],
+  ['38', '38'],
+  ['39', '39'],
+  ['40', '40'],
+  ['41', '41'],
+  ['42', '42'],
+  ['43', '43'],
+  ['44', '44'],
+  ['45', '45'],
+  ['46', '46'],
+  ['47', '47'],
+  ['48', '48'],
+  ['49', '49'],
+  ['50', '50'],
+  ['51', '51'],
+  ['52', '52'],
+  ['53', '53'],
+  ['54', '54'],
+  ['55', '55'],
+  ['56', '56'],
+  ['57', '57'],
+  ['58', '58'],
+  ['59', '59']
+];
+
+var Second_values = [
+  ['0', '0'],
+  ['1', '1'],
+  ['2', '2'],
+  ['3', '3'],
+  ['4', '4'],
+  ['5', '5'],
+  ['6', '6'],
+  ['7', '7'],
+  ['8', '8'],
+  ['9', '9'],
+  ['10', '10'],
+  ['11', '11'],
+  ['12', '12'],
+  ['13', '13'],
+  ['14', '14'],
+  ['15', '15'],
+  ['16', '16'],
+  ['17', '17'],
+  ['18', '18'],
+  ['19', '19'],
+  ['20', '20'],
+  ['21', '21'],
+  ['22', '22'],
+  ['23', '23'],
+  ['24', '24'],
+  ['25', '25'],
+  ['26', '26'],
+  ['27', '27'],
+  ['28', '28'],
+  ['29', '29'],
+  ['30', '30'],
+  ['31', '31'],
+  ['32', '32'],
+  ['33', '33'],
+  ['34', '34'],
+  ['35', '35'],
+  ['36', '36'],
+  ['37', '37'],
+  ['38', '38'],
+  ['39', '39'],
+  ['40', '40'],
+  ['41', '41'],
+  ['42', '42'],
+  ['43', '43'],
+  ['44', '44'],
+  ['45', '45'],
+  ['46', '46'],
+  ['47', '47'],
+  ['48', '48'],
+  ['49', '49'],
+  ['50', '50'],
+  ['51', '51'],
+  ['52', '52'],
+  ['53', '53'],
+  ['54', '54'],
+  ['55', '55'],
+  ['56', '56'],
+  ['57', '57'],
+  ['58', '58'],
+  ['59', '59']
+];
+
+
+
 
 Blockly.Blocks['AirsenseReadDataBME280'] = {
   init: function() {
@@ -766,6 +992,7 @@ Blockly.Blocks['AirsenseReadDataBME280'] = {
     this.appendValueInput("Text")
         .setCheck(null)
         .appendField("Hàm")
+      
     this.setColour('#00abd6');
     this.setInputsInline(true);
     this.setPreviousStatement(true, null);
@@ -793,8 +1020,6 @@ Blockly.Blocks['AirsenseReadDataPMS7003'] = {
         .appendField(new Blockly.FieldDropdown([["1","1"],["2","2"]]),"Port uart")
         .appendField("Chân RX")
         .appendField(new Blockly.FieldDropdown(Digital_pin_esp32),"Port rx")
-        .appendField("Chân TX")
-        .appendField(new Blockly.FieldDropdown(Digital_pin_esp32),"Port tx")
 
 
 
@@ -853,6 +1078,120 @@ Blockly.Blocks['ESP32_wireless'] = {
   },
 }
 
+
+Blockly.Blocks['setUpDS3231'] = {
+  init: function() {
+    this.appendDummyInput()
+        .appendField("Đọc dữ liệu thời gian thực(DS3231)");
+    this.appendDummyInput()
+        .appendField("Cấu hình chân DS3231")
+        .appendField("SDA")
+        .appendField(new Blockly.FieldDropdown(Digital_pin_esp32), "SDA_ds3231")
+        .appendField("SCL")
+        .appendField(new Blockly.FieldDropdown(Digital_pin_esp32), "SCL_ds3231")
+
+    this.appendDummyInput()
+        .appendField("Cài đặt thời gian")
+        .appendField("Năm")
+        .appendField(new Blockly.FieldDropdown(Year_values), "Nam")
+        .appendField("Tháng")
+        .appendField(new Blockly.FieldDropdown(Month_values), "Thang")
+        .appendField("Ngày")
+        .appendField(new Blockly.FieldDropdown(Day_values), "Ngay")
+        .appendField("Thứ ngày")
+        .appendField(new Blockly.FieldDropdown(WeekDay_values), "Thu ngay")
+        .appendField("Giờ")
+        .appendField(new Blockly.FieldDropdown(Hour_values), "Gio")
+        .appendField("Phút")
+        .appendField(new Blockly.FieldDropdown(Minute_values), "Phut")
+        .appendField("Giây")
+        .appendField(new Blockly.FieldDropdown(Second_values), "Giay")
+
+    this.setPreviousStatement(true, null);
+    this.setNextStatement(true, null);
+    this.setColour('#00abd6');
+    this.setInputsInline(false);
+    this.setTooltip("");
+    this.setHelpUrl("");
+  },
+};
+
+Blockly.Blocks['getDataOfDS3231'] = {
+  init: function(){
+    this.appendDummyInput()
+        .appendField("Dữ liệu thời gian thực cần lấy (DS3231)")
+        .appendField(new Blockly.FieldDropdown([["Năm","Năm"],["Tháng","Tháng"],["Ngày","Ngày"],["Thứ ngày","Thứ ngày"],["Giờ","Giờ"],["Phút","Phút"],["Giây","Giây"]]),'TypeData')
+    this.setColour('#00abd6');
+    this.setInputsInline(true);
+    this.setOutput(true , "Number");
+    this.setTooltip("");
+    this.setHelpUrl("");
+  }
+}
+
+Blockly.Blocks['FormatStringData'] = {
+  init: function() {
+    this.appendDummyInput()
+        .appendField("Gộp dữ liệu");
+    this.appendDummyInput()
+        .appendField("Số lượng dữ liệu")
+        .appendField(new Blockly.FieldDropdown([
+          ["1", "1"], ["2", "2"], ["3", "3"], ["4", "4"], ["5", "5"], ["6", "6"], ["7", "7"],
+          ["8","8"],["9","9"],["10","10"],["11","11"],["12","12"],["13","13"],["14","14"],["15","15"]
+        ]), "NUM_INPUTS");
+    this.setColour('#00abd6');
+    this.setInputsInline(false);
+    this.setOutput(true, "Number");
+    this.setTooltip("");
+    this.setHelpUrl("");
+    this.updateShape_();
+  },
+  
+  mutationToDom: function() {
+    var container = document.createElement('mutation');
+    var count = this.getFieldValue('NUM_INPUTS');
+    container.setAttribute('inputs', count);
+    return container;
+  },
+
+  domToMutation: function(xmlElement) {
+    var count = parseInt(xmlElement.getAttribute('inputs'), 15);
+    this.updateShape_(count);
+  },
+  
+  updateShape_: function(count) {
+    if (count === undefined) {
+      count = this.getFieldValue('NUM_INPUTS');
+    }
+    //var inputFields = ['Nhiệt độ', 'Độ ẩm', 'Áp suất', 'PM1', 'PM2.5', 'PM10', 'CO2'];
+    
+    // Remove existing inputs
+    for (var i = 1; i <= 7; i++) {
+      if (this.getInput('Text' + i)) {
+        this.removeInput('Text' + i);
+      }
+    }
+    
+    // Add new inputs
+    for (var i = 1; i <= count; i++) {
+      this.appendValueInput('Text' + i)
+          .setCheck(null)
+          .appendField("Tên dữ liêu")
+          .appendField(new Blockly.FieldTextInput("text"), "nameData" +  i);
+    }
+  },
+  
+  onchange: function(event) {
+    if (event.blockId === this.id && event.element === 'field' && event.name === 'NUM_INPUTS') {
+      this.updateShape_();
+    }
+  },
+
+  getBlockType: function() {
+    return Blockly.Types.NUMBER;
+  }
+}
+
 Blockly.Blocks['AirsenseReadDataMHZ14A'] =  {
   init: function(){
     this.appendDummyInput()
@@ -868,7 +1207,7 @@ Blockly.Blocks['AirsenseReadDataMHZ14A'] =  {
         .appendField(new Blockly.FieldDropdown(Digital_pin_esp32),"Port tx")
     
         this.setColour('#00abd6');
-        this.setInputsInline(false);
+        this.setInputsInline(true);
         this.setOutput(true , "Number");
         this.setTooltip("");
         this.setHelpUrl("");
@@ -879,51 +1218,7 @@ Blockly.Blocks['AirsenseReadDataMHZ14A'] =  {
   },
 
 }
-Blockly.Blocks['SetUpDS3231'] = {
-  init: function() {
-    this.appendDummyInput()
-        .appendField("Nhập ngày,tháng,năm : ")
-        .appendField(new Blockly.FieldTextInput(" "), 'DATE')
-        .appendField("Nhập giờ : ")
-        .appendField(new Blockly.FieldTextInput(" "), 'TIME');
-    this.appendDummyInput()
-        .appendField("SDA")
-        .appendField(new Blockly.FieldDropdown(Digital_pin_esp32), "SDA")
-        .appendField("SCL")
-        .appendField(new Blockly.FieldDropdown(Digital_pin_esp32), "SCL")
-    this.setPreviousStatement(true, null);
-    this.setNextStatement(true, null);
-    this.setColour('#00abd6');
- this.setTooltip("");
- this.setHelpUrl("");
-  }
-};
 
-Blockly.Blocks['GetDateTimeDS3231']={
-  init: function() {
-    this.appendDummyInput()
-        .appendField(Blockly.Msg.GetDateTimeDS3231)
-    this.appendDummyInput()
-        .appendField("LCD")
-        .appendField("RS")
-        .appendField(new Blockly.FieldDropdown(Digital_pin_esp32), "RS")
-        .appendField("En")
-        .appendField(new Blockly.FieldDropdown(Digital_pin_esp32), "En")
-        .appendField("D1")
-        .appendField(new Blockly.FieldDropdown(Digital_pin_esp32), "D1")
-        .appendField("D2")
-        .appendField(new Blockly.FieldDropdown(Digital_pin_esp32), "D2")
-        .appendField("D3")
-        .appendField(new Blockly.FieldDropdown(Digital_pin_esp32), "D3")
-        .appendField("D4")
-        .appendField(new Blockly.FieldDropdown(Digital_pin_esp32), "D4")
-    this.setPreviousStatement(true, null);
-    this.setNextStatement(true, null);
-    this.setColour('#00abd6');
- this.setTooltip("");
- this.setHelpUrl("");
-}
-};
 
 
 Blockly.Blocks['ConnectMQTT'] = {
@@ -982,9 +1277,6 @@ Blockly.Blocks['SendDataMQTT'] = {
     this.appendDummyInput()
       .appendField("TOPIC:")
       .appendField(new Blockly.FieldTextInput("topic"), "TOPIC");
-    this.appendDummyInput()
-      .appendField("Dung lượng dữ liệu:")
-      .appendField(new Blockly.FieldTextInput(""), "Cap_data");
     this.appendValueInput("Text")
       .setCheck(null)
       .appendField("Dữ liệu")
@@ -1017,41 +1309,7 @@ Blockly.Blocks['SendDataMQTT'] = {
     }
   }
 };
-Blockly.Blocks['BMEMQTT']={
-  init: function() {
-    this.appendDummyInput()
-        .appendField("Gửi dữ liệu BME qua MQTT ")
-        .appendField(new Blockly.FieldDropdown([["Nhiệt độ","Nhiệt độ"],["Độ ẩm","Độ ẩm"],["Áp suất","Áp suất"]]), "BME280")
-    this.setPreviousStatement(true, null);
-    this.setNextStatement(true, null);
-    this.setColour('#00abd6');
- this.setTooltip("");
- this.setHelpUrl("");
-}
-};
-Blockly.Blocks['PMSMQTT']={
-  init: function() {
-    this.appendDummyInput()
-        .appendField("Gửi dữ liệu PMS qua MQTT ")
-        .appendField(new Blockly.FieldDropdown([["PM1","PM1"],["PM2.5","PM2.5"],["PM10","PM10"]]), "PMS7003")
-    this.setPreviousStatement(true, null);
-    this.setNextStatement(true, null);
-    this.setColour('#00abd6');
- this.setTooltip("");
- this.setHelpUrl("");
-}
-};
-Blockly.Blocks['MHZMQTT']={
-  init: function() {
-    this.appendDummyInput()
-        .appendField("Gửi dữ liệu MHZ qua MQTT ")
-    this.setPreviousStatement(true, null);
-    this.setNextStatement(true, null);
-    this.setColour('#00abd6');
- this.setTooltip("");
- this.setHelpUrl("");
-}
-};
+
 Blockly.Blocks['ReceiveMQTTData']={
   init: function() {
     this.appendDummyInput()

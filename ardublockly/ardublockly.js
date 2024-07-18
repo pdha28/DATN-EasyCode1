@@ -51,33 +51,32 @@ Ardublockly.getCode = function() {
   var code = val ? decodeURIComponent(val[1].replace(/\+/g, '%20')) : '';
   return code==""?'arduino':code;
 };
-Ardublockly.changeBoard = function(board) {
-  let lang=Ardublockly.getUrlLanguage ();
-  // Ardublockly.initLanguage();
-  // var toolbox=Ardublockly.TOOLBOX_XML(board);
-  // document.getElementById('content_blocks').innerHTML='';
-  // Ardublockly.injectBlockly(document.getElementById('content_blocks'),toolbox
-  //                           , '../blockly/');
-  // Ardublockly.saveSessionStorageBlocks();
-  // board=JSON.stringify( board);
-  // //var languageMenu = document.getElementById('language');
-  // //var newLang = encodeURIComponent(
-  // //    languageMenu.options[languageMenu.selectedIndex].value);
 
-  // var newBoard = encodeURIComponent(board);
-  // var search = window.location.search;
-  // if (search.length <= 1) {
-  //   search = '?board=' + newBoard;
-  // } 
-  // else if (search.match(/[?&]board=[^&]*/)) {
-  //   search = search.replace(/([?&]board=)[^&]*/, '$1' + newBoard);
-  // } 
-  // else {
-  //   search = search.replace(/\?/, '?board=' + newBoard + '&');
-  // }
-   window.location = window.location.protocol + '//' +
-       window.location.host + window.location.pathname + '?lang='+lang+'&board='+board.board+'&name='+board.name;
+// Ardublockly.changeBoard = function(board) {
+//   console.log("Ardublockly.changeBoard called with board:", board);
+
+//   let lang = Ardublockly.getUrlLanguage();
+//   console.log("Language:", lang);
+
+//   let newUrl = window.location.protocol + '//' +
+//       window.location.host + window.location.pathname + '?lang=' + lang + '&board=' + board.board + '&name=' + board.name;
+//   console.log("Navigating to URL:", newUrl);
+
+//   window.location = newUrl;
+
+// };
+
+
+Ardublockly.changeBoard = function(board) {
+  let lang = Ardublockly.getUrlLanguage();
+
+  //Ardublockly.setArduinoBoardsHtml(board);
+  // Cập nhật URL để thay đổi giao diện nếu cần
+  window.location = window.location.protocol + '//' +
+    window.location.host + window.location.pathname + '?lang=' + lang + '&board=' + board.board + '&name=' + board.name;
 };
+
+
 
 /** Binds functions to each of the buttons, nav links, and related. */
 Ardublockly.bindActionFunctions = function() {

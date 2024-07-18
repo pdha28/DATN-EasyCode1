@@ -1,819 +1,421 @@
-// Copyright 2013 The Closure Library Authors. All Rights Reserved.
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//      http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS-IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+/**
+ * @license Licensed under the Apache License, Version 2.0 (the "License"):
+ *          http://www.apache.org/licenses/LICENSE-2.0
+ */
+
+/**
+ * Based on work of Fred Lin (gasolin@gmail.com) for Blocklyduino.
+ *
+ * @fileoverview Helper functions for generating Arduino language (C++).
+ */
+'use strict';
+
+goog.provide('Blockly.Arduino');
+
+goog.require('Blockly.Generator');
+goog.require('Blockly.StaticTyping');
 
 
 /**
- * @fileoverview The SafeHtml type and its builders.
- *
- * TODO(xtof): Link to document stating type contract.
+ * Arduino code generator.
+ * @type {!Blockly.Generator}
  */
-
-goog.provide('goog.html.SafeHtml');
-
-goog.require('goog.array');
-goog.require('goog.asserts');
-goog.require('goog.dom.TagName');
-goog.require('goog.dom.tags');
-goog.require('goog.html.SafeStyle');
-goog.require('goog.html.SafeStyleSheet');
-goog.require('goog.html.SafeUrl');
-goog.require('goog.html.TrustedResourceUrl');
-goog.require('goog.i18n.bidi.Dir');
-goog.require('goog.i18n.bidi.DirectionalString');
-goog.require('goog.labs.userAgent.browser');
-goog.require('goog.object');
-goog.require('goog.string');
-goog.require('goog.string.Const');
-goog.require('goog.string.TypedString');
-
-
+Blockly.Arduino = new Blockly.Generator('Arduino');
+Blockly.Arduino.StaticTyping = new Blockly.StaticTyping();
 
 /**
- * A string that is safe to use in HTML context in DOM APIs and HTML documents.
- *
- * A SafeHtml is a string-like object that carries the security type contract
- * that its value as a string will not cause untrusted script execution when
- * evaluated as HTML in a browser.
- *
- * Values of this type are guaranteed to be safe to use in HTML contexts,
- * such as, assignment to the innerHTML DOM property, or interpolation into
- * a HTML template in HTML PC_DATA context, in the sense that the use will not
- * result in a Cross-Site-Scripting vulnerability.
- *
- * Instances of this type must be created via the factory methods
- * ({@code goog.html.SafeHtml.create}, {@code goog.html.SafeHtml.htmlEscape}),
- * etc and not by invoking its constructor.  The constructor intentionally
- * takes no parameters and the type is immutable; hence only a default instance
- * corresponding to the empty string can be obtained via constructor invocation.
- *
- * @see goog.html.SafeHtml#create
- * @see goog.html.SafeHtml#htmlEscape
- * @constructor
- * @final
- * @struct
- * @implements {goog.i18n.bidi.DirectionalString}
- * @implements {goog.string.TypedString}
+ * List of illegal variable names.
+ * This is not intended to be a security feature.  Blockly is 100% client-side,
+ * so bypassing this list is trivial.  This is intended to prevent users from
+ * accidentally clobbering a built-in object or function.
+ * Arduino specific keywords defined in: http://arduino.cc/en/Reference/HomePage
+ * @private
  */
-goog.html.SafeHtml = function() {
-  /**
-   * The contained value of this SafeHtml.  The field has a purposely ugly
-   * name to make (non-compiled) code that attempts to directly access this
-   * field stand out.
-   * @private {string}
-   */
-  this.privateDoNotAccessOrElseSafeHtmlWrappedValue_ = '';
+Blockly.Arduino.addReservedWords(
+    'Blockly,' +  // In case JS is evaled in the current window.
+    'setup,loop,if,else,for,switch,case,while,do,break,continue,return,goto,' +
+    'define,include,HIGH,LOW,INPUT,OUTPUT,INPUT_PULLUP,true,false,integer,' +
+    'constants,floating,point,void,boolean,char,unsigned,byte,int,word,long,' +
+    'float,double,string,String,array,static,volatile,const,sizeof,pinMode,' +
+    'digitalWrite,digitalRead,analogReference,analogRead,analogWrite,tone,' +
+    'noTone,shiftOut,shitIn,pulseIn,millis,micros,delay,delayMicroseconds,' +
+    'min,max,abs,constrain,map,pow,sqrt,sin,cos,tan,randomSeed,random,' +
+    'lowByte,highByte,bitRead,bitWrite,bitSet,bitClear,bit,attachInterrupt,' +
+    'detachInterrupt,interrupts,noInterrupts');
 
-  /**
-   * A type marker used to implement additional run-time type checking.
-   * @see goog.html.SafeHtml#unwrap
-   * @const
-   * @private
-   */
-  this.SAFE_HTML_TYPE_MARKER_GOOG_HTML_SECURITY_PRIVATE_ =
-      goog.html.SafeHtml.TYPE_MARKER_GOOG_HTML_SECURITY_PRIVATE_;
+/** Order of operation ENUMs. */
+Blockly.Arduino.ORDER_ATOMIC = 0;         // 0 "" ...
+Blockly.Arduino.ORDER_UNARY_POSTFIX = 1;  // expr++ expr-- () [] .
+Blockly.Arduino.ORDER_UNARY_PREFIX = 2;   // -expr !expr ~expr ++expr --expr
+Blockly.Arduino.ORDER_MULTIPLICATIVE = 3; // * / % ~/
+Blockly.Arduino.ORDER_ADDITIVE = 4;       // + -
+Blockly.Arduino.ORDER_SHIFT = 5;          // << >>
+Blockly.Arduino.ORDER_RELATIONAL = 6;     // >= > <= <
+Blockly.Arduino.ORDER_EQUALITY = 7;       // == != === !==
+Blockly.Arduino.ORDER_BITWISE_AND = 8;    // &
+Blockly.Arduino.ORDER_BITWISE_XOR = 9;    // ^
+Blockly.Arduino.ORDER_BITWISE_OR = 10;    // |
+Blockly.Arduino.ORDER_LOGICAL_AND = 11;   // &&
+Blockly.Arduino.ORDER_LOGICAL_OR = 12;    // ||
+Blockly.Arduino.ORDER_CONDITIONAL = 13;   // expr ? expr : expr
+Blockly.Arduino.ORDER_ASSIGNMENT = 14;    // = *= /= ~/= %= += -= <<= >>= &= ^= |=
+Blockly.Arduino.ORDER_NONE = 99;          // (...)
 
-  /**
-   * This SafeHtml's directionality, or null if unknown.
-   * @private {?goog.i18n.bidi.Dir}
-   */
-  this.dir_ = null;
+/**
+ * A list of types tasks that the pins can be assigned. Used to track usage and
+ * warn if the same pin has been assigned to more than one task.
+ */
+Blockly.Arduino.PinTypes = {
+  INPUT: 'INPUT',
+  OUTPUT: 'OUTPUT',
+  PWM: 'PWM',
+  SERVO: 'SERVO',
+  STEPPER: 'STEPPER',
+  SERIAL: 'SERIAL',
+  I2C: 'I2C/TWI',
+  SPI: 'SPI'
 };
 
+/**
+ * Arduino generator short name for
+ * Blockly.Generator.prototype.FUNCTION_NAME_PLACEHOLDER_
+ * @type {!string}
+ */
+Blockly.Arduino.DEF_FUNC_NAME = Blockly.Arduino.FUNCTION_NAME_PLACEHOLDER_;
 
 /**
- * @override
- * @const
+ * Initialises the database of global definitions, the setup function, function
+ * names, and variable names.
+ * @param {Blockly.Workspace} workspace Workspace to generate code from.
  */
-goog.html.SafeHtml.prototype.implementsGoogI18nBidiDirectionalString = true;
+Blockly.Arduino.init = function(workspace) {
+  // Create a dictionary of definitions to be printed at the top of the sketch
+  Blockly.Arduino.includes_ = Object.create(null);
+  // Create a dictionary of global definitions to be printed after variables
+  Blockly.Arduino.definitions_ = Object.create(null);
+  // Create a dictionary of variables
+  Blockly.Arduino.variables_ = Object.create(null);
+  // Create a dictionary of functions from the code generator
+  Blockly.Arduino.codeFunctions_ = Object.create(null);
+  // Create a dictionary of functions created by the user
+  Blockly.Arduino.userFunctions_ = Object.create(null);
+  // Create a dictionary mapping desired function names in definitions_
+  // to actual function names (to avoid collisions with user functions)
+  Blockly.Arduino.functionNames_ = Object.create(null);
+  // Create a dictionary of setups to be printed in the setup() function
+  Blockly.Arduino.setups_ = Object.create(null);
+  // Create a dictionary of pins to check if their use conflicts
+  Blockly.Arduino.pins_ = Object.create(null);
 
-
-/** @override */
-goog.html.SafeHtml.prototype.getDirection = function() {
-  return this.dir_;
-};
-
-
-/**
- * @override
- * @const
- */
-goog.html.SafeHtml.prototype.implementsGoogStringTypedString = true;
-
-
-/**
- * Returns this SafeHtml's value as string.
- *
- * IMPORTANT: In code where it is security relevant that an object's type is
- * indeed {@code SafeHtml}, use {@code goog.html.SafeHtml.unwrap} instead of
- * this method. If in doubt, assume that it's security relevant. In particular,
- * note that goog.html functions which return a goog.html type do not guarantee
- * that the returned instance is of the right type. For example:
- *
- * <pre>
- * var fakeSafeHtml = new String('fake');
- * fakeSafeHtml.__proto__ = goog.html.SafeHtml.prototype;
- * var newSafeHtml = goog.html.SafeHtml.htmlEscape(fakeSafeHtml);
- * // newSafeHtml is just an alias for fakeSafeHtml, it's passed through by
- * // goog.html.SafeHtml.htmlEscape() as fakeSafeHtml
- * // instanceof goog.html.SafeHtml.
- * </pre>
- *
- * @see goog.html.SafeHtml#unwrap
- * @override
- */
-goog.html.SafeHtml.prototype.getTypedStringValue = function() {
-  return this.privateDoNotAccessOrElseSafeHtmlWrappedValue_;
-};
-
-
-if (goog.DEBUG) {
-  /**
-   * Returns a debug string-representation of this value.
-   *
-   * To obtain the actual string value wrapped in a SafeHtml, use
-   * {@code goog.html.SafeHtml.unwrap}.
-   *
-   * @see goog.html.SafeHtml#unwrap
-   * @override
-   */
-  goog.html.SafeHtml.prototype.toString = function() {
-    return 'SafeHtml{' + this.privateDoNotAccessOrElseSafeHtmlWrappedValue_ +
-        '}';
-  };
-}
-
-
-/**
- * Performs a runtime check that the provided object is indeed a SafeHtml
- * object, and returns its value.
- * @param {!goog.html.SafeHtml} safeHtml The object to extract from.
- * @return {string} The SafeHtml object's contained string, unless the run-time
- *     type check fails. In that case, {@code unwrap} returns an innocuous
- *     string, or, if assertions are enabled, throws
- *     {@code goog.asserts.AssertionError}.
- */
-goog.html.SafeHtml.unwrap = function(safeHtml) {
-  // Perform additional run-time type-checking to ensure that safeHtml is indeed
-  // an instance of the expected type.  This provides some additional protection
-  // against security bugs due to application code that disables type checks.
-  // Specifically, the following checks are performed:
-  // 1. The object is an instance of the expected type.
-  // 2. The object is not an instance of a subclass.
-  // 3. The object carries a type marker for the expected type. "Faking" an
-  // object requires a reference to the type marker, which has names intended
-  // to stand out in code reviews.
-  if (safeHtml instanceof goog.html.SafeHtml &&
-      safeHtml.constructor === goog.html.SafeHtml &&
-      safeHtml.SAFE_HTML_TYPE_MARKER_GOOG_HTML_SECURITY_PRIVATE_ ===
-          goog.html.SafeHtml.TYPE_MARKER_GOOG_HTML_SECURITY_PRIVATE_) {
-    return safeHtml.privateDoNotAccessOrElseSafeHtmlWrappedValue_;
+  if (!Blockly.Arduino.variableDB_) {
+    Blockly.Arduino.variableDB_ =
+        new Blockly.Names(Blockly.Arduino.RESERVED_WORDS_);
   } else {
-    goog.asserts.fail('expected object of type SafeHtml, got \'' +
-        safeHtml + '\' of type ' + goog.typeOf(safeHtml));
-    return 'type_error:SafeHtml';
+    Blockly.Arduino.variableDB_.reset();
+  }
+
+  // Iterate through to capture all blocks types and set the function arguments
+  var varsWithTypes = Blockly.Arduino.StaticTyping.collectVarsWithTypes(workspace);
+  Blockly.Arduino.StaticTyping.setProcedureArgs(workspace, varsWithTypes);
+
+  // Set variable declarations with their Arduino type in the defines dictionary
+  for (var varName in varsWithTypes) {
+    Blockly.Arduino.addVariable(varName,
+        Blockly.Arduino.getArduinoType_(varsWithTypes[varName]) +' ' +
+        Blockly.Arduino.variableDB_.getName(varName, Blockly.Variables.NAME_TYPE) + ';');
   }
 };
 
+/**
+ * Prepare all generated code to be placed in the sketch specific locations.
+ * @param {string} code Generated main program (loop function) code.
+ * @return {string} Completed sketch code.
+ */
+Blockly.Arduino.finish = function(code) {
+  // Convert the includes, definitions, and functions dictionaries into lists
+  var includes = [], definitions = [], variables = [], functions = [];
+  for (var name in Blockly.Arduino.includes_) {
+    includes.push(Blockly.Arduino.includes_[name]);
+  }
+  if (includes.length) {
+    includes.push('\n');
+  }
+  for (var name in Blockly.Arduino.variables_) {
+    variables.push(Blockly.Arduino.variables_[name]);
+  }
+  if (variables.length) {
+    variables.push('\n');
+  }
+  for (var name in Blockly.Arduino.definitions_) {
+    definitions.push(Blockly.Arduino.definitions_[name]);
+  }
+  if (definitions.length) {
+    definitions.push('\n');
+  }
+  for (var name in Blockly.Arduino.codeFunctions_) {
+    functions.push(Blockly.Arduino.codeFunctions_[name]);
+  }
+  for (var name in Blockly.Arduino.userFunctions_) {
+    functions.push(Blockly.Arduino.userFunctions_[name]);
+  }
+  if (functions.length) {
+    functions.push('\n');
+  }
+
+  // userSetupCode added at the end of the setup function without leading spaces
+  var setups = [''], userSetupCode= '';
+  if (Blockly.Arduino.setups_['userSetupCode'] !== undefined) {
+    userSetupCode = '\n' + Blockly.Arduino.setups_['userSetupCode'];
+    delete Blockly.Arduino.setups_['userSetupCode'];
+  }
+  for (var name in Blockly.Arduino.setups_) {
+    setups.push(Blockly.Arduino.setups_[name]);
+  }
+  if (userSetupCode) {
+    setups.push(userSetupCode);
+  }
+
+  // Clean up temporary data
+  delete Blockly.Arduino.includes_;
+  delete Blockly.Arduino.definitions_;
+  delete Blockly.Arduino.codeFunctions_;
+  delete Blockly.Arduino.userFunctions_;
+  delete Blockly.Arduino.functionNames_;
+  delete Blockly.Arduino.setups_;
+  delete Blockly.Arduino.pins_;
+  Blockly.Arduino.variableDB_.reset();
+
+  var allDefs = includes.join('\n') + definitions.join('\n') +
+                 variables.join('\n') + functions.join('\n\n');
+  var setup = 'void setup() {' + setups.join('\n  ') + '\n}\n\n';
+  var loop = 'void loop() {\n  ' + code.replace(/\n/g, '\n  ') + '\n}';
+  return allDefs + setup + loop;
+};
 
 /**
- * Shorthand for union of types that can sensibly be converted to strings
- * or might already be SafeHtml (as SafeHtml is a goog.string.TypedString).
- * @private
- * @typedef {string|number|boolean|!goog.string.TypedString|
- *           !goog.i18n.bidi.DirectionalString}
+ * Adds a string of "include" code to be added to the sketch.
+ * Once a include is added it will not get overwritten with new code.
+ * @param {!string} includeTag Identifier for this include code.
+ * @param {!string} code Code to be included at the very top of the sketch.
  */
-goog.html.SafeHtml.TextOrHtml_;
-
+Blockly.Arduino.addInclude = function(includeTag, code) {
+  if (Blockly.Arduino.includes_[includeTag] === undefined) {
+    Blockly.Arduino.includes_[includeTag] = code;
+  }
+};
 
 /**
- * Returns HTML-escaped text as a SafeHtml object.
- *
- * If text is of a type that implements
- * {@code goog.i18n.bidi.DirectionalString}, the directionality of the new
- * {@code SafeHtml} object is set to {@code text}'s directionality, if known.
- * Otherwise, the directionality of the resulting SafeHtml is unknown (i.e.,
- * {@code null}).
- *
- * @param {!goog.html.SafeHtml.TextOrHtml_} textOrHtml The text to escape. If
- *     the parameter is of type SafeHtml it is returned directly (no escaping
- *     is done).
- * @return {!goog.html.SafeHtml} The escaped text, wrapped as a SafeHtml.
+ * Adds a string of code to be declared globally to the sketch.
+ * Once it is added it will not get overwritten with new code.
+ * @param {!string} declarationTag Identifier for this declaration code.
+ * @param {!string} code Code to be added below the includes.
  */
-goog.html.SafeHtml.htmlEscape = function(textOrHtml) {
-  if (textOrHtml instanceof goog.html.SafeHtml) {
-    return textOrHtml;
+Blockly.Arduino.addDeclaration = function(declarationTag, code) {
+  if (Blockly.Arduino.definitions_[declarationTag] === undefined) {
+    Blockly.Arduino.definitions_[declarationTag] = code;
   }
-  var dir = null;
-  if (textOrHtml.implementsGoogI18nBidiDirectionalString) {
-    dir = textOrHtml.getDirection();
+};
+
+/**
+ * Adds a string of code to declare a variable globally to the sketch.
+ * Only if overwrite option is set to true it will overwrite whatever
+ * value the identifier held before.
+ * @param {!string} varName The name of the variable to declare.
+ * @param {!string} code Code to be added for the declaration.
+ * @param {boolean=} overwrite Flag to ignore previously set value.
+ * @return {!boolean} Indicates if the declaration overwrote a previous one.
+ */
+Blockly.Arduino.addVariable = function(varName, code, overwrite) {
+  var overwritten = false;
+  if (overwrite || (Blockly.Arduino.variables_[varName] === undefined)) {
+    Blockly.Arduino.variables_[varName] = code;
+    overwritten = true;
   }
-  var textAsString;
-  if (textOrHtml.implementsGoogStringTypedString) {
-    textAsString = textOrHtml.getTypedStringValue();
+  return overwritten;
+};
+
+/**
+ * Adds a string of code into the Arduino setup() function. It takes an
+ * identifier to not repeat the same kind of initialisation code from several
+ * blocks. If overwrite option is set to true it will overwrite whatever
+ * value the identifier held before.
+ * @param {!string} setupTag Identifier for the type of set up code.
+ * @param {!string} code Code to be included in the setup() function.
+ * @param {boolean=} overwrite Flag to ignore previously set value.
+ * @return {!boolean} Indicates if the new setup code overwrote a previous one.
+ */
+Blockly.Arduino.addSetup = function(setupTag, code, overwrite) {
+  var overwritten = false;
+  if (overwrite || (Blockly.Arduino.setups_[setupTag] === undefined)) {
+    Blockly.Arduino.setups_[setupTag] = code;
+    overwritten = true;
+  }
+  return overwritten;
+};
+
+/**
+ * Adds a string of code as a function. It takes an identifier (meant to be the
+ * function name) to only keep a single copy even if multiple blocks might
+ * request this function to be created.
+ * A function (and its code) will only be added on first request.
+ * @param {!string} preferedName Identifier for the function.
+ * @param {!string} code Code to be included in the setup() function.
+ * @return {!string} A unique function name based on input name.
+ */
+Blockly.Arduino.addFunction = function(preferedName, code) {
+  if (Blockly.Arduino.codeFunctions_[preferedName] === undefined) {
+    var uniqueName = Blockly.Arduino.variableDB_.getDistinctName(
+        preferedName, Blockly.Generator.NAME_TYPE);
+    Blockly.Arduino.codeFunctions_[preferedName] =
+        code.replace(Blockly.Arduino.DEF_FUNC_NAME, uniqueName);
+    Blockly.Arduino.functionNames_[preferedName] = uniqueName;
+  }
+  return Blockly.Arduino.functionNames_[preferedName];
+};
+
+/**
+ * Description.
+ * @param {!Blockly.Block} block Description.
+ * @param {!string} pin Description.
+ * @param {!string} pinType Description.
+ * @param {!string} warningTag Description.
+ */
+Blockly.Arduino.reservePin = function(block, pin, pinType, warningTag) {
+  if (Blockly.Arduino.pins_[pin] !== undefined) {
+    if (Blockly.Arduino.pins_[pin] != pinType) {
+      block.setWarningText(Blockly.Msg.ARD_PIN_WARN1.replace('%1', pin)
+		.replace('%2', warningTag).replace('%3', pinType)
+		.replace('%4', Blockly.Arduino.pins_[pin]), warningTag);
+    } else {
+      block.setWarningText(null, warningTag);
+    }
   } else {
-    textAsString = String(textOrHtml);
+    Blockly.Arduino.pins_[pin] = pinType;
+    block.setWarningText(null, warningTag);
   }
-  return goog.html.SafeHtml.createSafeHtmlSecurityPrivateDoNotAccessOrElse(
-      goog.string.htmlEscape(textAsString), dir);
 };
 
-
 /**
- * Returns HTML-escaped text as a SafeHtml object, with newlines changed to
- * &lt;br&gt;.
- * @param {!goog.html.SafeHtml.TextOrHtml_} textOrHtml The text to escape. If
- *     the parameter is of type SafeHtml it is returned directly (no escaping
- *     is done).
- * @return {!goog.html.SafeHtml} The escaped text, wrapped as a SafeHtml.
+ * Naked values are top-level blocks with outputs that aren't plugged into
+ * anything. A trailing semicolon is needed to make this legal.
+ * @param {string} line Line of generated code.
+ * @return {string} Legal line of code.
  */
-goog.html.SafeHtml.htmlEscapePreservingNewlines = function(textOrHtml) {
-  if (textOrHtml instanceof goog.html.SafeHtml) {
-    return textOrHtml;
-  }
-  var html = goog.html.SafeHtml.htmlEscape(textOrHtml);
-  return goog.html.SafeHtml.createSafeHtmlSecurityPrivateDoNotAccessOrElse(
-      goog.string.newLineToBr(goog.html.SafeHtml.unwrap(html)),
-      html.getDirection());
+Blockly.Arduino.scrubNakedValue = function(line) {
+  return line + ';\n';
 };
 
-
 /**
- * Returns HTML-escaped text as a SafeHtml object, with newlines changed to
- * &lt;br&gt; and escaping whitespace to preserve spatial formatting. Character
- * entity #160 is used to make it safer for XML.
- * @param {!goog.html.SafeHtml.TextOrHtml_} textOrHtml The text to escape. If
- *     the parameter is of type SafeHtml it is returned directly (no escaping
- *     is done).
- * @return {!goog.html.SafeHtml} The escaped text, wrapped as a SafeHtml.
- */
-goog.html.SafeHtml.htmlEscapePreservingNewlinesAndSpaces = function(
-    textOrHtml) {
-  if (textOrHtml instanceof goog.html.SafeHtml) {
-    return textOrHtml;
-  }
-  var html = goog.html.SafeHtml.htmlEscape(textOrHtml);
-  return goog.html.SafeHtml.createSafeHtmlSecurityPrivateDoNotAccessOrElse(
-      goog.string.whitespaceEscape(goog.html.SafeHtml.unwrap(html)),
-      html.getDirection());
-};
-
-
-/**
- * Coerces an arbitrary object into a SafeHtml object.
- *
- * If {@code textOrHtml} is already of type {@code goog.html.SafeHtml}, the same
- * object is returned. Otherwise, {@code textOrHtml} is coerced to string, and
- * HTML-escaped. If {@code textOrHtml} is of a type that implements
- * {@code goog.i18n.bidi.DirectionalString}, its directionality, if known, is
- * preserved.
- *
- * @param {!goog.html.SafeHtml.TextOrHtml_} textOrHtml The text or SafeHtml to
- *     coerce.
- * @return {!goog.html.SafeHtml} The resulting SafeHtml object.
- * @deprecated Use goog.html.SafeHtml.htmlEscape.
- */
-goog.html.SafeHtml.from = goog.html.SafeHtml.htmlEscape;
-
-
-/**
- * @const
+ * Encode a string as a properly escaped Arduino string, complete with quotes.
+ * @param {string} string Text to encode.
+ * @return {string} Arduino string.
  * @private
  */
-goog.html.SafeHtml.VALID_NAMES_IN_TAG_ = /^[a-zA-Z0-9-]+$/;
-
-
-/**
- * Set of attributes containing URL as defined at
- * http://www.w3.org/TR/html5/index.html#attributes-1.
- * @private @const {!Object<string,boolean>}
- */
-goog.html.SafeHtml.URL_ATTRIBUTES_ = goog.object.createSet(
-    'action', 'cite', 'data', 'formaction', 'href', 'manifest', 'poster',
-    'src');
-
-
-/**
- * Tags which are unsupported via create(). They might be supported via a
- * tag-specific create method. These are tags which might require a
- * TrustedResourceUrl in one of their attributes or a restricted type for
- * their content.
- * @private @const {!Object<string,boolean>}
- */
-goog.html.SafeHtml.NOT_ALLOWED_TAG_NAMES_ = goog.object.createSet(
-    goog.dom.TagName.APPLET, goog.dom.TagName.BASE, goog.dom.TagName.EMBED,
-    goog.dom.TagName.IFRAME, goog.dom.TagName.LINK, goog.dom.TagName.MATH,
-    goog.dom.TagName.META, goog.dom.TagName.OBJECT, goog.dom.TagName.SCRIPT,
-    goog.dom.TagName.STYLE, goog.dom.TagName.SVG, goog.dom.TagName.TEMPLATE);
-
-
-/**
- * @typedef {string|number|goog.string.TypedString|
- *     goog.html.SafeStyle.PropertyMap}
- */
-goog.html.SafeHtml.AttributeValue;
-
-
-/**
- * Creates a SafeHtml content consisting of a tag with optional attributes and
- * optional content.
- *
- * For convenience tag names and attribute names are accepted as regular
- * strings, instead of goog.string.Const. Nevertheless, you should not pass
- * user-controlled values to these parameters. Note that these parameters are
- * syntactically validated at runtime, and invalid values will result in
- * an exception.
- *
- * Example usage:
- *
- * goog.html.SafeHtml.create('br');
- * goog.html.SafeHtml.create('div', {'class': 'a'});
- * goog.html.SafeHtml.create('p', {}, 'a');
- * goog.html.SafeHtml.create('p', {}, goog.html.SafeHtml.create('br'));
- *
- * goog.html.SafeHtml.create('span', {
- *   'style': {'margin': '0'}
- * });
- *
- * To guarantee SafeHtml's type contract is upheld there are restrictions on
- * attribute values and tag names.
- *
- * - For attributes which contain script code (on*), a goog.string.Const is
- *   required.
- * - For attributes which contain style (style), a goog.html.SafeStyle or a
- *   goog.html.SafeStyle.PropertyMap is required.
- * - For attributes which are interpreted as URLs (e.g. src, href) a
- *   goog.html.SafeUrl, goog.string.Const or string is required. If a string
- *   is passed, it will be sanitized with SafeUrl.sanitize().
- * - For tags which can load code or set security relevant page metadata,
- *   more specific goog.html.SafeHtml.create*() functions must be used. Tags
- *   which are not supported by this function are applet, base, embed, iframe,
- *   link, math, object, script, style, svg, and template.
- *
- * @param {string} tagName The name of the tag. Only tag names consisting of
- *     [a-zA-Z0-9-] are allowed. Tag names documented above are disallowed.
- * @param {!Object<string, ?goog.html.SafeHtml.AttributeValue>=} opt_attributes
- *     Mapping from attribute names to their values. Only attribute names
- *     consisting of [a-zA-Z0-9-] are allowed. Value of null or undefined causes
- *     the attribute to be omitted.
- * @param {!goog.html.SafeHtml.TextOrHtml_|
- *     !Array<!goog.html.SafeHtml.TextOrHtml_>=} opt_content Content to
- *     HTML-escape and put inside the tag. This must be empty for void tags
- *     like <br>. Array elements are concatenated.
- * @return {!goog.html.SafeHtml} The SafeHtml content with the tag.
- * @throws {Error} If invalid tag name, attribute name, or attribute value is
- *     provided.
- * @throws {goog.asserts.AssertionError} If content for void tag is provided.
- */
-goog.html.SafeHtml.create = function(tagName, opt_attributes, opt_content) {
-  if (!goog.html.SafeHtml.VALID_NAMES_IN_TAG_.test(tagName)) {
-    throw Error('Invalid tag name <' + tagName + '>.');
-  }
-  if (tagName.toUpperCase() in goog.html.SafeHtml.NOT_ALLOWED_TAG_NAMES_) {
-    throw Error('Tag name <' + tagName + '> is not allowed for SafeHtml.');
-  }
-  return goog.html.SafeHtml.createSafeHtmlTagSecurityPrivateDoNotAccessOrElse(
-      tagName, opt_attributes, opt_content);
+Blockly.Arduino.quote_ = function(string) {
+  // TODO: This is a quick hack.  Replace with goog.string.quote
+  string = string.replace(/\\/g, '\\\\')
+                 .replace(/\n/g, '\\\n')
+                 .replace(/\$/g, '\\$')
+                 .replace(/'/g, '\\\'');
+  return '\"' + string + '\"';
+};
+Blockly.Arduino.ngoacdon_ = function(string) {
+  // TODO: This is a quick hack.  Replace with goog.string.quote
+  string = string.replace(/\\/g, '\\\\')
+                 .replace(/\n/g, '\\\n')
+                 .replace(/\$/g, '\\$')
+                 .replace(/'/g, '\\\'');
+  return '\'' + string + '\'';
+};
+Blockly.Arduino.khongngoac_ = function(string) {
+  // TODO: This is a quick hack.  Replace with goog.string.quote
+  string = string.replace(/\\/g, '\\\\')
+                 .replace(/\n/g, '\\\n')
+                 .replace(/\$/g, '\\$')
+                 .replace(/'/g, '\\\'');
+  return '' + string + '';
 };
 
-
 /**
- * Creates a SafeHtml representing an iframe tag.
- *
- * By default the sandbox attribute is set to an empty value, which is the most
- * secure option, as it confers the iframe the least privileges. If this
- * is too restrictive then granting individual privileges is the preferable
- * option. Unsetting the attribute entirely is the least secure option and
- * should never be done unless it's stricly necessary.
- *
- * @param {goog.html.TrustedResourceUrl=} opt_src The value of the src
- *     attribute. If null or undefined src will not be set.
- * @param {goog.html.SafeHtml=} opt_srcdoc The value of the srcdoc attribute.
- *     If null or undefined srcdoc will not be set.
- * @param {!Object<string, ?goog.html.SafeHtml.AttributeValue>=} opt_attributes
- *     Mapping from attribute names to their values. Only attribute names
- *     consisting of [a-zA-Z0-9-] are allowed. Value of null or undefined causes
- *     the attribute to be omitted.
- * @param {!goog.html.SafeHtml.TextOrHtml_|
- *     !Array<!goog.html.SafeHtml.TextOrHtml_>=} opt_content Content to
- *     HTML-escape and put inside the tag. Array elements are concatenated.
- * @return {!goog.html.SafeHtml} The SafeHtml content with the tag.
- * @throws {Error} If invalid tag name, attribute name, or attribute value is
- *     provided. If opt_attributes contains the src or srcdoc attributes.
+ * Common tasks for generating Arduino from blocks.
+ * Handles comments for the specified block and any connected value blocks.
+ * Calls any statements following this block.
+ * @param {!Blockly.Block} block The current block.
+ * @param {string} code The Arduino code created for this block.
+ * @return {string} Arduino code with comments and subsequent blocks added.
+ * @this {Blockly.CodeGenerator}
+ * @private
  */
-goog.html.SafeHtml.createIframe = function(
-    opt_src, opt_srcdoc, opt_attributes, opt_content) {
-  var fixedAttributes = {};
-  fixedAttributes['src'] = opt_src || null;
-  fixedAttributes['srcdoc'] = opt_srcdoc || null;
-  var defaultAttributes = {'sandbox': ''};
-  var attributes = goog.html.SafeHtml.combineAttributes(
-      fixedAttributes, defaultAttributes, opt_attributes);
-  return goog.html.SafeHtml.createSafeHtmlTagSecurityPrivateDoNotAccessOrElse(
-      'iframe', attributes, opt_content);
-};
+Blockly.Arduino.scrub_ = function(block, code) {
+  if (code === null) { return ''; } // Block has handled code generation itself
 
-
-/**
- * Creates a SafeHtml representing a style tag. The type attribute is set
- * to "text/css".
- * @param {!goog.html.SafeStyleSheet|!Array<!goog.html.SafeStyleSheet>}
- *     styleSheet Content to put inside the tag. Array elements are
- *     concatenated.
- * @param {!Object<string, ?goog.html.SafeHtml.AttributeValue>=} opt_attributes
- *     Mapping from attribute names to their values. Only attribute names
- *     consisting of [a-zA-Z0-9-] are allowed. Value of null or undefined causes
- *     the attribute to be omitted.
- * @return {!goog.html.SafeHtml} The SafeHtml content with the tag.
- * @throws {Error} If invalid attribute name or attribute value is provided. If
- *     opt_attributes contains the type attribute.
- */
-goog.html.SafeHtml.createStyle = function(styleSheet, opt_attributes) {
-  var fixedAttributes = {'type': 'text/css'};
-  var defaultAttributes = {};
-  var attributes = goog.html.SafeHtml.combineAttributes(
-      fixedAttributes, defaultAttributes, opt_attributes);
-
-  var content = '';
-  styleSheet = goog.array.concat(styleSheet);
-  for (var i = 0; i < styleSheet.length; i++) {
-    content += goog.html.SafeStyleSheet.unwrap(styleSheet[i]);
-  }
-  // Convert to SafeHtml so that it's not HTML-escaped.
-  var htmlContent =
-      goog.html.SafeHtml.createSafeHtmlSecurityPrivateDoNotAccessOrElse(
-          content, goog.i18n.bidi.Dir.NEUTRAL);
-  return goog.html.SafeHtml.createSafeHtmlTagSecurityPrivateDoNotAccessOrElse(
-      'style', attributes, htmlContent);
-};
-
-
-/**
- * Creates a SafeHtml representing a meta refresh tag.
- * @param {!goog.html.SafeUrl|string} url Where to redirect. If a string is
- *     passed, it will be sanitized with SafeUrl.sanitize().
- * @param {number=} opt_secs Number of seconds until the page should be
- *     reloaded. Will be set to 0 if unspecified.
- * @return {!goog.html.SafeHtml} The SafeHtml content with the tag.
- */
-goog.html.SafeHtml.createMetaRefresh = function(url, opt_secs) {
-
-  // Note that sanitize is a no-op on SafeUrl.
-  var unwrappedUrl = goog.html.SafeUrl.unwrap(goog.html.SafeUrl.sanitize(url));
-
-  if (goog.labs.userAgent.browser.isIE() ||
-      goog.labs.userAgent.browser.isEdge()) {
-    // IE/EDGE can't parse the content attribute if the url contains a
-    // semicolon. We can fix this by adding quotes around the url, but then we
-    // can't parse quotes in the URL correctly. Also, it seems that IE/EDGE
-    // did not unescape semicolons in these URLs at some point in the past. We
-    // take a best-effort approach.
-    //
-    // If the URL has semicolons (which may happen in some cases, see
-    // http://www.w3.org/TR/1999/REC-html401-19991224/appendix/notes.html#h-B.2
-    // for instance), wrap it in single quotes to protect the semicolons.
-    // If the URL has semicolons and single quotes, url-encode the single quotes
-    // as well.
-    //
-    // This is imperfect. Notice that both ' and ; are reserved characters in
-    // URIs, so this could do the wrong thing, but at least it will do the wrong
-    // thing in only rare cases.
-    if (goog.string.contains(unwrappedUrl, ';')) {
-      unwrappedUrl = "'" + unwrappedUrl.replace(/'/g, '%27') + "'";
+  var commentCode = '';
+  // Only collect comments for blocks that aren't inline
+  if (!block.outputConnection || !block.outputConnection.targetConnection) {
+    // Collect comment for this block.
+    var comment = block.getCommentText();
+    if (comment) {
+      commentCode += this.prefixLines(comment, '// ') + '\n';
     }
-  }
-  var attributes = {
-    'http-equiv': 'refresh',
-    'content': (opt_secs || 0) + '; url=' + unwrappedUrl
-  };
-
-  // This function will handle the HTML escaping for attributes.
-  return goog.html.SafeHtml.createSafeHtmlTagSecurityPrivateDoNotAccessOrElse(
-      'meta', attributes);
-};
-
-
-/**
- * @param {string} tagName The tag name.
- * @param {string} name The attribute name.
- * @param {!goog.html.SafeHtml.AttributeValue} value The attribute value.
- * @return {string} A "name=value" string.
- * @throws {Error} If attribute value is unsafe for the given tag and attribute.
- * @private
- */
-goog.html.SafeHtml.getAttrNameAndValue_ = function(tagName, name, value) {
-  // If it's goog.string.Const, allow any valid attribute name.
-  if (value instanceof goog.string.Const) {
-    value = goog.string.Const.unwrap(value);
-  } else if (name.toLowerCase() == 'style') {
-    value = goog.html.SafeHtml.getStyleValue_(value);
-  } else if (/^on/i.test(name)) {
-    // TODO(jakubvrana): Disallow more attributes with a special meaning.
-    throw Error(
-        'Attribute "' + name + '" requires goog.string.Const value, "' + value +
-        '" given.');
-    // URL attributes handled differently accroding to tag.
-  } else if (name.toLowerCase() in goog.html.SafeHtml.URL_ATTRIBUTES_) {
-    if (value instanceof goog.html.TrustedResourceUrl) {
-      value = goog.html.TrustedResourceUrl.unwrap(value);
-    } else if (value instanceof goog.html.SafeUrl) {
-      value = goog.html.SafeUrl.unwrap(value);
-    } else if (goog.isString(value)) {
-      value = goog.html.SafeUrl.sanitize(value).getTypedStringValue();
-    } else {
-      throw Error(
-          'Attribute "' + name + '" on tag "' + tagName +
-          '" requires goog.html.SafeUrl, goog.string.Const, or string,' +
-          ' value "' + value + '" given.');
-    }
-  }
-
-  // Accept SafeUrl, TrustedResourceUrl, etc. for attributes which only require
-  // HTML-escaping.
-  if (value.implementsGoogStringTypedString) {
-    // Ok to call getTypedStringValue() since there's no reliance on the type
-    // contract for security here.
-    value = value.getTypedStringValue();
-  }
-
-  goog.asserts.assert(
-      goog.isString(value) || goog.isNumber(value),
-      'String or number value expected, got ' + (typeof value) +
-          ' with value: ' + value);
-  return name + '="' + goog.string.htmlEscape(String(value)) + '"';
-};
-
-
-/**
- * Gets value allowed in "style" attribute.
- * @param {!goog.html.SafeHtml.AttributeValue} value It could be SafeStyle or a
- *     map which will be passed to goog.html.SafeStyle.create.
- * @return {string} Unwrapped value.
- * @throws {Error} If string value is given.
- * @private
- */
-goog.html.SafeHtml.getStyleValue_ = function(value) {
-  if (!goog.isObject(value)) {
-    throw Error(
-        'The "style" attribute requires goog.html.SafeStyle or map ' +
-        'of style properties, ' + (typeof value) + ' given: ' + value);
-  }
-  if (!(value instanceof goog.html.SafeStyle)) {
-    // Process the property bag into a style object.
-    value = goog.html.SafeStyle.create(value);
-  }
-  return goog.html.SafeStyle.unwrap(value);
-};
-
-
-/**
- * Creates a SafeHtml content with known directionality consisting of a tag with
- * optional attributes and optional content.
- * @param {!goog.i18n.bidi.Dir} dir Directionality.
- * @param {string} tagName
- * @param {!Object<string, ?goog.html.SafeHtml.AttributeValue>=} opt_attributes
- * @param {!goog.html.SafeHtml.TextOrHtml_|
- *     !Array<!goog.html.SafeHtml.TextOrHtml_>=} opt_content
- * @return {!goog.html.SafeHtml} The SafeHtml content with the tag.
- */
-goog.html.SafeHtml.createWithDir = function(
-    dir, tagName, opt_attributes, opt_content) {
-  var html = goog.html.SafeHtml.create(tagName, opt_attributes, opt_content);
-  html.dir_ = dir;
-  return html;
-};
-
-
-/**
- * Creates a new SafeHtml object by concatenating values.
- * @param {...(!goog.html.SafeHtml.TextOrHtml_|
- *     !Array<!goog.html.SafeHtml.TextOrHtml_>)} var_args Values to concatenate.
- * @return {!goog.html.SafeHtml}
- */
-goog.html.SafeHtml.concat = function(var_args) {
-  var dir = goog.i18n.bidi.Dir.NEUTRAL;
-  var content = '';
-
-  /**
-   * @param {!goog.html.SafeHtml.TextOrHtml_|
-   *     !Array<!goog.html.SafeHtml.TextOrHtml_>} argument
-   */
-  var addArgument = function(argument) {
-    if (goog.isArray(argument)) {
-      goog.array.forEach(argument, addArgument);
-    } else {
-      var html = goog.html.SafeHtml.htmlEscape(argument);
-      content += goog.html.SafeHtml.unwrap(html);
-      var htmlDir = html.getDirection();
-      if (dir == goog.i18n.bidi.Dir.NEUTRAL) {
-        dir = htmlDir;
-      } else if (htmlDir != goog.i18n.bidi.Dir.NEUTRAL && dir != htmlDir) {
-        dir = null;
+    // Collect comments for all value arguments
+    // Don't collect comments for nested statements
+    for (var x = 0; x < block.inputList.length; x++) {
+      if (block.inputList[x].type == Blockly.INPUT_VALUE) {
+        var childBlock = block.inputList[x].connection.targetBlock();
+        if (childBlock) {
+          var comment = this.allNestedComments(childBlock);
+          if (comment) {
+            commentCode += this.prefixLines(comment, '// ');
+          }
+        }
       }
     }
-  };
-
-  goog.array.forEach(arguments, addArgument);
-  return goog.html.SafeHtml.createSafeHtmlSecurityPrivateDoNotAccessOrElse(
-      content, dir);
+  }
+  var nextBlock = block.nextConnection && block.nextConnection.targetBlock();
+  var nextCode = this.blockToCode(nextBlock);
+  return commentCode + code + nextCode;
 };
 
-
 /**
- * Creates a new SafeHtml object with known directionality by concatenating the
- * values.
- * @param {!goog.i18n.bidi.Dir} dir Directionality.
- * @param {...(!goog.html.SafeHtml.TextOrHtml_|
- *     !Array<!goog.html.SafeHtml.TextOrHtml_>)} var_args Elements of array
- *     arguments would be processed recursively.
- * @return {!goog.html.SafeHtml}
- */
-goog.html.SafeHtml.concatWithDir = function(dir, var_args) {
-  var html = goog.html.SafeHtml.concat(goog.array.slice(arguments, 1));
-  html.dir_ = dir;
-  return html;
-};
-
-
-/**
- * Type marker for the SafeHtml type, used to implement additional run-time
- * type checking.
- * @const {!Object}
+ * Generates Arduino Types from a Blockly Type.
+ * @param {!Blockly.Type} typeBlockly The Blockly type to be converted.
+ * @return {string} Arduino type for the respective Blockly input type, in a
+ *     string format.
  * @private
  */
-goog.html.SafeHtml.TYPE_MARKER_GOOG_HTML_SECURITY_PRIVATE_ = {};
-
-
-/**
- * Package-internal utility method to create SafeHtml instances.
- *
- * @param {string} html The string to initialize the SafeHtml object with.
- * @param {?goog.i18n.bidi.Dir} dir The directionality of the SafeHtml to be
- *     constructed, or null if unknown.
- * @return {!goog.html.SafeHtml} The initialized SafeHtml object.
- * @package
- */
-goog.html.SafeHtml.createSafeHtmlSecurityPrivateDoNotAccessOrElse = function(
-    html, dir) {
-  return new goog.html.SafeHtml().initSecurityPrivateDoNotAccessOrElse_(
-      html, dir);
+Blockly.Arduino.getArduinoType_ = function(typeBlockly) {
+  switch (typeBlockly.typeId) {
+    case Blockly.Types.SHORT_NUMBER.typeId:
+      return 'char';
+    case Blockly.Types.NUMBER.typeId:
+      return 'int';
+    case Blockly.Types.LARGE_NUMBER.typeId:
+      return 'long';
+    case Blockly.Types.DECIMAL.typeId:
+      return 'float';
+    case Blockly.Types.TEXT.typeId:
+      return 'String';
+    case Blockly.Types.CHARACTER.typeId:
+      return 'char';
+    case Blockly.Types.BOOLEAN.typeId:
+      return 'boolean';
+    case Blockly.Types.NULL.typeId:
+      return 'void';
+    case Blockly.Types.UNDEF.typeId:
+      return 'undefined';
+    case Blockly.Types.CHILD_BLOCK_MISSING.typeId:
+      // If no block connected default to int, change for easier debugging
+      //return 'ChildBlockMissing';
+      return 'int';
+    default:
+      return 'Invalid Blockly Type';
+    }
 };
 
-
-/**
- * Called from createSafeHtmlSecurityPrivateDoNotAccessOrElse(). This
- * method exists only so that the compiler can dead code eliminate static
- * fields (like EMPTY) when they're not accessed.
- * @param {string} html
- * @param {?goog.i18n.bidi.Dir} dir
- * @return {!goog.html.SafeHtml}
- * @private
- */
-goog.html.SafeHtml.prototype.initSecurityPrivateDoNotAccessOrElse_ = function(
-    html, dir) {
-  this.privateDoNotAccessOrElseSafeHtmlWrappedValue_ = html;
-  this.dir_ = dir;
-  return this;
+/** Used for not-yet-implemented block code generators */
+Blockly.Arduino.noGeneratorCodeInline = function() {
+  return ['', Blockly.Arduino.ORDER_ATOMIC];
 };
 
-
-/**
- * Like create() but does not restrict which tags can be constructed.
- *
- * @param {string} tagName Tag name. Set or validated by caller.
- * @param {!Object<string, ?goog.html.SafeHtml.AttributeValue>=} opt_attributes
- * @param {(!goog.html.SafeHtml.TextOrHtml_|
- *     !Array<!goog.html.SafeHtml.TextOrHtml_>)=} opt_content
- * @return {!goog.html.SafeHtml}
- * @throws {Error} If invalid or unsafe attribute name or value is provided.
- * @throws {goog.asserts.AssertionError} If content for void tag is provided.
- * @package
- */
-goog.html.SafeHtml.createSafeHtmlTagSecurityPrivateDoNotAccessOrElse = function(
-    tagName, opt_attributes, opt_content) {
-  var dir = null;
-  var result = '<' + tagName;
-
-  if (opt_attributes) {
-    for (var name in opt_attributes) {
-      if (!goog.html.SafeHtml.VALID_NAMES_IN_TAG_.test(name)) {
-        throw Error('Invalid attribute name "' + name + '".');
-      }
-      var value = opt_attributes[name];
-      if (!goog.isDefAndNotNull(value)) {
-        continue;
-      }
-      result +=
-          ' ' + goog.html.SafeHtml.getAttrNameAndValue_(tagName, name, value);
-    }
-  }
-
-  var content = opt_content;
-  if (!goog.isDefAndNotNull(content)) {
-    content = [];
-  } else if (!goog.isArray(content)) {
-    content = [content];
-  }
-
-  if (goog.dom.tags.isVoidTag(tagName.toLowerCase())) {
-    goog.asserts.assert(
-        !content.length, 'Void tag <' + tagName + '> does not allow content.');
-    result += '>';
-  } else {
-    var html = goog.html.SafeHtml.concat(content);
-    result += '>' + goog.html.SafeHtml.unwrap(html) + '</' + tagName + '>';
-    dir = html.getDirection();
-  }
-
-  var dirAttribute = opt_attributes && opt_attributes['dir'];
-  if (dirAttribute) {
-    if (/^(ltr|rtl|auto)$/i.test(dirAttribute)) {
-      // If the tag has the "dir" attribute specified then its direction is
-      // neutral because it can be safely used in any context.
-      dir = goog.i18n.bidi.Dir.NEUTRAL;
-    } else {
-      dir = null;
-    }
-  }
-
-  return goog.html.SafeHtml.createSafeHtmlSecurityPrivateDoNotAccessOrElse(
-      result, dir);
-};
-
-
-/**
- * @param {!Object<string, string>} fixedAttributes
- * @param {!Object<string, string>} defaultAttributes
- * @param {!Object<string, ?goog.html.SafeHtml.AttributeValue>=} opt_attributes
- *     Optional attributes passed to create*().
- * @return {!Object<string, ?goog.html.SafeHtml.AttributeValue>}
- * @throws {Error} If opt_attributes contains an attribute with the same name
- *     as an attribute in fixedAttributes.
- * @package
- */
-goog.html.SafeHtml.combineAttributes = function(
-    fixedAttributes, defaultAttributes, opt_attributes) {
-  var combinedAttributes = {};
-  var name;
-
-  for (name in fixedAttributes) {
-    goog.asserts.assert(name.toLowerCase() == name, 'Must be lower case');
-    combinedAttributes[name] = fixedAttributes[name];
-  }
-  for (name in defaultAttributes) {
-    goog.asserts.assert(name.toLowerCase() == name, 'Must be lower case');
-    combinedAttributes[name] = defaultAttributes[name];
-  }
-
-  for (name in opt_attributes) {
-    var nameLower = name.toLowerCase();
-    if (nameLower in fixedAttributes) {
-      throw Error(
-          'Cannot override "' + nameLower + '" attribute, got "' + name +
-          '" with value "' + opt_attributes[name] + '"');
-    }
-    if (nameLower in defaultAttributes) {
-      delete combinedAttributes[nameLower];
-    }
-    combinedAttributes[name] = opt_attributes[name];
-  }
-
-  return combinedAttributes;
-};
-
-
-/**
- * A SafeHtml instance corresponding to the HTML doctype: "<!DOCTYPE html>".
- * @const {!goog.html.SafeHtml}
- */
-goog.html.SafeHtml.DOCTYPE_HTML =
-    goog.html.SafeHtml.createSafeHtmlSecurityPrivateDoNotAccessOrElse(
-        '<!DOCTYPE html>', goog.i18n.bidi.Dir.NEUTRAL);
-
-
-/**
- * A SafeHtml instance corresponding to the empty string.
- * @const {!goog.html.SafeHtml}
- */
-goog.html.SafeHtml.EMPTY =
-    goog.html.SafeHtml.createSafeHtmlSecurityPrivateDoNotAccessOrElse(
-        '', goog.i18n.bidi.Dir.NEUTRAL);
-
-
-/**
- * A SafeHtml instance corresponding to the <br> tag.
- * @const {!goog.html.SafeHtml}
- */
-goog.html.SafeHtml.BR =
-    goog.html.SafeHtml.createSafeHtmlSecurityPrivateDoNotAccessOrElse(
-        '<br>', goog.i18n.bidi.Dir.NEUTRAL);
+/** Used for not-yet-implemented block code generators */
+Blockly.Arduino.noGeneratorCodeLine = function() { return ''; };
